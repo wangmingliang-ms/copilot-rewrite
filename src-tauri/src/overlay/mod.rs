@@ -21,8 +21,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
 const TOOLBAR_SIZE: f64 = 48.0;
 
 /// Preview window dimensions
-const PREVIEW_WIDTH: f64 = 480.0;
-const PREVIEW_HEIGHT: f64 = 400.0;
+const PREVIEW_WIDTH: f64 = 400.0;
+const PREVIEW_HEIGHT: f64 = 240.0;
 
 /// Offset from cursor position for the toolbar
 const TOOLBAR_OFFSET_X: f64 = 8.0;

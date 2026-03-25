@@ -15,19 +15,6 @@ interface PreviewProps {
   onCancel: () => void;
 }
 
-const actionLabel = (action: string): string => {
-  switch (action) {
-    case "Translate":
-      return "🌐 Translation";
-    case "Polish":
-      return "✨ Polished";
-    case "TranslateAndPolish":
-      return "🔄 Translated & Polished";
-    default:
-      return "Result";
-  }
-};
-
 const Preview: FC<PreviewProps> = ({
   result,
   loading,
@@ -80,56 +67,33 @@ const Preview: FC<PreviewProps> = ({
   }
 
   return (
-    <div className="animate-slide-up flex h-full flex-col rounded-xl bg-surface shadow-popup">
-      {/* Header */}
-      <div className="border-b border-gray-100 px-4 py-3">
-        <h3 className="text-sm font-semibold text-gray-800">
-          {actionLabel(result.action)}
-        </h3>
-      </div>
-
-      {/* Content */}
-      <div className="flex-1 overflow-auto px-4 py-3">
-        {/* Original text */}
-        <div className="mb-3">
-          <label className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-gray-400">
-            Original
-          </label>
-          <div className="rounded-lg bg-surface-elevated p-3 text-xs leading-relaxed text-gray-600">
-            {result.original}
-          </div>
-        </div>
-
-        {/* Result text */}
-        <div>
-          <label className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-copilot-blue">
-            Result
-          </label>
-          <div className="rounded-lg border border-copilot-blue/20 bg-blue-50/30 p-3 text-xs leading-relaxed text-gray-800">
-            {result.result}
-          </div>
+    <div className="animate-slide-up flex flex-col rounded-xl bg-surface shadow-popup">
+      {/* Result text */}
+      <div className="px-4 py-3">
+        <div className="text-sm leading-relaxed text-gray-800 whitespace-pre-wrap">
+          {result.result}
         </div>
       </div>
 
-      {/* Actions */}
-      <div className="flex items-center justify-end gap-2 border-t border-gray-100 px-4 py-3">
+      {/* Actions — compact inline */}
+      <div className="flex items-center justify-end gap-1.5 border-t border-gray-100 px-3 py-2">
         <button
           onClick={onCancel}
-          className="rounded-md px-4 py-2 text-xs font-medium text-gray-500 transition-colors hover:bg-gray-100"
+          className="rounded-md px-3 py-1.5 text-xs font-medium text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600"
         >
-          Cancel
+          ✕
         </button>
         <button
           onClick={onCopy}
-          className="rounded-md bg-gray-100 px-4 py-2 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-200"
+          className="rounded-md px-3 py-1.5 text-xs font-medium text-gray-600 transition-colors hover:bg-gray-100"
         >
-          📋 Copy
+          📋
         </button>
         <button
           onClick={onReplace}
-          className="rounded-md bg-copilot-blue px-4 py-2 text-xs font-medium text-white transition-colors hover:bg-copilot-blue-hover"
+          className="rounded-md bg-copilot-blue px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-copilot-blue-hover"
         >
-          ✅ Replace
+          Replace
         </button>
       </div>
     </div>

@@ -30,8 +30,8 @@
       {
         "label": "preview",
         "title": "Copilot Rewrite Preview",
-        "width": 480,
-        "height": 400,
+        "width": 400,
+        "height": 240,
         "resizable": false,
         "decorations": false,
         "transparent": true,
