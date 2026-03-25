@@ -59,11 +59,6 @@
     ],
     "security": {
       "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' https://api.github.com https://api.githubcopilot.com https://copilot-proxy.githubusercontent.com https://github.com"
-    },
-    "trayIcon": {
-      "iconPath": "icons/icon.png",
-      "iconAsTemplate": false,
-      "tooltip": "Copilot Rewrite"
     }
   },
   "bundle": {
