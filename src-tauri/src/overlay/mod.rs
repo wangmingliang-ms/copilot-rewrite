@@ -22,7 +22,16 @@ const TOOLBAR_SIZE: f64 = 48.0;
 
 /// Preview window dimensions
 const PREVIEW_WIDTH: f64 = 400.0;
-const PREVIEW_HEIGHT: f64 = 240.0;
+const PREVIEW_MIN_HEIGHT: f64 = 80.0;
+const PREVIEW_MAX_HEIGHT: f64 = 400.0;
+/// Button bar height (border-t + padding + buttons)
+const PREVIEW_BUTTONS_HEIGHT: f64 = 40.0;
+/// Padding around text area
+const PREVIEW_PADDING: f64 = 28.0;
+/// Approximate line height in pixels for text rendering
+const LINE_HEIGHT_PX: f64 = 22.0;
+/// Approximate characters per line at PREVIEW_WIDTH
+const CHARS_PER_LINE: f64 = 50.0;
 
 /// Offset from cursor position for the toolbar
 const TOOLBAR_OFFSET_X: f64 = 8.0;
@@ -134,13 +143,31 @@ pub fn show_toolbar_at(app_handle: &AppHandle, mouse_x: i32, mouse_y: i32) {
     }
 }
 
+/// Estimate preview window height based on text content
+fn estimate_preview_height(text: &str) -> f64 {
+    // Count actual newlines
+    let newline_count = text.chars().filter(|c| *c == '\n').count() as f64;
+    // Estimate wrapped lines based on character count
+    let char_count = text.chars().count() as f64;
+    let wrapped_lines = (char_count / CHARS_PER_LINE).ceil();
+    // Total lines = max of newline-based or wrap-based estimate
+    let total_lines = wrapped_lines.max(newline_count + 1.0);
+    let text_height = total_lines * LINE_HEIGHT_PX;
+    let height = text_height + PREVIEW_PADDING + PREVIEW_BUTTONS_HEIGHT;
+    height.clamp(PREVIEW_MIN_HEIGHT, PREVIEW_MAX_HEIGHT)
+}
+
 /// Position and show the preview window directly below the toolbar
 /// toolbar_x, toolbar_y are the toolbar's physical pixel coordinates (top-left)
-pub fn show_preview_below_toolbar(app_handle: &AppHandle, toolbar_x: i32, toolbar_y: i32) {
+pub fn show_preview_below_toolbar(app_handle: &AppHandle, toolbar_x: i32, toolbar_y: i32, text: &str) {
     if let Some(window) = app_handle.get_webview_window("preview") {
         let scale = get_scale_at(toolbar_x, toolbar_y);
         let (screen_w, screen_h, _) = get_primary_screen_info(app_handle);
         let toolbar_h_logical = TOOLBAR_SIZE / scale;
+        let preview_height = estimate_preview_height(text);
+
+        // Resize window to fit content
+        let _ = window.set_size(tauri::LogicalSize::new(PREVIEW_WIDTH, preview_height));
 
         // Convert toolbar physical position to logical
         let tb_logical_x = toolbar_x as f64 / scale;
@@ -155,8 +182,8 @@ pub fn show_preview_below_toolbar(app_handle: &AppHandle, toolbar_x: i32, toolba
             x = screen_w - PREVIEW_WIDTH - 8.0;
         }
         // If preview goes below screen, show it above the toolbar instead
-        if y + PREVIEW_HEIGHT > screen_h {
-            y = tb_logical_y - PREVIEW_HEIGHT - 4.0;
+        if y + preview_height > screen_h {
+            y = tb_logical_y - preview_height - 4.0;
         }
         if x < 0.0 { x = 8.0; }
         if y < 0.0 { y = 8.0; }
@@ -170,51 +197,32 @@ pub fn show_preview_below_toolbar(app_handle: &AppHandle, toolbar_x: i32, toolba
             warn!("Failed to show preview: {}", e);
         }
 
-        debug!("Preview shown below toolbar at logical ({:.0}, {:.0})", x, y);
+        debug!("Preview shown below toolbar at logical ({:.0}, {:.0}), height={:.0}", x, y, preview_height);
     }
 }
 
-/// Position and show the preview window near the given cursor coordinates (legacy)
-/// Uses per-monitor DPI for accurate positioning
-pub fn show_preview_at(app_handle: &AppHandle, mouse_x: i32, mouse_y: i32) {
+/// Resize and reposition preview window after content is loaded
+pub fn resize_preview(app_handle: &AppHandle, toolbar_x: i32, toolbar_y: i32, text: &str) {
     if let Some(window) = app_handle.get_webview_window("preview") {
-        let scale = get_scale_at(mouse_x, mouse_y);
+        let scale = get_scale_at(toolbar_x, toolbar_y);
         let (screen_w, screen_h, _) = get_primary_screen_info(app_handle);
-        let toolbar_h = TOOLBAR_SIZE;
-        let toolbar_h_logical = toolbar_h / scale;
+        let toolbar_h_logical = TOOLBAR_SIZE / scale;
+        let preview_height = estimate_preview_height(text);
 
-        // Convert physical to logical coordinates
-        let logical_x = mouse_x as f64 / scale;
-        let logical_y = mouse_y as f64 / scale;
+        let _ = window.set_size(tauri::LogicalSize::new(PREVIEW_WIDTH, preview_height));
 
-        // Position preview below and slightly left of the mouse
-        let mut x = logical_x - PREVIEW_WIDTH / 2.0;
-        let mut y = logical_y + TOOLBAR_OFFSET_Y + toolbar_h_logical + 8.0;
+        let tb_logical_x = toolbar_x as f64 / scale;
+        let tb_logical_y = toolbar_y as f64 / scale;
+        let mut x = tb_logical_x;
+        let mut y = tb_logical_y + toolbar_h_logical + 4.0;
 
-        // Screen boundary detection
-        if x + PREVIEW_WIDTH > screen_w {
-            x = screen_w - PREVIEW_WIDTH - 8.0;
-        }
-        if y + PREVIEW_HEIGHT > screen_h {
-            y = logical_y - PREVIEW_HEIGHT - toolbar_h_logical - 16.0;
-        }
-        if x < 0.0 {
-            x = 8.0;
-        }
-        if y < 0.0 {
-            y = 8.0;
-        }
+        if x + PREVIEW_WIDTH > screen_w { x = screen_w - PREVIEW_WIDTH - 8.0; }
+        if y + preview_height > screen_h { y = tb_logical_y - preview_height - 4.0; }
+        if x < 0.0 { x = 8.0; }
+        if y < 0.0 { y = 8.0; }
 
-        let position = LogicalPosition::new(x, y);
-        if let Err(e) = window.set_position(Position::Logical(position)) {
-            warn!("Failed to position preview: {}", e);
-        }
-
-        if let Err(e) = window.show() {
-            warn!("Failed to show preview: {}", e);
-        }
-
-        debug!("Preview shown at logical ({:.0}, {:.0})", x, y);
+        let _ = window.set_position(Position::Logical(LogicalPosition::new(x, y)));
+        debug!("Preview resized to height={:.0} for {} chars", preview_height, text.len());
     }
 }
 

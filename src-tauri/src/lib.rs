@@ -238,11 +238,11 @@ async fn process_and_show_preview(
         (500, 300)
     };
 
-    // Show preview window with loading state
+    // Show preview window with loading state (compact size)
     // Mark preview as visible to pause UIA monitoring
     *state.preview_visible.lock() = true;
     app.emit("show-preview-loading", ()).map_err(|e| e.to_string())?;
-    overlay::show_preview_below_toolbar(&app, preview_pos.0, preview_pos.1);
+    overlay::show_preview_below_toolbar(&app, preview_pos.0, preview_pos.1, "");
 
     // Hide toolbar
     overlay::hide_toolbar(&app);
@@ -253,6 +253,9 @@ async fn process_and_show_preview(
         .await
     {
         Ok(result) => {
+            // Resize preview to fit result text
+            overlay::resize_preview(&app, preview_pos.0, preview_pos.1, &result);
+
             let response = ProcessResponse {
                 original: request.text,
                 result,
