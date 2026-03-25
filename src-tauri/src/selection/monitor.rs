@@ -6,16 +6,16 @@ use log::{debug, error, info, warn};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tauri::Emitter;
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 use windows::Win32::Foundation::POINT;
 use windows::Win32::UI::WindowsAndMessaging::{GetCursorPos, GetForegroundWindow};
 
 use super::uia::UiaEngine;
 use crate::overlay;
 
-/// Minimum time between showing the toolbar (debounce)
+/// Minimum time between showing the popup (debounce)
 const DEBOUNCE_MS: u64 = 200;
-/// Minimum text length to trigger toolbar
+/// Minimum text length to trigger popup
 const MIN_TEXT_LENGTH: usize = 1;
 /// Maximum text length to process (avoid huge payloads)
 const MAX_TEXT_LENGTH: usize = 5000;
@@ -71,26 +71,20 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
                 let text_trimmed = text.trim().to_string();
 
                 if !text_trimmed.is_empty() {
-                    // When preview is visible, don't show toolbar or react to text changes
-                    // (focus is on preview window, UIA may see stale/different state)
                     if preview_is_visible {
-                        // Just keep track of the selection text, don't trigger any UI
+                        // Popup is expanded — don't trigger new popups
                         last_selection = Some(text_trimmed);
                     } else {
-                        // Normal mode: detect changes and show toolbar
+                        // Normal mode: detect changes and show popup icon
                         let text_changed = last_selection.as_ref() != Some(&text_trimmed);
 
                         if text_changed {
-                            // Text changed - start debounce timer
                             debounce_text = Some(text_trimmed.clone());
                             last_change_time = Instant::now();
                             last_selection = Some(text_trimmed);
-                            // Selection changed — hide preview from previous translation
-                            overlay::hide_preview(&app_handle);
                         } else if let Some(ref debounced) = debounce_text {
-                            // Text stabilized - check debounce timer
                             if last_change_time.elapsed() >= Duration::from_millis(DEBOUNCE_MS) {
-                                // Debounce complete - show toolbar!
+                                // Debounce complete — show popup icon
                                 let mouse_pos = get_cursor_position();
                                 let source_hwnd = unsafe { GetForegroundWindow().0 as isize };
                                 let selection_info = SelectionInfo {
@@ -101,7 +95,7 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
                                     source_hwnd: Some(source_hwnd),
                                 };
 
-                                show_toolbar(&app_handle, &state, selection_info);
+                                show_popup(app_handle.clone(), &state, selection_info);
                                 debounce_text = None;
                             }
                         }
@@ -109,12 +103,11 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
                 }
             }
         } else {
-            // No selection detected - clear state
+            // No selection — hide popup and clear state
             if last_selection.is_some() {
                 last_selection = None;
                 debounce_text = None;
-                // Hide toolbar AND preview when selection is cleared
-                overlay::hide_all(&app_handle);
+                overlay::hide_popup(&app_handle);
                 *state.current_selection.lock() = None;
                 *state.preview_visible.lock() = false;
             }
@@ -136,10 +129,10 @@ fn get_cursor_position() -> (i32, i32) {
     }
 }
 
-/// Show the floating toolbar near the mouse cursor
-fn show_toolbar(app_handle: &AppHandle, state: &Arc<AppState>, info: SelectionInfo) {
+/// Show the popup icon near the mouse cursor
+fn show_popup(app_handle: AppHandle, state: &Arc<AppState>, info: SelectionInfo) {
     debug!(
-        "Showing toolbar at ({}, {}) for text: {}...",
+        "Showing popup icon at ({}, {}) for text: {}...",
         info.mouse_x,
         info.mouse_y,
         &info.text[..info.text.len().min(50)]
@@ -148,16 +141,11 @@ fn show_toolbar(app_handle: &AppHandle, state: &Arc<AppState>, info: SelectionIn
     // Store the current selection in state
     *state.current_selection.lock() = Some(info.clone());
 
-    // Use overlay module for proper positioning with DPI-aware coordinates
-    overlay::show_toolbar_at(app_handle, info.mouse_x, info.mouse_y);
+    // Show popup icon at cursor position
+    overlay::show_popup_icon(&app_handle, info.mouse_x, info.mouse_y);
 
     // Emit event to frontend with the selection info
     if let Err(e) = app_handle.emit("selection-detected", &info) {
         warn!("Failed to emit selection event: {}", e);
     }
-}
-
-/// Hide the floating toolbar
-fn hide_toolbar(app_handle: &AppHandle) {
-    overlay::hide_toolbar(app_handle);
 }

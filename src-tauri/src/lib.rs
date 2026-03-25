@@ -209,8 +209,8 @@ async fn process_text(
     })
 }
 
-/// Process text and show result in preview window
-/// This is the main flow: toolbar click → API call → show preview
+/// Process text and show result in popup window
+/// This is the main flow: icon click → spinning → API call → expand with result
 #[tauri::command]
 async fn process_and_show_preview(
     app: tauri::AppHandle,
@@ -223,29 +223,11 @@ async fn process_and_show_preview(
         return Err("Not logged in. Please sign in via Settings.".to_string());
     }
 
-    // Get toolbar position to place preview below it
-    let preview_pos = if let Some(toolbar) = app.get_webview_window("toolbar") {
-        if let Ok(pos) = toolbar.outer_position() {
-            // Use toolbar's top-left as reference (physical pixels)
-            (pos.x, pos.y)
-        } else {
-            // Fallback: use mouse position from selection
-            state.current_selection.lock().as_ref()
-                .map(|s| (s.mouse_x, s.mouse_y))
-                .unwrap_or((500, 300))
-        }
-    } else {
-        (500, 300)
-    };
-
-    // Show preview window with loading state (compact size)
-    // Mark preview as visible to pause UIA monitoring
+    // Mark popup as "processing" to pause UIA monitoring
     *state.preview_visible.lock() = true;
-    app.emit("show-preview-loading", ()).map_err(|e| e.to_string())?;
-    overlay::show_preview_below_toolbar(&app, preview_pos.0, preview_pos.1, "");
 
-    // Hide toolbar
-    overlay::hide_toolbar(&app);
+    // Emit loading event (frontend switches to spinning state)
+    app.emit("show-preview-loading", ()).map_err(|e| e.to_string())?;
 
     // Call Copilot API
     match state.copilot_client
@@ -253,8 +235,8 @@ async fn process_and_show_preview(
         .await
     {
         Ok(result) => {
-            // Resize preview to fit result text
-            overlay::resize_preview(&app, preview_pos.0, preview_pos.1, &result);
+            // Expand popup window to fit result text
+            overlay::expand_popup(&app, &result);
 
             let response = ProcessResponse {
                 original: request.text,
@@ -406,9 +388,9 @@ async fn replace_text(
         .and_then(|s| s.source_hwnd);
     log::info!("[REPLACE CMD] source_hwnd={:?}", source_hwnd);
 
-    // Hide preview first
-    overlay::hide_all(&app);
-    log::info!("[REPLACE CMD] preview hidden");
+    // Hide popup first
+    overlay::hide_popup(&app);
+    log::info!("[REPLACE CMD] popup hidden");
 
     // Run replacement on a dedicated OS thread (NOT tokio pool)
     // SendInput requires proper thread context for input injection
@@ -470,26 +452,15 @@ fn is_enabled(state: tauri::State<'_, Arc<AppState>>) -> bool {
     *state.enabled.lock()
 }
 
-/// Dismiss the toolbar (hide it)
+/// Dismiss the popup (hide + shrink back to icon size) and briefly pause monitoring
 #[tauri::command]
-async fn dismiss_toolbar(app: tauri::AppHandle) -> Result<(), String> {
-    if let Some(window) = app.get_webview_window("toolbar") {
-        window.hide().map_err(|e| e.to_string())?;
-    }
-    Ok(())
-}
-
-/// Dismiss the preview popup (hide it) and briefly pause monitoring
-#[tauri::command]
-async fn dismiss_preview(
+async fn dismiss_popup(
     app: tauri::AppHandle,
     state: tauri::State<'_, Arc<AppState>>,
 ) -> Result<(), String> {
-    if let Some(window) = app.get_webview_window("preview") {
-        window.hide().map_err(|e| e.to_string())?;
-    }
+    overlay::hide_popup(&app);
     *state.preview_visible.lock() = false;
-    // Briefly pause monitoring so toolbar doesn't immediately re-appear
+    // Briefly pause monitoring so popup doesn't immediately re-appear
     *state.enabled.lock() = false;
     let state_clone = state.inner().clone();
     std::thread::spawn(move || {
@@ -518,8 +489,7 @@ pub fn run() {
             update_settings,
             toggle_enabled,
             is_enabled,
-            dismiss_toolbar,
-            dismiss_preview,
+            dismiss_popup,
             start_github_login,
             poll_github_login,
             get_auth_status,
@@ -534,8 +504,8 @@ pub fn run() {
 
             info!("Copilot Rewrite starting up...");
 
-            // Apply WS_EX_NOACTIVATE to overlay windows so they don't steal focus
-            overlay::setup_overlay_windows(&app_handle);
+            // Apply window styles to popup (WS_EX_NOACTIVATE, strip frame)
+            overlay::setup_popup_window(&app_handle);
 
             // Set up the system tray icon with Enable/Disable/Quit menu
             if let Err(e) = tray::setup_tray(&app_handle, state.clone()) {

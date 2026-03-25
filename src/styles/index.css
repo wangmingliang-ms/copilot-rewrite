@@ -17,9 +17,8 @@ body,
   -webkit-user-select: none;
 }
 
-/* Toolbar and preview: no scrolling, transparent */
-html:has(#root .toolbar-view),
-html:has(#root .preview-view) {
+/* Popup: no scrolling, transparent */
+html:has(#root .popup-view) {
   overflow: hidden;
 }
 

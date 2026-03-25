@@ -13,9 +13,9 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "label": "toolbar",
+        "label": "popup",
         "title": "Copilot Rewrite",
-        "width": 140,
+        "width": 48,
         "height": 48,
         "resizable": false,
         "decorations": false,
@@ -25,22 +25,7 @@
         "skipTaskbar": true,
         "focus": false,
         "shadow": false,
-        "url": "index.html#/toolbar"
-      },
-      {
-        "label": "preview",
-        "title": "Copilot Rewrite Preview",
-        "width": 400,
-        "height": 240,
-        "resizable": false,
-        "decorations": false,
-        "transparent": true,
-        "alwaysOnTop": true,
-        "visible": false,
-        "skipTaskbar": true,
-        "focus": false,
-        "shadow": false,
-        "url": "index.html#/preview"
+        "url": "index.html#/popup"
       },
       {
         "label": "settings",
