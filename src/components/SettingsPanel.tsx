@@ -261,31 +261,20 @@ const SettingsPanel: FC = () => {
               {modelsLoading ? "Loading..." : "↻ Refresh"}
             </button>
           </div>
-          <div className="space-y-2 max-h-[300px] overflow-y-auto">
+          <select
+            value={settings.model}
+            onChange={(e) => setSettings({ ...settings, model: e.target.value })}
+            className="w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm text-gray-900 focus:border-copilot-blue focus:outline-none focus:ring-1 focus:ring-copilot-blue"
+          >
             {models.map((model) => (
-              <label
-                key={model.id}
-                className={`flex items-center gap-3 rounded-lg border p-3 cursor-pointer transition-colors ${
-                  settings.model === model.id
-                    ? "border-copilot-blue bg-blue-50"
-                    : "border-gray-200 hover:bg-gray-50"
-                }`}
-              >
-                <input
-                  type="radio"
-                  name="model"
-                  value={model.id}
-                  checked={settings.model === model.id}
-                  onChange={(e) => setSettings({ ...settings, model: e.target.value })}
-                  className="w-4 h-4 text-copilot-blue focus:ring-copilot-blue"
-                />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-gray-900">{model.name}</p>
-                  <p className="text-xs text-gray-400">{model.owned_by || model.id}</p>
-                </div>
-              </label>
+              <option key={model.id} value={model.id}>
+                {model.name} — {model.owned_by || model.id}
+              </option>
             ))}
-          </div>
+            {models.length === 0 && (
+              <option value={settings.model}>{settings.model}</option>
+            )}
+          </select>
         </section>
 
         {/* General Section */}
