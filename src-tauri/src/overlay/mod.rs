@@ -2,8 +2,13 @@
 // Manages a single unified popup window that transitions:
 //   icon (48×48) → spinning (48×48) → expanded (auto-sized with content)
 // Uses WS_EX_NOACTIVATE in icon/spinning states, removes it when expanded for click events.
+//
+// POSITION STABILITY: The popup position is set once (in show_popup_icon) and stored.
+// All subsequent state transitions (spinning, expanded) reuse the stored position
+// to prevent jumping caused by DPI round-trip errors or cursor movement.
 
 use log::{debug, info, warn};
+use parking_lot::Mutex;
 use tauri::{AppHandle, LogicalPosition, LogicalSize, Manager, Position};
 use windows::Win32::Foundation::{HWND, POINT};
 use windows::Win32::Graphics::Gdi::MonitorFromPoint;
@@ -36,6 +41,9 @@ const CHARS_PER_LINE: f64 = 50.0;
 /// Offset from cursor position
 const POPUP_OFFSET_X: f64 = 8.0;
 const POPUP_OFFSET_Y: f64 = 16.0;
+
+/// Stored popup position (logical coordinates) — set once, reused across state transitions
+static POPUP_POS: Mutex<(f64, f64)> = Mutex::new((0.0, 0.0));
 
 /// Set up popup window styles — strip frame, apply WS_EX_NOACTIVATE
 pub fn setup_popup_window(app_handle: &AppHandle) {
@@ -76,7 +84,8 @@ pub fn setup_popup_window(app_handle: &AppHandle) {
     }
 }
 
-/// Show popup at icon size (48×48) near cursor
+/// Show popup at icon size (48×48) near cursor.
+/// This is the ONLY place that calculates position — all other states reuse it.
 pub fn show_popup_icon(app_handle: &AppHandle, mouse_x: i32, mouse_y: i32) {
     if let Some(window) = app_handle.get_webview_window("popup") {
         let scale = get_scale_at(mouse_x, mouse_y);
@@ -94,6 +103,9 @@ pub fn show_popup_icon(app_handle: &AppHandle, mouse_x: i32, mouse_y: i32) {
         if x < 0.0 { x = 8.0; }
         if y < 0.0 { y = 8.0; }
 
+        // Store position — all subsequent transitions use this exact position
+        *POPUP_POS.lock() = (x, y);
+
         // Ensure icon size + WS_EX_NOACTIVATE
         set_noactivate(app_handle, true);
         resize_popup_physical(app_handle, ICON_SIZE, ICON_SIZE);
@@ -105,41 +117,32 @@ pub fn show_popup_icon(app_handle: &AppHandle, mouse_x: i32, mouse_y: i32) {
     }
 }
 
-/// Expand popup to show result text — removes WS_EX_NOACTIVATE for interactivity
+/// Expand popup to show result text — removes WS_EX_NOACTIVATE for interactivity.
+/// Reuses the stored position from show_popup_icon — no recalculation.
 pub fn expand_popup(app_handle: &AppHandle, text: &str) {
     if let Some(window) = app_handle.get_webview_window("popup") {
         let height = estimate_height(text);
-        let scale = get_popup_scale(app_handle);
-        let (screen_w, screen_h, _) = get_primary_screen_info_safe(app_handle);
+        let (screen_w, screen_h, _) = get_primary_screen_info(app_handle);
 
-        // Get current popup position before resizing
-        let (cur_x, cur_y) = if let Ok(pos) = window.outer_position() {
-            (pos.x as f64 / scale, pos.y as f64 / scale)
-        } else {
-            (100.0, 100.0)
-        };
+        // Use stored position — same top-left as the icon
+        let (stored_x, stored_y) = *POPUP_POS.lock();
+        let mut x = stored_x;
+        let mut y = stored_y;
 
-        let w_logical = EXPANDED_WIDTH;
-        let h_logical = height;
-
-        // Keep top-left at same position, expand right and down
-        let mut x = cur_x;
-        let mut y = cur_y;
-
-        // Boundary checks
-        if x + w_logical > screen_w { x = screen_w - w_logical - 8.0; }
-        if y + h_logical > screen_h { y = cur_y - h_logical + ICON_SIZE / scale; }
+        // Boundary checks for expanded size
+        if x + EXPANDED_WIDTH > screen_w { x = screen_w - EXPANDED_WIDTH - 8.0; }
+        if y + height > screen_h { y = screen_h - height - 8.0; }
         if x < 0.0 { x = 8.0; }
         if y < 0.0 { y = 8.0; }
 
         // Remove WS_EX_NOACTIVATE so buttons are clickable
         set_noactivate(app_handle, false);
 
-        // Resize to expanded dimensions
-        let _ = window.set_size(LogicalSize::new(w_logical, h_logical));
+        // Resize and reposition atomically
+        let _ = window.set_size(LogicalSize::new(EXPANDED_WIDTH, height));
         let _ = window.set_position(Position::Logical(LogicalPosition::new(x, y)));
 
-        debug!("Popup expanded to {:.0}x{:.0} at ({:.0}, {:.0})", w_logical, h_logical, x, y);
+        debug!("Popup expanded to {:.0}x{:.0} at ({:.0}, {:.0})", EXPANDED_WIDTH, height, x, y);
     }
 }
 
@@ -171,7 +174,7 @@ fn set_noactivate(app_handle: &AppHandle, enable: bool) {
                     ex_style & !(WS_EX_NOACTIVATE.0 as i32)
                 };
                 SetWindowLongW(hwnd_win, GWL_EXSTYLE, new_style);
-                // Apply change
+                // Apply change without moving or resizing
                 let _ = SetWindowPos(
                     hwnd_win, HWND_TOP,
                     0, 0, 0, 0,
@@ -214,16 +217,6 @@ fn estimate_height(text: &str) -> f64 {
     height.clamp(EXPANDED_MIN_HEIGHT, EXPANDED_MAX_HEIGHT)
 }
 
-/// Get scale at popup's current position
-fn get_popup_scale(app_handle: &AppHandle) -> f64 {
-    if let Some(window) = app_handle.get_webview_window("popup") {
-        if let Ok(pos) = window.outer_position() {
-            return get_scale_at(pos.x, pos.y);
-        }
-    }
-    1.25 // reasonable default
-}
-
 /// Get scale factor at given physical coordinates
 fn get_scale_at(x: i32, y: i32) -> f64 {
     unsafe {
@@ -244,8 +237,4 @@ fn get_primary_screen_info(app_handle: &AppHandle) -> (f64, f64, f64) {
     } else {
         (1920.0, 1080.0, 1.0)
     }
-}
-
-fn get_primary_screen_info_safe(app_handle: &AppHandle) -> (f64, f64, f64) {
-    get_primary_screen_info(app_handle)
 }

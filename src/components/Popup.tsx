@@ -34,19 +34,20 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
       setState("error");
     });
 
+    // Reset to icon state when popup is hidden and re-shown
+    const unSelection = listen("selection-detected", () => {
+      setState("icon");
+      setResult(null);
+      setError(null);
+    });
+
     return () => {
       unResult.then((f) => f());
       unLoading.then((f) => f());
       unError.then((f) => f());
+      unSelection.then((f) => f());
     };
   }, []);
-
-  // Reset to icon when selection changes
-  useEffect(() => {
-    setState("icon");
-    setResult(null);
-    setError(null);
-  }, [selection?.text]);
 
   // Dismiss on Escape
   useEffect(() => {
