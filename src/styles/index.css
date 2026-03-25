@@ -1,0 +1,55 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Ensure transparent background for overlay windows */
+:root {
+  background: transparent;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Toolbar and preview: no scrolling, transparent */
+html:has(#root .toolbar-view),
+html:has(#root .preview-view) {
+  overflow: hidden;
+}
+
+/* Settings page: allow scrolling, solid background */
+html:has(#root .settings-view) {
+  background: #f9fafb;
+  overflow: auto;
+}
+html:has(#root .settings-view) body,
+html:has(#root .settings-view) #root {
+  background: #f9fafb;
+  overflow: auto;
+  user-select: auto;
+  -webkit-user-select: auto;
+}
+
+/* Scrollbar styling for the preview content */
+.overflow-auto::-webkit-scrollbar {
+  width: 4px;
+}
+
+.overflow-auto::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.overflow-auto::-webkit-scrollbar-thumb {
+  background-color: rgba(0, 0, 0, 0.15);
+  border-radius: 2px;
+}
+
+.overflow-auto::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(0, 0, 0, 0.25);
+}
