@@ -135,6 +135,27 @@ function PreviewWindow() {
     };
   }, []);
 
+  // Auto-dismiss preview when window loses focus (user clicked elsewhere)
+  useEffect(() => {
+    const handleBlur = () => {
+      // Small delay to avoid dismissing during internal focus changes
+      setTimeout(async () => {
+        if (!document.hasFocus()) {
+          try {
+            await invoke("dismiss_preview");
+            setResult(null);
+            setLoading(false);
+            setError(null);
+          } catch (e) {
+            console.error("[Preview] dismiss on blur failed:", e);
+          }
+        }
+      }, 100);
+    };
+    window.addEventListener("blur", handleBlur);
+    return () => window.removeEventListener("blur", handleBlur);
+  }, []);
+
   const handleReplace = useCallback(async () => {
     if (!result) return;
     try {

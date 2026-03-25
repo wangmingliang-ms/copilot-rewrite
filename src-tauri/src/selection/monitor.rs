@@ -48,13 +48,7 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
             continue;
         }
 
-        // Skip monitoring while preview is visible (it would steal focus and
-        // cause UIA to think the selection disappeared)
-        if *state.preview_visible.lock() {
-            std::thread::sleep(Duration::from_millis(200));
-            continue;
-        }
-
+        let preview_is_visible = *state.preview_visible.lock();
         let poll_interval = state.settings.lock().poll_interval_ms;
 
         // Try to get selected text via UIA
@@ -77,32 +71,39 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
                 let text_trimmed = text.trim().to_string();
 
                 if !text_trimmed.is_empty() {
-                    // Check if text has changed
-                    let text_changed = last_selection.as_ref() != Some(&text_trimmed);
-
-                    if text_changed {
-                        // Text changed - start debounce timer
-                        debounce_text = Some(text_trimmed.clone());
-                        last_change_time = Instant::now();
+                    // When preview is visible, don't show toolbar or react to text changes
+                    // (focus is on preview window, UIA may see stale/different state)
+                    if preview_is_visible {
+                        // Just keep track of the selection text, don't trigger any UI
                         last_selection = Some(text_trimmed);
-                        // Selection changed — hide preview from previous translation
-                        overlay::hide_preview(&app_handle);
-                    } else if let Some(ref debounced) = debounce_text {
-                        // Text stabilized - check debounce timer
-                        if last_change_time.elapsed() >= Duration::from_millis(DEBOUNCE_MS) {
-                            // Debounce complete - show toolbar!
-                            let mouse_pos = get_cursor_position();
-                            let source_hwnd = unsafe { GetForegroundWindow().0 as isize };
-                            let selection_info = SelectionInfo {
-                                text: debounced.clone(),
-                                mouse_x: mouse_pos.0,
-                                mouse_y: mouse_pos.1,
-                                source: SelectionSource::UIA,
-                                source_hwnd: Some(source_hwnd),
-                            };
+                    } else {
+                        // Normal mode: detect changes and show toolbar
+                        let text_changed = last_selection.as_ref() != Some(&text_trimmed);
 
-                            show_toolbar(&app_handle, &state, selection_info);
-                            debounce_text = None;
+                        if text_changed {
+                            // Text changed - start debounce timer
+                            debounce_text = Some(text_trimmed.clone());
+                            last_change_time = Instant::now();
+                            last_selection = Some(text_trimmed);
+                            // Selection changed — hide preview from previous translation
+                            overlay::hide_preview(&app_handle);
+                        } else if let Some(ref debounced) = debounce_text {
+                            // Text stabilized - check debounce timer
+                            if last_change_time.elapsed() >= Duration::from_millis(DEBOUNCE_MS) {
+                                // Debounce complete - show toolbar!
+                                let mouse_pos = get_cursor_position();
+                                let source_hwnd = unsafe { GetForegroundWindow().0 as isize };
+                                let selection_info = SelectionInfo {
+                                    text: debounced.clone(),
+                                    mouse_x: mouse_pos.0,
+                                    mouse_y: mouse_pos.1,
+                                    source: SelectionSource::UIA,
+                                    source_hwnd: Some(source_hwnd),
+                                };
+
+                                show_toolbar(&app_handle, &state, selection_info);
+                                debounce_text = None;
+                            }
                         }
                     }
                 }
@@ -115,6 +116,7 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
                 // Hide toolbar AND preview when selection is cleared
                 overlay::hide_all(&app_handle);
                 *state.current_selection.lock() = None;
+                *state.preview_visible.lock() = false;
             }
         }
 

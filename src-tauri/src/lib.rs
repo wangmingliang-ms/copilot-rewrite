@@ -9,7 +9,7 @@ pub mod replacement;
 pub mod selection;
 pub mod tray;
 
-use log::info;
+use log::{info, warn};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -34,8 +34,10 @@ pub struct AppState {
 
 impl AppState {
     pub fn new() -> Self {
-        // Try to load saved auth
-        let mut settings = Settings::default();
+        // Load settings from disk (or defaults)
+        let mut settings = Settings::load();
+
+        // Override token from saved auth if available
         if let Some(saved_auth) = copilot::oauth::load_saved_auth() {
             settings.api_token = saved_auth.github_token;
             info!("Loaded saved GitHub token for user: {:?}", saved_auth.username);
@@ -91,6 +93,50 @@ pub struct Settings {
     pub poll_interval_ms: u64,
     /// AI model to use (e.g. "gpt-4o", "claude-3.5-sonnet")
     pub model: String,
+}
+
+impl Settings {
+    /// Path to the settings JSON file
+    fn settings_path() -> Option<std::path::PathBuf> {
+        dirs::config_dir().map(|d| d.join("copilot-rewrite").join("settings.json"))
+    }
+
+    /// Load settings from disk, falling back to defaults
+    pub fn load() -> Self {
+        if let Some(path) = Self::settings_path() {
+            if path.exists() {
+                match std::fs::read_to_string(&path) {
+                    Ok(json) => {
+                        match serde_json::from_str::<Settings>(&json) {
+                            Ok(s) => {
+                                info!("Loaded settings from {:?}", path);
+                                return s;
+                            }
+                            Err(e) => warn!("Failed to parse settings.json: {}", e),
+                        }
+                    }
+                    Err(e) => warn!("Failed to read settings.json: {}", e),
+                }
+            }
+        }
+        Self::default()
+    }
+
+    /// Save settings to disk
+    pub fn save(&self) -> Result<(), String> {
+        let path = Self::settings_path()
+            .ok_or_else(|| "Cannot determine config directory".to_string())?;
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("Failed to create config dir: {}", e))?;
+        }
+        let json = serde_json::to_string_pretty(self)
+            .map_err(|e| format!("Failed to serialize settings: {}", e))?;
+        std::fs::write(&path, json)
+            .map_err(|e| format!("Failed to write settings.json: {}", e))?;
+        info!("Settings saved to {:?}", path);
+        Ok(())
+    }
 }
 
 impl Default for Settings {
@@ -389,6 +435,9 @@ fn update_settings(
     state: tauri::State<'_, Arc<AppState>>,
     settings: Settings,
 ) -> Result<(), String> {
+    // Save to disk first
+    settings.save()?;
+    // Then update in-memory state
     let mut current = state.settings.lock();
     *current = settings;
     Ok(())
