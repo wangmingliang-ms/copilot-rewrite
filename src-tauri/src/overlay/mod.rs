@@ -134,7 +134,47 @@ pub fn show_toolbar_at(app_handle: &AppHandle, mouse_x: i32, mouse_y: i32) {
     }
 }
 
-/// Position and show the preview window near the toolbar
+/// Position and show the preview window directly below the toolbar
+/// toolbar_x, toolbar_y are the toolbar's physical pixel coordinates (top-left)
+pub fn show_preview_below_toolbar(app_handle: &AppHandle, toolbar_x: i32, toolbar_y: i32) {
+    if let Some(window) = app_handle.get_webview_window("preview") {
+        let scale = get_scale_at(toolbar_x, toolbar_y);
+        let (screen_w, screen_h, _) = get_primary_screen_info(app_handle);
+        let toolbar_h_logical = TOOLBAR_SIZE / scale;
+
+        // Convert toolbar physical position to logical
+        let tb_logical_x = toolbar_x as f64 / scale;
+        let tb_logical_y = toolbar_y as f64 / scale;
+
+        // Place preview: left-aligned with toolbar, directly below it with small gap
+        let mut x = tb_logical_x;
+        let mut y = tb_logical_y + toolbar_h_logical + 4.0;
+
+        // Screen boundary: push left if preview goes off right edge
+        if x + PREVIEW_WIDTH > screen_w {
+            x = screen_w - PREVIEW_WIDTH - 8.0;
+        }
+        // If preview goes below screen, show it above the toolbar instead
+        if y + PREVIEW_HEIGHT > screen_h {
+            y = tb_logical_y - PREVIEW_HEIGHT - 4.0;
+        }
+        if x < 0.0 { x = 8.0; }
+        if y < 0.0 { y = 8.0; }
+
+        let position = LogicalPosition::new(x, y);
+        if let Err(e) = window.set_position(Position::Logical(position)) {
+            warn!("Failed to position preview: {}", e);
+        }
+
+        if let Err(e) = window.show() {
+            warn!("Failed to show preview: {}", e);
+        }
+
+        debug!("Preview shown below toolbar at logical ({:.0}, {:.0})", x, y);
+    }
+}
+
+/// Position and show the preview window near the given cursor coordinates (legacy)
 /// Uses per-monitor DPI for accurate positioning
 pub fn show_preview_at(app_handle: &AppHandle, mouse_x: i32, mouse_y: i32) {
     if let Some(window) = app_handle.get_webview_window("preview") {

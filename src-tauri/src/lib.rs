@@ -223,16 +223,26 @@ async fn process_and_show_preview(
         return Err("Not logged in. Please sign in via Settings.".to_string());
     }
 
-    // Get the mouse position from current selection for preview positioning
-    let mouse_pos = state.current_selection.lock().as_ref()
-        .map(|s| (s.mouse_x, s.mouse_y))
-        .unwrap_or((500, 300));
+    // Get toolbar position to place preview below it
+    let preview_pos = if let Some(toolbar) = app.get_webview_window("toolbar") {
+        if let Ok(pos) = toolbar.outer_position() {
+            // Use toolbar's top-left as reference (physical pixels)
+            (pos.x, pos.y)
+        } else {
+            // Fallback: use mouse position from selection
+            state.current_selection.lock().as_ref()
+                .map(|s| (s.mouse_x, s.mouse_y))
+                .unwrap_or((500, 300))
+        }
+    } else {
+        (500, 300)
+    };
 
     // Show preview window with loading state
     // Mark preview as visible to pause UIA monitoring
     *state.preview_visible.lock() = true;
     app.emit("show-preview-loading", ()).map_err(|e| e.to_string())?;
-    overlay::show_preview_at(&app, mouse_pos.0, mouse_pos.1);
+    overlay::show_preview_below_toolbar(&app, preview_pos.0, preview_pos.1);
 
     // Hide toolbar
     overlay::hide_toolbar(&app);
