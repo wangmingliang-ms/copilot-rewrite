@@ -103,14 +103,17 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
                 }
             }
         } else {
-            // No selection — hide popup and clear state
-            if last_selection.is_some() {
+            // No selection detected
+            if last_selection.is_some() && !preview_is_visible {
+                // Only hide if popup is NOT in expanded/spinning state.
+                // When user clicks the expanded popup, the source app loses focus
+                // and UIA returns no selection — but we must keep the popup alive.
                 last_selection = None;
                 debounce_text = None;
                 overlay::hide_popup(&app_handle);
                 *state.current_selection.lock() = None;
-                *state.preview_visible.lock() = false;
             }
+            // If preview_is_visible: do nothing — let dismiss_popup handle cleanup
         }
 
         std::thread::sleep(Duration::from_millis(poll_interval));
