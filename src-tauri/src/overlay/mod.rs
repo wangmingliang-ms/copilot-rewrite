@@ -9,24 +9,16 @@ use windows::Win32::Graphics::Gdi::MonitorFromPoint;
 use windows::Win32::Graphics::Gdi::MONITOR_DEFAULTTONEAREST;
 use windows::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetSystemMetrics, GetWindowLongW, SetWindowLongW,
-    GWL_EXSTYLE, SM_CXMINTRACK, SM_CYMINTRACK, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+    GetWindowLongW, SetWindowLongW, SetWindowPos,
+    GWL_EXSTYLE, GWL_STYLE,
+    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+    WS_THICKFRAME, WS_CAPTION, WS_SYSMENU, WS_MINIMIZEBOX, WS_MAXIMIZEBOX,
+    SWP_NOMOVE, SWP_NOZORDER, SWP_FRAMECHANGED, HWND_TOP,
 };
 
-/// Toolbar window dimensions
-/// Windows enforces a minimum track size (~136x39 physical pixels at 100% DPI)
-/// We use the actual Windows minimum to avoid invisible whitespace
-fn get_toolbar_size() -> (f64, f64) {
-    unsafe {
-        let min_w = GetSystemMetrics(SM_CXMINTRACK);
-        let min_h = GetSystemMetrics(SM_CYMINTRACK);
-        // Use the larger of our desired size or Windows minimum
-        // These are physical pixels; Tauri will handle DPI internally
-        let w = 48.0_f64.max(min_w as f64);
-        let h = 48.0_f64.max(min_h as f64);
-        (w, h)
-    }
-}
+/// Toolbar window dimensions (physical pixels)
+/// By removing WS_THICKFRAME/WS_CAPTION, we bypass Windows' minimum track size
+const TOOLBAR_SIZE: f64 = 48.0;
 
 /// Preview window dimensions
 const PREVIEW_WIDTH: f64 = 480.0;
@@ -36,34 +28,40 @@ const PREVIEW_HEIGHT: f64 = 400.0;
 const TOOLBAR_OFFSET_X: f64 = 8.0;
 const TOOLBAR_OFFSET_Y: f64 = 16.0;
 
-/// Apply WS_EX_NOACTIVATE and WS_EX_TOOLWINDOW styles to a window
-/// This prevents the overlay window from stealing focus and hides it from the taskbar
-pub fn apply_noactivate_style(hwnd: isize) {
-    unsafe {
-        let hwnd = HWND(hwnd as *mut _);
-        let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE);
-        let new_style = ex_style | WS_EX_NOACTIVATE.0 as i32 | WS_EX_TOOLWINDOW.0 as i32;
-        SetWindowLongW(hwnd, GWL_EXSTYLE, new_style);
-        debug!("Applied WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW to window");
-    }
-}
-
 /// Set up overlay window styles for both toolbar and preview windows
 /// Should be called during app setup after windows are created
 pub fn setup_overlay_windows(app_handle: &AppHandle) {
     info!("Setting up overlay windows...");
 
-    let (toolbar_w, toolbar_h) = get_toolbar_size();
-    info!("Toolbar size: {}x{} (accounting for Windows minimum)", toolbar_w, toolbar_h);
-
     // Apply non-focus-stealing style to toolbar
+    // Also strip WS_THICKFRAME/WS_CAPTION to bypass Windows minimum size enforcement
     if let Some(window) = app_handle.get_webview_window("toolbar") {
         match window.hwnd() {
             Ok(hwnd) => {
-                apply_noactivate_style(hwnd.0 as isize);
-                // Set to actual usable size
-                let _ = window.set_size(tauri::PhysicalSize::new(toolbar_w as u32, toolbar_h as u32));
-                info!("Toolbar window configured as non-activating overlay");
+                unsafe {
+                    let hwnd_win = HWND(hwnd.0 as *mut _);
+
+                    // Set extended style: no-activate + tool window
+                    let ex_style = GetWindowLongW(hwnd_win, GWL_EXSTYLE);
+                    let new_ex = ex_style | WS_EX_NOACTIVATE.0 as i32 | WS_EX_TOOLWINDOW.0 as i32;
+                    SetWindowLongW(hwnd_win, GWL_EXSTYLE, new_ex);
+
+                    // Remove standard window styles that enforce minimum size
+                    let style = GetWindowLongW(hwnd_win, GWL_STYLE);
+                    let strip = WS_THICKFRAME.0 | WS_CAPTION.0 | WS_SYSMENU.0
+                        | WS_MINIMIZEBOX.0 | WS_MAXIMIZEBOX.0;
+                    let new_style = style & !(strip as i32);
+                    SetWindowLongW(hwnd_win, GWL_STYLE, new_style);
+
+                    // Force resize to 48×48 physical pixels (bypasses min track size)
+                    let _ = SetWindowPos(
+                        hwnd_win, HWND_TOP,
+                        0, 0,
+                        TOOLBAR_SIZE as i32, TOOLBAR_SIZE as i32,
+                        SWP_NOMOVE | SWP_NOZORDER | SWP_FRAMECHANGED,
+                    );
+                }
+                info!("Toolbar window: {}x{} px, WS_EX_NOACTIVATE, no frame", TOOLBAR_SIZE, TOOLBAR_SIZE);
             }
             Err(e) => warn!("Failed to get toolbar HWND: {}", e),
         }
@@ -96,7 +94,8 @@ pub fn show_toolbar_at(app_handle: &AppHandle, mouse_x: i32, mouse_y: i32) {
     if let Some(window) = app_handle.get_webview_window("toolbar") {
         let scale = get_scale_at(mouse_x, mouse_y);
         let (screen_w, screen_h, _) = get_primary_screen_info(app_handle);
-        let (toolbar_w, toolbar_h) = get_toolbar_size();
+        let toolbar_w = TOOLBAR_SIZE;
+        let toolbar_h = TOOLBAR_SIZE;
         let toolbar_w_logical = toolbar_w / scale;
         let toolbar_h_logical = toolbar_h / scale;
 
@@ -141,7 +140,7 @@ pub fn show_preview_at(app_handle: &AppHandle, mouse_x: i32, mouse_y: i32) {
     if let Some(window) = app_handle.get_webview_window("preview") {
         let scale = get_scale_at(mouse_x, mouse_y);
         let (screen_w, screen_h, _) = get_primary_screen_info(app_handle);
-        let (_, toolbar_h) = get_toolbar_size();
+        let toolbar_h = TOOLBAR_SIZE;
         let toolbar_h_logical = toolbar_h / scale;
 
         // Convert physical to logical coordinates
