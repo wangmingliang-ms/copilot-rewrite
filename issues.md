@@ -43,6 +43,22 @@
 - **理想方案**: 加 10 分钟超时
 - **来源**: Code Review HI-1
 
+## Distribution
+
+### P3: Windows SmartScreen 警告 "Unknown Publisher"
+- **现状**: 下载 exe 安装包时 Edge 显示警告，运行时 SmartScreen 弹窗 "Windows protected your PC"
+- **原因**: 没有代码签名证书（code signing certificate），Publisher 显示为 Unknown
+- **方案**:
+  - 普通代码签名证书（~$200-400/年）— SmartScreen 警告在用户量积累后逐渐消失
+  - EV 代码签名证书（~$400+/年）— 立即消除 SmartScreen 警告
+  - Tauri 支持在 `tauri.conf.json` 中配置 Windows 代码签名
+- **决定**: 暂不处理，自用阶段直接 "Run anyway"。分发给其他人时再考虑购买证书
+
+### P2: Private Repo 导致 Auto-Updater 404
+- **现状**: 已修复 — repo 改为 public
+- **原因**: Private repo 的 release assets 无法匿名访问，updater 请求 `latest.json` 返回 404
+- **相关 commit**: repo visibility → public
+
 ## UX
 
 ### P3: Replace 操作无法撤销
