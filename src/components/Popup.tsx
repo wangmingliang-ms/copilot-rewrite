@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useMemo, type FC } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { marked } from "marked";
+import iconImg from "../assets/icon-48.png";
 import { SelectionInfo, ProcessResponse } from "../hooks/useSelection";
 
 type PopupState = "icon" | "spinning" | "expanded" | "error";
@@ -212,15 +213,12 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
             style={{ cursor: "pointer", borderRadius: "14px" }}
             title="Translate & Polish"
           >
-            <svg className="w-6 h-6 transition-transform group-hover:scale-110" viewBox="0 0 24 24" fill="none" stroke="#0078D4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M5 8l4-4 4 4" />
-              <path d="M9 4v8" />
-              <path d="M12 20l3-6 3 6" />
-              <path d="M13.5 17h3" />
-              <path d="M2 16h4" />
-              <path d="M6 12c0 3-2.5 4-2.5 4" />
-              <path d="M6 12c0 0 2 1 4 1" />
-            </svg>
+            <img
+              src={iconImg}
+              alt="Translate"
+              className="w-7 h-7 transition-transform group-hover:scale-110"
+              draggable={false}
+            />
           </button>
         </div>
       </div>

@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="bg4" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#F59E0B"/>
+      <stop offset="100%" stop-color="#D97706"/>
+    </linearGradient>
+    <linearGradient id="wand" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="100%" stop-color="#FDE68A"/>
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" rx="56" fill="url(#bg4)"/>
+  <!-- Wand body (diagonal) -->
+  <g transform="rotate(-45, 128, 128)">
+    <rect x="68" y="120" width="140" height="16" rx="4" fill="url(#wand)"/>
+    <rect x="188" y="112" width="24" height="32" rx="4" fill="white" opacity="0.9"/>
+  </g>
+  <!-- Sparkles -->
+  <!-- Star 1 (top right) -->
+  <path d="M188 52 L192 64 L204 68 L192 72 L188 84 L184 72 L172 68 L184 64 Z" fill="white"/>
+  <!-- Star 2 (small, upper) -->
+  <path d="M160 36 L162 44 L170 46 L162 48 L160 56 L158 48 L150 46 L158 44 Z" fill="white" opacity="0.7"/>
+  <!-- Star 3 (right side) -->
+  <path d="M216 96 L218 104 L226 106 L218 108 L216 116 L214 108 L206 106 L214 104 Z" fill="white" opacity="0.6"/>
+  <!-- Star 4 (top left area) -->
+  <path d="M80 56 L82 62 L88 64 L82 66 L80 72 L78 66 L72 64 L78 62 Z" fill="white" opacity="0.5"/>
+  <!-- Glow dots -->
+  <circle cx="144" cy="68" r="3" fill="white" opacity="0.5"/>
+  <circle cx="208" cy="44" r="2.5" fill="white" opacity="0.4"/>
+  <circle cx="228" cy="76" r="2" fill="white" opacity="0.3"/>
+</svg>
