@@ -429,10 +429,12 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
                   await invoke("update_settings", { settings: { ...s, beast_mode: newVal } });
                 } catch {}
               }}
-              className={`flex items-center justify-center w-7 h-7 rounded-lg transition-colors ${beastMode ? "text-amber-600 bg-amber-50 hover:bg-amber-100" : "text-gray-400 hover:bg-gray-200/60 hover:text-gray-600"}`}
+              className={`flex items-center justify-center w-7 h-7 rounded-lg transition-colors ${beastMode ? "text-blue-500 bg-blue-50 hover:bg-blue-100" : "text-gray-400 hover:bg-gray-200/60 hover:text-gray-600"}`}
               title={beastMode ? "Beast Mode ON — click to disable" : "Beast Mode OFF — click to enable"}
             >
-              <span className="text-sm leading-none">🐺</span>
+              <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M1 2.5L3.5 8l-1 2.5C2.5 10.5 4 13 8 14c4-1 5.5-3.5 5.5-3.5L12.5 8 15 2.5 11.5 5 8 1 4.5 5z" />
+              </svg>
             </button>
             <button
               onClick={() => invoke("open_settings").catch(() => {})}
