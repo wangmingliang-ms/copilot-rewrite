@@ -288,37 +288,38 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
           maxHeight: "calc(100% - 40px)",
         }}
       >
-        {/* Scrollable content area — translation + original */}
+        {/* Translation — scrollable, takes remaining space */}
         <div className="flex-1 min-h-0 overflow-auto px-5 pt-5 pb-3" style={{ userSelect: "text", WebkitUserSelect: "text" }}>
-          {/* Translation */}
           <div
             className="text-[13.5px] leading-[1.7] text-gray-800 prose prose-sm max-w-none prose-p:my-1 prose-li:my-0.5 prose-ul:my-1.5 prose-ol:my-1.5 prose-headings:my-1.5 prose-strong:text-gray-900"
             dangerouslySetInnerHTML={{ __html: translatedHtml }}
           />
-
-          {/* Reorganized — collapsible, scrolls with content */}
-          {reorganizedHtml && (
-            <div className="mt-3 pt-3 border-t border-gray-100">
-              <button
-                onClick={() => setShowOriginal(!showOriginal)}
-                className="flex items-center gap-1 text-[11px] text-gray-400 hover:text-gray-600 transition-colors"
-              >
-                <svg
-                  className={`w-3 h-3 transition-transform ${showOriginal ? "rotate-90" : ""}`}
-                  viewBox="0 0 12 12" fill="currentColor"
-                >
-                  <path d="M4.5 2l5 4-5 4V2z" />
-                </svg>
-                <span className="font-medium tracking-wide uppercase">Original (reorganized)</span>
-              </button>
-              {showOriginal && (
-                <div className="mt-2 text-[12px] leading-[1.55] text-gray-400 prose prose-sm max-w-none prose-p:my-0.5 prose-li:my-0.5 prose-ul:my-1 prose-ol:my-1">
-                  <div dangerouslySetInnerHTML={{ __html: reorganizedHtml }} />
-                </div>
-              )}
-            </div>
-          )}
         </div>
+
+        {/* Reorganized — fixed between translation and action bar */}
+        {reorganizedHtml && (
+          <div className="flex-shrink-0 px-5 pb-2 border-t border-gray-100">
+            <button
+              onClick={() => setShowOriginal(!showOriginal)}
+              className="flex items-center gap-1 text-[11px] text-gray-400 hover:text-gray-600 transition-colors mt-2"
+            >
+              <svg
+                className={`w-3 h-3 transition-transform ${showOriginal ? "rotate-90" : ""}`}
+                viewBox="0 0 12 12" fill="currentColor"
+              >
+                <path d="M4.5 2l5 4-5 4V2z" />
+              </svg>
+              <span className="font-medium tracking-wide uppercase">Original (reorganized)</span>
+            </button>
+            {showOriginal && (
+              <div className="mt-2 overflow-auto text-[12px] leading-[1.55] text-gray-400 prose prose-sm max-w-none prose-p:my-0.5 prose-li:my-0.5 prose-ul:my-1 prose-ol:my-1"
+                style={{ maxHeight: "120px", userSelect: "text", WebkitUserSelect: "text" }}
+              >
+                <div dangerouslySetInnerHTML={{ __html: reorganizedHtml }} />
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Action bar — always visible at bottom */}
         <div className="flex-shrink-0 flex items-center justify-between border-t border-gray-100 px-3 py-2"
