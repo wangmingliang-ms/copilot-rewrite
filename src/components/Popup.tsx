@@ -286,32 +286,38 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
         }}
       >
         {/* Content area */}
-        <div className="overflow-auto flex-1 px-5 py-4" style={{ maxHeight: "340px", userSelect: "text", WebkitUserSelect: "text" }}>
+        <div className="overflow-auto flex-1 px-5 pt-5 pb-3" style={{ maxHeight: "340px", userSelect: "text", WebkitUserSelect: "text" }}>
           {reorganizedHtml && (
             <>
-              <div className="flex items-center gap-1.5 mb-2">
-                <div className="w-1 h-3.5 rounded-full bg-gray-300" />
-                <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Reorganized</span>
+              {/* Reorganized section — muted card */}
+              <div className="rounded-lg px-3.5 py-3 mb-3"
+                style={{ background: "#f8f9fa", border: "1px solid #eef0f2" }}
+              >
+                <div className="flex items-center gap-1.5 mb-1.5">
+                  <div className="w-1 h-3 rounded-full bg-gray-300" />
+                  <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Reorganized</span>
+                </div>
+                <div
+                  className="text-[13px] leading-[1.6] text-gray-500 prose prose-sm max-w-none prose-p:my-0.5 prose-li:my-0.5 prose-ul:my-1 prose-ol:my-1 prose-headings:my-1.5"
+                  dangerouslySetInnerHTML={{ __html: reorganizedHtml }}
+                />
               </div>
-              <div
-                className="text-[13px] leading-[1.6] text-gray-500 prose prose-sm max-w-none prose-p:my-1 prose-li:my-0.5 prose-ul:my-1 prose-ol:my-1 prose-headings:my-1.5"
-                dangerouslySetInnerHTML={{ __html: reorganizedHtml }}
-              />
-              <div className="my-3 border-t border-gray-100" />
-              <div className="flex items-center gap-1.5 mb-2">
-                <div className="w-1 h-3.5 rounded-full bg-copilot-blue" />
-                <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Translation</span>
+
+              {/* Translation label */}
+              <div className="flex items-center gap-1.5 mb-1.5">
+                <div className="w-1 h-3 rounded-full bg-copilot-blue" />
+                <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Translation</span>
               </div>
             </>
           )}
           <div
-            className="text-[13px] leading-[1.6] text-gray-800 prose prose-sm max-w-none prose-p:my-1 prose-li:my-0.5 prose-ul:my-1 prose-ol:my-1 prose-headings:my-1.5 prose-strong:text-gray-900"
+            className="text-[13px] leading-[1.6] text-gray-800 prose prose-sm max-w-none prose-p:my-0.5 prose-li:my-0.5 prose-ul:my-1 prose-ol:my-1 prose-headings:my-1.5 prose-strong:text-gray-900"
             dangerouslySetInnerHTML={{ __html: translatedHtml }}
           />
         </div>
 
         {/* Action bar */}
-        <div className="flex items-center justify-between border-t border-gray-100 px-3 py-2"
+        <div className="flex items-center justify-between border-t border-gray-100 px-3 py-1.5"
           style={{ background: "rgba(249,250,251,0.8)" }}
         >
           <button
