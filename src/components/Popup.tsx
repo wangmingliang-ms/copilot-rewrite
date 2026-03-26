@@ -247,7 +247,7 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
   if (state === "error") {
     return (
       <div className="w-screen h-screen" style={{ padding: "20px", background: "transparent" }}>
-        <div className="flex flex-col rounded-2xl h-full overflow-hidden"
+        <div className="flex flex-col rounded-lg h-full overflow-hidden"
           style={{
             background: "#fff",
             border: "1px solid rgba(0,0,0,0.08)",
@@ -280,7 +280,7 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
   // ── Expanded state (auto-sized with result) ──
   return (
     <div className="w-screen h-screen" style={{ padding: "20px", background: "transparent" }}>
-      <div className="flex flex-col rounded-2xl overflow-hidden pt-1"
+      <div className="flex flex-col rounded-lg overflow-hidden pt-1"
         style={{
           background: "#fff",
           border: "1px solid rgba(0,0,0,0.08)",
