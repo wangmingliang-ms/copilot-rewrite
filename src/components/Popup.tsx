@@ -428,6 +428,22 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
                   const s = await invoke<{ model: string; beast_mode: boolean }>("get_settings");
                   await invoke("update_settings", { settings: { ...s, beast_mode: newVal } });
                 } catch {}
+                // Auto-refresh with new mode
+                if (selection && !refreshing) {
+                  setRefreshing(true);
+                  refreshingRef.current = true;
+                  setError(null);
+                  try {
+                    await invoke("process_and_show_preview", {
+                      request: { text: selection.text, action: "TranslateAndPolish", is_refresh: true },
+                    });
+                  } catch (err) {
+                    setError(err instanceof Error ? err.message : String(err));
+                    setState("error");
+                    setRefreshing(false);
+                    refreshingRef.current = false;
+                  }
+                }
               }}
               className={`flex items-center justify-center w-7 h-7 rounded-lg transition-colors ${beastMode ? "text-blue-500 bg-blue-50 hover:bg-blue-100" : "text-gray-400 hover:bg-gray-200/60 hover:text-gray-600"}`}
               title={beastMode ? "Beast Mode: ON\nLLM will fully rewrite with creative freedom — adds examples, restructures, crafts the best version.\nClick to disable." : "Beast Mode: OFF\nClick to enable creative rewriting."}
