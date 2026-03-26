@@ -395,6 +395,16 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
             {currentModel && (
               <span className="text-[10px] text-gray-400 font-mono truncate max-w-[120px]" title={currentModel}>{currentModel}</span>
             )}
+            <button
+              onClick={() => invoke("open_settings").catch(() => {})}
+              className="flex items-center justify-center w-7 h-7 rounded-lg text-gray-400 hover:bg-gray-200/60 hover:text-gray-600 transition-colors"
+              title="Settings"
+            >
+              <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="8" cy="8" r="2.5" />
+                <path d="M13.5 8a5.5 5.5 0 0 0-.1-.9l1.4-1.1-1.2-2-1.7.6a5.3 5.3 0 0 0-1.6-.9L10 2H8L7.7 3.7a5.3 5.3 0 0 0-1.6.9l-1.7-.6-1.2 2 1.4 1.1a5.6 5.6 0 0 0 0 1.8l-1.4 1.1 1.2 2 1.7-.6c.5.4 1 .7 1.6.9L8 14h2l.3-1.7c.6-.2 1.1-.5 1.6-.9l1.7.6 1.2-2-1.4-1.1a5.5 5.5 0 0 0 .1-.9z" />
+              </svg>
+            </button>
           </div>
           <div className="flex items-center gap-1">
             {/* Markdown/Preview toggle */}
@@ -432,16 +442,6 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
               <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                 <rect x="5" y="5" width="9" height="9" rx="1.5" />
                 <path d="M11 5V3.5A1.5 1.5 0 0 0 9.5 2h-6A1.5 1.5 0 0 0 2 3.5v6A1.5 1.5 0 0 0 3.5 11H5" />
-              </svg>
-            </button>
-            <button
-              onClick={() => invoke("open_settings").catch(() => {})}
-              className="flex items-center justify-center w-7 h-7 rounded-lg text-gray-400 hover:bg-gray-200/60 hover:text-gray-600 transition-colors"
-              title="Settings"
-            >
-              <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="8" cy="8" r="2.5" />
-                <path d="M13.5 8a5.5 5.5 0 0 0-.1-.9l1.4-1.1-1.2-2-1.7.6a5.3 5.3 0 0 0-1.6-.9L10 2H8L7.7 3.7a5.3 5.3 0 0 0-1.6.9l-1.7-.6-1.2 2 1.4 1.1a5.6 5.6 0 0 0 0 1.8l-1.4 1.1 1.2 2 1.7-.6c.5.4 1 .7 1.6.9L8 14h2l.3-1.7c.6-.2 1.1-.5 1.6-.9l1.7.6 1.2-2-1.4-1.1a5.5 5.5 0 0 0 .1-.9z" />
               </svg>
             </button>
             <button
