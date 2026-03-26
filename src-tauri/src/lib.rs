@@ -24,6 +24,8 @@ pub struct AppState {
     pub preview_visible: Mutex<bool>,
     /// The currently selected text (if any)
     pub current_selection: Mutex<Option<SelectionInfo>>,
+    /// Incremented on dismiss — signals monitor to reset its local state
+    pub selection_generation: std::sync::atomic::AtomicU64,
     /// User settings
     pub settings: Mutex<Settings>,
     /// Copilot API client
@@ -47,6 +49,7 @@ impl AppState {
             enabled: Mutex::new(true),
             preview_visible: Mutex::new(false),
             current_selection: Mutex::new(None),
+            selection_generation: std::sync::atomic::AtomicU64::new(0),
             settings: Mutex::new(settings),
             copilot_client: copilot::CopilotClient::new(),
             pending_device_code: Mutex::new(None),
@@ -455,7 +458,7 @@ fn is_enabled(state: tauri::State<'_, Arc<AppState>>) -> bool {
     *state.enabled.lock()
 }
 
-/// Dismiss the popup (hide + shrink back to icon size) and briefly pause monitoring
+/// Dismiss the popup (hide + shrink back to icon size) and signal monitor to reset
 #[tauri::command]
 async fn dismiss_popup(
     app: tauri::AppHandle,
@@ -464,13 +467,8 @@ async fn dismiss_popup(
     overlay::hide_popup(&app);
     *state.preview_visible.lock() = false;
     *state.current_selection.lock() = None;
-    // Briefly pause monitoring so popup doesn't immediately re-appear
-    *state.enabled.lock() = false;
-    let state_clone = state.inner().clone();
-    std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_millis(500));
-        *state_clone.enabled.lock() = true;
-    });
+    // Bump generation — monitor will clear its local state when it sees this
+    state.selection_generation.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     Ok(())
 }
 

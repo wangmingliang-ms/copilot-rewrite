@@ -40,6 +40,7 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
     let mut last_selection: Option<String> = None;
     let mut last_change_time = Instant::now();
     let mut debounce_text: Option<String> = None;
+    let mut seen_generation = state.selection_generation.load(std::sync::atomic::Ordering::Relaxed);
 
     loop {
         // Check if monitoring is enabled
@@ -49,6 +50,15 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
             debounce_text = None;
             std::thread::sleep(Duration::from_millis(500));
             continue;
+        }
+
+        // Check if dismiss happened (generation bumped)
+        let current_gen = state.selection_generation.load(std::sync::atomic::Ordering::Relaxed);
+        if current_gen != seen_generation {
+            debug!("Generation changed ({} → {}) — resetting monitor state", seen_generation, current_gen);
+            last_selection = None;
+            debounce_text = None;
+            seen_generation = current_gen;
         }
 
         let preview_is_visible = *state.preview_visible.lock();
