@@ -68,6 +68,9 @@ pub struct SelectionInfo {
     /// HWND of the source application window (for restoring focus)
     #[serde(skip)]
     pub source_hwnd: Option<isize>,
+    /// Bounding rect of the input element (physical pixels, optional)
+    #[serde(skip)]
+    pub input_rect: Option<(i32, i32, i32, i32)>, // (x, y, w, h)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

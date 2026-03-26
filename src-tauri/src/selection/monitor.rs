@@ -87,12 +87,22 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
                                 // Debounce complete — show popup icon
                                 let mouse_pos = get_cursor_position();
                                 let source_hwnd = unsafe { GetForegroundWindow().0 as isize };
+
+                                // Get bounding rect of the focused input element
+                                let input_rect = if let Some(ref uia_engine) = uia {
+                                    uia_engine.get_focused_element_rect()
+                                        .map(|r| (r.x, r.y, r.width, r.height))
+                                } else {
+                                    None
+                                };
+
                                 let selection_info = SelectionInfo {
                                     text: debounced.clone(),
                                     mouse_x: mouse_pos.0,
                                     mouse_y: mouse_pos.1,
                                     source: SelectionSource::UIA,
                                     source_hwnd: Some(source_hwnd),
+                                    input_rect,
                                 };
 
                                 show_popup(app_handle.clone(), &state, selection_info);
@@ -145,8 +155,8 @@ fn show_popup(app_handle: AppHandle, state: &Arc<AppState>, info: SelectionInfo)
     // Store the current selection in state
     *state.current_selection.lock() = Some(info.clone());
 
-    // Show popup icon at cursor position
-    overlay::show_popup_icon(&app_handle, info.mouse_x, info.mouse_y);
+    // Show popup icon at cursor position (with input rect for smart positioning)
+    overlay::show_popup_icon(&app_handle, info.mouse_x, info.mouse_y, info.input_rect);
 
     // Emit event to frontend with the selection info
     if let Err(e) = app_handle.emit("selection-detected", &info) {
