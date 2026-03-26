@@ -287,21 +287,23 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
           boxShadow: "0 8px 32px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.06)",
         }}
       >
-        {/* Content area — padding stays fixed, content scrolls inside */}
+        {/* Translation — scrollable */}
         <div className="px-5 pt-5 pb-3">
-          <div className="overflow-auto" style={{ maxHeight: "320px", userSelect: "text", WebkitUserSelect: "text" }}>
-          {/* Translation — hero content, no label needed when it's the only section */}
-          <div
-            className="text-[13.5px] leading-[1.7] text-gray-800 prose prose-sm max-w-none prose-p:my-1 prose-li:my-0.5 prose-ul:my-1.5 prose-ol:my-1.5 prose-headings:my-1.5 prose-strong:text-gray-900"
-            dangerouslySetInnerHTML={{ __html: translatedHtml }}
-          />
+          <div className="overflow-auto" style={{ maxHeight: "280px", userSelect: "text", WebkitUserSelect: "text" }}>
+            <div
+              className="text-[13.5px] leading-[1.7] text-gray-800 prose prose-sm max-w-none prose-p:my-1 prose-li:my-0.5 prose-ul:my-1.5 prose-ol:my-1.5 prose-headings:my-1.5 prose-strong:text-gray-900"
+              dangerouslySetInnerHTML={{ __html: translatedHtml }}
+            />
+          </div>
+        </div>
 
-          {/* Reorganized — collapsible reference */}
-          {reorganizedHtml && (
-            <div className="mt-3 pt-3 border-t border-gray-100">
+        {/* Reorganized — fixed below translation, above action bar */}
+        {reorganizedHtml && (
+          <div className="px-5 pb-2">
+            <div className="pt-2 border-t border-gray-100">
               <button
                 onClick={() => setShowOriginal(!showOriginal)}
-                className="flex items-center gap-1 text-[11px] text-gray-400 hover:text-gray-600 transition-colors mb-0"
+                className="flex items-center gap-1 text-[11px] text-gray-400 hover:text-gray-600 transition-colors"
               >
                 <svg
                   className={`w-3 h-3 transition-transform ${showOriginal ? "rotate-90" : ""}`}
@@ -312,14 +314,15 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
                 <span className="font-medium tracking-wide uppercase">Original (reorganized)</span>
               </button>
               {showOriginal && (
-                <div className="mt-2 text-[12px] leading-[1.55] text-gray-400 prose prose-sm max-w-none prose-p:my-0.5 prose-li:my-0.5 prose-ul:my-1 prose-ol:my-1">
+                <div className="mt-2 overflow-auto text-[12px] leading-[1.55] text-gray-400 prose prose-sm max-w-none prose-p:my-0.5 prose-li:my-0.5 prose-ul:my-1 prose-ol:my-1"
+                  style={{ maxHeight: "120px" }}
+                >
                   <div dangerouslySetInnerHTML={{ __html: reorganizedHtml }} />
                 </div>
               )}
             </div>
-          )}
           </div>
-        </div>
+        )}
 
         {/* Action bar */}
         <div className="flex items-center justify-between border-t border-gray-100 px-3 py-2"
