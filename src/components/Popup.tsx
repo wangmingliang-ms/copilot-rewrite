@@ -50,18 +50,32 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
     };
   }, []);
 
-  // Split result into reorganized + translated sections (divided by "---")
+  // Parse result — LLM returns JSON {"reorganized": "...", "translated": "..."}
   const { reorganized, translated } = useMemo(() => {
     if (!result?.result) return { reorganized: "", translated: "" };
-    const text = result.result;
-    const dividerMatch = text.match(/\n---\n/);
-    if (dividerMatch && dividerMatch.index !== undefined) {
-      return {
-        reorganized: text.slice(0, dividerMatch.index).trim(),
-        translated: text.slice(dividerMatch.index + dividerMatch[0].length).trim(),
-      };
+    const text = result.result.trim();
+    try {
+      // Strip markdown code fences if LLM wraps in ```json ... ```
+      const cleaned = text.replace(/^```(?:json)?\s*\n?/i, "").replace(/\n?```\s*$/, "");
+      const parsed = JSON.parse(cleaned);
+      if (parsed.reorganized && parsed.translated) {
+        return {
+          reorganized: String(parsed.reorganized),
+          translated: String(parsed.translated),
+        };
+      }
+    } catch {
+      // JSON parse failed — fallback: try "---" divider
+      const dividerMatch = text.match(/\n---\n/);
+      if (dividerMatch && dividerMatch.index !== undefined) {
+        return {
+          reorganized: text.slice(0, dividerMatch.index).trim(),
+          translated: text.slice(dividerMatch.index + dividerMatch[0].length).trim(),
+        };
+      }
     }
-    return { reorganized: "", translated: text.trim() };
+    // No structure found — treat entire text as translated
+    return { reorganized: "", translated: text };
   }, [result?.result]);
 
   // Render markdown
