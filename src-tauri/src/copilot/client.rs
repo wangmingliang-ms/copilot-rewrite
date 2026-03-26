@@ -163,6 +163,8 @@ struct ChatMessage {
 #[derive(Debug, Deserialize)]
 struct ChatCompletionResponse {
     choices: Vec<Choice>,
+    #[serde(default)]
+    model: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -426,6 +428,7 @@ impl CopilotClient {
         // Parse SSE stream response
         let body = response.text().await.context("Failed to read response body")?;
         let mut result = String::new();
+        let mut actual_model_logged = false;
         
         for line in body.lines() {
             let line = line.trim();
@@ -434,6 +437,15 @@ impl CopilotClient {
                     break;
                 }
                 if let Ok(chunk) = serde_json::from_str::<ChatCompletionResponse>(data) {
+                    // Log the actual model used by the API (from first chunk)
+                    if !actual_model_logged {
+                        info!(
+                            "API responding with model: {} (requested: {})",
+                            chunk.model.as_deref().unwrap_or("unknown"),
+                            model
+                        );
+                        actual_model_logged = true;
+                    }
                     if let Some(choice) = chunk.choices.first() {
                         if let Some(ref delta) = choice.delta {
                             if let Some(ref content) = delta.content {
