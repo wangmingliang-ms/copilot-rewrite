@@ -283,7 +283,7 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
             <>
               <div className="text-[10px] font-medium text-gray-400 uppercase tracking-wider mb-1">Reorganized</div>
               <div
-                className="text-sm leading-relaxed text-gray-600 prose prose-sm max-w-none"
+                className="text-sm leading-snug text-gray-600 prose prose-sm max-w-none prose-p:my-1 prose-li:my-0 prose-ul:my-1 prose-ol:my-1 prose-headings:my-1"
                 dangerouslySetInnerHTML={{ __html: reorganizedHtml }}
               />
               <hr className="my-2 border-gray-200" />
@@ -291,7 +291,7 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
             </>
           )}
           <div
-            className="text-sm leading-relaxed text-gray-800 prose prose-sm max-w-none"
+            className="text-sm leading-snug text-gray-800 prose prose-sm max-w-none prose-p:my-1 prose-li:my-0 prose-ul:my-1 prose-ol:my-1 prose-headings:my-1"
             dangerouslySetInnerHTML={{ __html: translatedHtml }}
           />
         </div>

@@ -36,7 +36,7 @@ const BUTTONS_HEIGHT: f64 = 40.0;
 /// Text area padding
 const TEXT_PADDING: f64 = 28.0;
 /// Approximate line height
-const LINE_HEIGHT_PX: f64 = 22.0;
+const LINE_HEIGHT_PX: f64 = 18.0;
 /// Approximate characters per line
 const CHARS_PER_LINE: f64 = 50.0;
 
