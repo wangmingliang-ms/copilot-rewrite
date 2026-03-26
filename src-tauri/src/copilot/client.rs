@@ -124,7 +124,9 @@ pub struct CopilotModel {
     #[serde(default)]
     pub version: String,
     #[serde(default)]
-    pub owned_by: String,
+    pub vendor: String,
+    #[serde(default)]
+    pub preview: bool,
 }
 
 /// Response from /models endpoint
@@ -141,7 +143,19 @@ struct ModelEntry {
     #[serde(default)]
     version: Option<String>,
     #[serde(default)]
-    owned_by: Option<String>,
+    vendor: Option<String>,
+    #[serde(default)]
+    model_picker_enabled: Option<bool>,
+    #[serde(default)]
+    preview: Option<bool>,
+    #[serde(default)]
+    capabilities: Option<ModelCapabilities>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ModelCapabilities {
+    #[serde(default, rename = "type")]
+    model_type: Option<String>,
 }
 
 /// Client for the GitHub Copilot API
@@ -389,37 +403,30 @@ impl CopilotClient {
         let models: Vec<CopilotModel> = models_resp
             .data
             .into_iter()
+            // Filter: only model_picker_enabled=true and chat-capable models
+            .filter(|m| {
+                // Use official model_picker_enabled flag — false means deprecated/hidden
+                if !m.model_picker_enabled.unwrap_or(false) {
+                    return false;
+                }
+                // Skip non-chat models (e.g. embeddings)
+                if let Some(ref caps) = m.capabilities {
+                    if let Some(ref t) = caps.model_type {
+                        if t != "chat" { return false; }
+                    }
+                }
+                // Skip internal-only models
+                let name = m.name.as_deref().unwrap_or("");
+                if name.to_lowercase().contains("internal") { return false; }
+                true
+            })
             .map(|m| CopilotModel {
                 id: m.id.clone(),
                 name: m.name.unwrap_or_else(|| m.id.clone()),
                 version: m.version.unwrap_or_default(),
-                owned_by: m.owned_by.unwrap_or_default(),
+                vendor: m.vendor.unwrap_or_default(),
+                preview: m.preview.unwrap_or(false),
             })
-            // Filter out non-chat models, deprecated models, and internal-only
-            .filter(|m| {
-                let id = m.id.as_str();
-                let name_lower = m.name.to_lowercase();
-                // Skip embeddings
-                if id.contains("embedding") { return false; }
-                // Skip internal-only models
-                if name_lower.contains("internal") { return false; }
-                // Skip deprecated old models
-                if id.starts_with("gpt-3.5") || (id.starts_with("gpt-4") && !id.starts_with("gpt-4.") && !id.starts_with("gpt-4o")) { return false; }
-                // Skip date-suffixed variants (e.g. gpt-4o-2024-11-20) — keep only the alias
-                if id.contains("-2024-") || id.contains("-2025-") { return false; }
-                // Skip preview aliases that duplicate main models
-                if id == "gpt-4-o-preview" { return false; }
-                // Skip router/account-prefixed models
-                if id.starts_with("accounts/") { return false; }
-                true
-            })
-            .collect();
-
-        // Deduplicate by name — keep the first (shortest id) for each name
-        let mut seen_names = std::collections::HashSet::new();
-        let models: Vec<CopilotModel> = models
-            .into_iter()
-            .filter(|m| seen_names.insert(m.name.clone()))
             .collect();
 
         if models.is_empty() {
@@ -433,13 +440,12 @@ impl CopilotClient {
     /// Fallback model list when API is unavailable
     fn default_models() -> Vec<CopilotModel> {
         vec![
-            CopilotModel { id: "claude-sonnet-4".into(), name: "Claude Sonnet 4".into(), version: String::new(), owned_by: "Anthropic".into() },
-            CopilotModel { id: "gpt-4o".into(), name: "GPT-4o".into(), version: String::new(), owned_by: "OpenAI".into() },
-            CopilotModel { id: "gpt-4o-mini".into(), name: "GPT-4o Mini".into(), version: String::new(), owned_by: "OpenAI".into() },
-            CopilotModel { id: "claude-sonnet-4.5".into(), name: "Claude Sonnet 4.5".into(), version: String::new(), owned_by: "Anthropic".into() },
-            CopilotModel { id: "claude-haiku-4.5".into(), name: "Claude Haiku 4.5".into(), version: String::new(), owned_by: "Anthropic".into() },
-            CopilotModel { id: "gpt-5-mini".into(), name: "GPT-5 Mini".into(), version: String::new(), owned_by: "Azure OpenAI".into() },
-            CopilotModel { id: "gemini-2.5-pro".into(), name: "Gemini 2.5 Pro".into(), version: String::new(), owned_by: "Google".into() },
+            CopilotModel { id: "claude-sonnet-4".into(), name: "Claude Sonnet 4".into(), version: String::new(), vendor: "Anthropic".into(), preview: false },
+            CopilotModel { id: "gpt-4o".into(), name: "GPT-4o".into(), version: String::new(), vendor: "OpenAI".into(), preview: false },
+            CopilotModel { id: "gpt-5-mini".into(), name: "GPT-5 Mini".into(), version: String::new(), vendor: "OpenAI".into(), preview: false },
+            CopilotModel { id: "claude-sonnet-4.5".into(), name: "Claude Sonnet 4.5".into(), version: String::new(), vendor: "Anthropic".into(), preview: false },
+            CopilotModel { id: "claude-haiku-4.5".into(), name: "Claude Haiku 4.5".into(), version: String::new(), vendor: "Anthropic".into(), preview: false },
+            CopilotModel { id: "gemini-2.5-pro".into(), name: "Gemini 2.5 Pro".into(), version: String::new(), vendor: "Google".into(), preview: false },
         ]
     }
 }

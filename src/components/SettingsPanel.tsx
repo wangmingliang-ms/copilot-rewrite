@@ -29,7 +29,8 @@ interface CopilotModel {
   id: string;
   name: string;
   version: string;
-  owned_by: string;
+  vendor: string;
+  preview: boolean;
 }
 
 const SettingsPanel: FC = () => {
@@ -272,7 +273,7 @@ const SettingsPanel: FC = () => {
             )}
             {models.map((model) => (
               <option key={model.id} value={model.id}>
-                {model.name} — {model.owned_by || model.id}
+                {model.name}{model.preview ? " (Preview)" : ""} — {model.vendor || model.id}
               </option>
             ))}
             {models.length === 0 && settings.model && (
