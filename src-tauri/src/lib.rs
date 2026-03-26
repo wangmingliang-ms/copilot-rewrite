@@ -369,10 +369,11 @@ async fn get_auth_status(state: tauri::State<'_, Arc<AppState>>) -> Result<AuthS
 /// Log out - clear saved auth
 #[tauri::command]
 fn logout(state: tauri::State<'_, Arc<AppState>>) -> Result<(), String> {
-    // Clear token from settings (in memory)
+    // Clear token and model from settings (in memory)
     {
         let mut settings = state.settings.lock();
         settings.api_token.clear();
+        settings.model.clear();
         // Save cleared settings to disk so token doesn't persist across restart
         if let Err(e) = settings.save() {
             warn!("Failed to save settings after logout: {}", e);

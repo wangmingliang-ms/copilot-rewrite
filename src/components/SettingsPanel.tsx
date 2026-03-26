@@ -273,17 +273,27 @@ const SettingsPanel: FC = () => {
           <select
             value={settings.model}
             onChange={(e) => setSettings({ ...settings, model: e.target.value })}
-            className="w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm text-gray-900 focus:border-copilot-blue focus:outline-none focus:ring-1 focus:ring-copilot-blue"
+            className={`w-full rounded-lg border px-3 py-2.5 text-sm text-gray-900 focus:outline-none focus:ring-1 ${
+              !settings.model
+                ? "border-red-400 focus:border-red-500 focus:ring-red-500"
+                : "border-gray-200 focus:border-copilot-blue focus:ring-copilot-blue"
+            }`}
           >
+            {!settings.model && (
+              <option value="" disabled>— Select a model (required) —</option>
+            )}
             {models.map((model) => (
               <option key={model.id} value={model.id}>
                 {model.name} — {model.owned_by || model.id}
               </option>
             ))}
-            {models.length === 0 && (
+            {models.length === 0 && settings.model && (
               <option value={settings.model}>{settings.model}</option>
             )}
           </select>
+          {!settings.model && (
+            <p className="text-xs text-red-500 mt-1">⚠ Model is required. Please select one.</p>
+          )}
         </section>
 
         {/* General Section */}
