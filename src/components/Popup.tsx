@@ -302,12 +302,11 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
   // ── Expanded state (auto-sized with result) ──
   return (
     <div className="w-screen h-screen" style={{ padding: "20px", background: "transparent" }}>
-      <div ref={contentRef} className="flex flex-col rounded-lg overflow-hidden"
+      <div ref={contentRef} className="flex flex-col rounded-lg overflow-hidden h-full"
         style={{
           background: "#fff",
           border: "1px solid rgba(0,0,0,0.08)",
           boxShadow: "0 8px 32px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.06)",
-          maxHeight: "calc(100% - 40px)",
         }}
       >
         {/* Layer 1: Translation (visible when original is collapsed) */}
