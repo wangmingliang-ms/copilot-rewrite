@@ -25,18 +25,6 @@ const LANGUAGES = [
   "Portuguese", "Russian", "Arabic", "Hindi", "Italian",
 ];
 
-const MODELS = [
-  { id: "gpt-4o", name: "GPT-4o", desc: "Fast & capable" },
-  { id: "gpt-4o-mini", name: "GPT-4o Mini", desc: "Fastest, lightweight" },
-  { id: "gpt-4.1", name: "GPT-4.1", desc: "Latest GPT-4" },
-  { id: "gpt-4.1-mini", name: "GPT-4.1 Mini", desc: "Fast GPT-4.1" },
-  { id: "o3-mini", name: "o3 Mini", desc: "Reasoning model" },
-  { id: "o4-mini", name: "o4 Mini", desc: "Latest reasoning" },
-  { id: "claude-3.5-sonnet", name: "Claude 3.5 Sonnet", desc: "Anthropic, balanced" },
-  { id: "claude-3.7-sonnet", name: "Claude 3.7 Sonnet", desc: "Anthropic, latest" },
-  { id: "gemini-2.0-flash", name: "Gemini 2.0 Flash", desc: "Google, fast" },
-];
-
 interface CopilotModel {
   id: string;
   name: string;
@@ -89,8 +77,8 @@ const SettingsPanel: FC = () => {
       const result = await invoke<CopilotModel[]>("list_models");
       setModels(result);
     } catch {
-      // Use fallback static list
-      setModels(MODELS.map(m => ({ id: m.id, name: m.name, version: "", owned_by: m.desc })));
+      // Backend list_models has its own fallback; if it fails too, show empty
+      setModels([]);
     } finally {
       setModelsLoading(false);
     }

@@ -7,18 +7,10 @@ import { SelectionInfo, ProcessResponse } from "../hooks/useSelection";
 
 type PopupState = "icon" | "spinning" | "expanded" | "error";
 
-const MODEL_NAMES: Record<string, string> = {
-  "gpt-4o": "GPT-4o",
-  "gpt-4o-mini": "GPT-4o Mini",
-  "gpt-4.1": "GPT-4.1",
-  "gpt-4.1-mini": "GPT-4.1 Mini",
-  "o3-mini": "o3 Mini",
-  "o4-mini": "o4 Mini",
-  "claude-3.5-sonnet": "Claude 3.5 Sonnet",
-  "claude-3.7-sonnet": "Claude 3.7 Sonnet",
-  "claude-sonnet-4": "Claude Sonnet 4",
-  "gemini-2.0-flash": "Gemini 2.0 Flash",
-};
+interface CopilotModel {
+  id: string;
+  name: string;
+}
 
 interface PopupProps {
   selection: SelectionInfo | null;
@@ -73,9 +65,18 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
     };
   }, []);
 
-  // Load current model from settings
+  // Load current model display name from settings + models list
   useEffect(() => {
-    invoke<{ model: string }>("get_settings").then((s) => setCurrentModel(s.model)).catch(() => {});
+    invoke<{ model: string }>("get_settings").then(async (s) => {
+      if (!s.model) { setCurrentModel(""); return; }
+      try {
+        const models = await invoke<CopilotModel[]>("list_models");
+        const match = models.find((m) => m.id === s.model);
+        setCurrentModel(match ? match.name : s.model);
+      } catch {
+        setCurrentModel(s.model);
+      }
+    }).catch(() => {});
   }, []);
 
   // Parse result — LLM returns JSON {"reorganized": "...", "translated": "..."}
@@ -406,7 +407,7 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
               </svg>
             </button>
             {currentModel && (
-              <span className="text-[10px] text-gray-400 font-mono truncate max-w-[120px]" title={currentModel}>{MODEL_NAMES[currentModel] || currentModel}</span>
+              <span className="text-[10px] text-gray-400 font-mono truncate max-w-[120px]" title={currentModel}>{currentModel}</span>
             )}
             <button
               onClick={() => invoke("open_settings").catch(() => {})}
