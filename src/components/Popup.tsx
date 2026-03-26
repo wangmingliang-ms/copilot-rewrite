@@ -287,37 +287,37 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
       >
         {/* Content area */}
         <div className="overflow-auto px-5 pt-5 pb-3" style={{ maxHeight: "340px", userSelect: "text", WebkitUserSelect: "text" }}>
+          {/* Translation — primary content */}
           {reorganizedHtml && (
-            <>
-              {/* Reorganized section — muted card */}
-              <div className="rounded-lg px-3.5 py-3 mb-3"
-                style={{ background: "#f8f9fa", border: "1px solid #eef0f2" }}
-              >
-                <div className="flex items-center gap-1.5 mb-1.5">
-                  <div className="w-1 h-3 rounded-full bg-gray-300" />
-                  <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Reorganized</span>
-                </div>
-                <div
-                  className="text-[13px] leading-[1.6] text-gray-500 prose prose-sm max-w-none prose-p:my-0.5 prose-li:my-0.5 prose-ul:my-1 prose-ol:my-1 prose-headings:my-1.5"
-                  dangerouslySetInnerHTML={{ __html: reorganizedHtml }}
-                />
-              </div>
-
-              {/* Translation label */}
-              <div className="flex items-center gap-1.5 mb-1.5">
-                <div className="w-1 h-3 rounded-full bg-copilot-blue" />
-                <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Translation</span>
-              </div>
-            </>
+            <div className="flex items-center gap-1.5 mb-2">
+              <div className="w-1 h-3.5 rounded-full bg-copilot-blue" />
+              <span className="text-[10px] font-semibold text-copilot-blue uppercase tracking-wider">Translation</span>
+            </div>
           )}
           <div
-            className="text-[13px] leading-[1.6] text-gray-800 prose prose-sm max-w-none prose-p:my-0.5 prose-li:my-0.5 prose-ul:my-1 prose-ol:my-1 prose-headings:my-1.5 prose-strong:text-gray-900"
+            className="text-[13.5px] leading-[1.65] text-gray-900 prose prose-sm max-w-none prose-p:my-0.5 prose-li:my-0.5 prose-ul:my-1 prose-ol:my-1 prose-headings:my-1.5 prose-strong:text-gray-900"
             dangerouslySetInnerHTML={{ __html: translatedHtml }}
           />
+
+          {/* Reorganized — secondary reference */}
+          {reorganizedHtml && (
+            <div className="mt-3 rounded-lg px-3.5 py-2.5"
+              style={{ background: "#f8f9fa", border: "1px solid #eef0f2" }}
+            >
+              <div className="flex items-center gap-1.5 mb-1.5">
+                <div className="w-1 h-3 rounded-full bg-gray-300" />
+                <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Original (reorganized)</span>
+              </div>
+              <div
+                className="text-[12px] leading-[1.55] text-gray-400 prose prose-sm max-w-none prose-p:my-0.5 prose-li:my-0.5 prose-ul:my-1 prose-ol:my-1 prose-headings:my-1.5"
+                dangerouslySetInnerHTML={{ __html: reorganizedHtml }}
+              />
+            </div>
+          )}
         </div>
 
         {/* Action bar */}
-        <div className="flex items-center justify-between border-t border-gray-100 px-3 py-1.5"
+        <div className="flex items-center justify-between border-t border-gray-100 px-3 py-2"
           style={{ background: "rgba(249,250,251,0.8)" }}
         >
           <button
