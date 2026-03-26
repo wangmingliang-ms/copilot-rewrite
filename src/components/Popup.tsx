@@ -26,6 +26,22 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
   const [currentModel, setCurrentModel] = useState<string>("");
   const [beastMode, setBeastMode] = useState<boolean>(false);
 
+  // Refresh settings (model name + beast mode) from backend
+  const refreshSettings = useCallback(async () => {
+    try {
+      const s = await invoke<{ model: string; beast_mode: boolean }>("get_settings");
+      setBeastMode(s.beast_mode || false);
+      if (!s.model) { setCurrentModel(""); return; }
+      try {
+        const models = await invoke<CopilotModel[]>("list_models");
+        const match = models.find((m) => m.id === s.model);
+        setCurrentModel(match ? match.name : s.model);
+      } catch {
+        setCurrentModel(s.model);
+      }
+    } catch { /* ignore */ }
+  }, []);
+
   // Listen for backend events
   useEffect(() => {
     const unResult = listen<ProcessResponse>("show-preview-result", (event) => {
@@ -56,6 +72,7 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
       setState("icon");
       setResult(null);
       setError(null);
+      refreshSettings();
     });
 
     return () => {
@@ -66,20 +83,10 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
     };
   }, []);
 
-  // Load current model display name from settings + models list
+  // Load settings on mount
   useEffect(() => {
-    invoke<{ model: string; beast_mode: boolean }>("get_settings").then(async (s) => {
-      setBeastMode(s.beast_mode || false);
-      if (!s.model) { setCurrentModel(""); return; }
-      try {
-        const models = await invoke<CopilotModel[]>("list_models");
-        const match = models.find((m) => m.id === s.model);
-        setCurrentModel(match ? match.name : s.model);
-      } catch {
-        setCurrentModel(s.model);
-      }
-    }).catch(() => {});
-  }, []);
+    refreshSettings();
+  }, [refreshSettings]);
 
   // Parse result — LLM returns JSON {"reorganized": "...", "translated": "..."}
   const { reorganized, translated } = useMemo(() => {
