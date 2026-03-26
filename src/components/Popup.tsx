@@ -286,7 +286,7 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
         }}
       >
         {/* Content area */}
-        <div className="overflow-auto px-5 pt-5 pb-3" style={{ maxHeight: "340px", userSelect: "text", WebkitUserSelect: "text" }}>
+        <div className="overflow-auto px-5 pt-6 pb-3" style={{ maxHeight: "340px", userSelect: "text", WebkitUserSelect: "text" }}>
           {/* Translation — primary content */}
           {reorganizedHtml && (
             <div className="flex items-center gap-1.5 mb-2">
