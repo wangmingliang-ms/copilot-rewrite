@@ -129,9 +129,12 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
   // Ref for expanded content container to measure actual height
   const contentRef = useRef<HTMLDivElement>(null);
 
-  // Resize popup window to fit rendered content (only on initial expand)
+  // Resize popup window to fit rendered content (only on initial expand, not refresh)
+  const hasResized = useRef(false);
   useEffect(() => {
     if (state !== "expanded" || !contentRef.current) return;
+    // Skip resize if this is a refresh result (keep current size)
+    if (hasResized.current) return;
     // Wait a tick for DOM to settle after render
     const timer = setTimeout(() => {
       if (contentRef.current) {
@@ -143,6 +146,7 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
         card.style.maxHeight = oldMaxH;
         // Clamp and tell backend to resize
         invoke("resize_popup_content", { height: Math.min(Math.max(totalHeight, 80), 400) }).catch(() => {});
+        hasResized.current = true;
       }
     }, 50);
     return () => clearTimeout(timer);
@@ -228,6 +232,7 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
     setShowRaw(false);
     setRefreshing(false);
     refreshingRef.current = false;
+    hasResized.current = false;
   };
 
   // ── Icon state (48×48) ──
@@ -325,7 +330,15 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
         {/* Layer 1: Translation (visible when original is collapsed) */}
         {!showOriginal && (
           <div className="flex-1 min-h-0 overflow-auto px-5 pt-5 pb-3" style={{ userSelect: "text", WebkitUserSelect: "text" }}>
-            {showRaw ? (
+            {refreshing ? (
+              <div className="space-y-3 animate-pulse">
+                <div className="h-3 bg-gray-200 rounded w-full" />
+                <div className="h-3 bg-gray-200 rounded w-11/12" />
+                <div className="h-3 bg-gray-200 rounded w-4/5" />
+                <div className="h-3 bg-gray-200 rounded w-full" />
+                <div className="h-3 bg-gray-200 rounded w-3/4" />
+              </div>
+            ) : showRaw ? (
               <pre className="text-[12px] leading-[1.6] text-gray-700 whitespace-pre-wrap break-words font-mono">{translated}</pre>
             ) : (
               <div
