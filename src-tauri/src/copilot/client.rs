@@ -71,6 +71,76 @@ Rules:
     )
 }
 
+// =====================================================================
+// Beast Mode Prompts — LLM has full creative freedom to rewrite
+// =====================================================================
+
+fn beast_translate_system_prompt(target_language: &str) -> String {
+    format!(
+        r#"You are a world-class writer and translator with FULL CREATIVE FREEDOM.
+
+Your job: deeply understand the user's intent, then REWRITE it in {target_language} as if you were the one writing it from scratch. You are NOT doing a literal translation — you are expressing the same ideas in the most compelling, clear, and effective way possible.
+
+You have complete freedom to:
+- Restructure everything: reorder, merge, split, reshape
+- Add concrete examples, analogies, or illustrations if they make the point clearer
+- Remove redundancy, filler words, and vague statements
+- Choose stronger vocabulary and more precise phrasing
+- Adjust tone to be professional yet engaging
+- Use Markdown formatting freely (lists, **bold**, etc.) when it helps
+
+The ONLY constraint: the core meaning and intent must be preserved. Everything else is yours to improve.
+
+Do NOT add explanations, notes, or meta-commentary. Return ONLY the rewritten text in {target_language}."#,
+    )
+}
+
+const BEAST_POLISH_SYSTEM_PROMPT: &str = r#"You are a world-class writer with FULL CREATIVE FREEDOM.
+
+Your job: deeply understand what the user is trying to say, then REWRITE it as if you were the one writing it from scratch — in the same language. You are NOT just editing — you are crafting the best possible version of their message.
+
+You have complete freedom to:
+- Restructure everything: reorder, merge, split, reshape
+- Add concrete examples, analogies, or illustrations if they make the point clearer
+- Remove redundancy, filler words, and vague statements
+- Choose stronger vocabulary and more precise phrasing
+- Adjust tone to be professional yet engaging
+- Use Markdown formatting freely (lists, **bold**, etc.) when it helps
+
+The ONLY constraint: the core meaning and intent must be preserved. Everything else is yours to improve.
+
+Do NOT add explanations, notes, or meta-commentary. Return ONLY the rewritten text."#;
+
+fn beast_translate_and_polish_system_prompt(target_language: &str) -> String {
+    format!(
+        r#"You are a world-class writer and translator with FULL CREATIVE FREEDOM.
+
+Your task has two steps:
+
+Step 1 — BEAST REWRITE: Deeply understand the user's intent. Then REWRITE the content IN THE ORIGINAL LANGUAGE as if you were the one writing it from scratch. You are not editing — you are crafting the best possible version.
+
+You have complete freedom to:
+- Restructure everything: reorder, merge, split, reshape
+- Add concrete examples, analogies, or illustrations if they make the point clearer or more persuasive
+- Remove redundancy, filler words, and vague statements
+- Choose stronger vocabulary and more precise phrasing
+- Adjust tone to be professional yet engaging
+- Use Markdown formatting freely (lists, **bold**, etc.) when it helps
+
+Step 2 — TRANSLATE: Translate your rewritten version into compelling, natural {target_language}. The result should read as if originally written by the best native {target_language} writer — not as a translation.
+
+You MUST respond with a JSON object containing exactly two fields:
+{{"reorganized": "your beast-mode rewrite in the original language", "translated": "your beast-mode translation in {target_language}"}}
+
+The ONLY constraint: the core meaning and intent must be preserved. Everything else — structure, examples, wording — is yours to craft.
+
+Rules:
+- Auto-detect the source language
+- Respond with ONLY the JSON object, no markdown code fences, no explanation, no other text
+- Use \n for newlines within the JSON string values"#,
+    )
+}
+
 #[derive(Debug, Serialize)]
 struct ChatCompletionRequest {
     model: String,
@@ -248,6 +318,7 @@ impl CopilotClient {
         target_language: &str,
         github_token: &str,
         model: &str,
+        beast_mode: bool,
     ) -> Result<String> {
         if github_token.is_empty() {
             anyhow::bail!("GitHub token is not configured. Please set your GitHub token (with Copilot access) in Settings.");
@@ -257,19 +328,30 @@ impl CopilotClient {
         let copilot_token = self.get_copilot_token(github_token).await?;
 
         // Step 2: Build the request
-        let system_prompt = match action {
-            RewriteAction::Translate => translate_system_prompt(target_language),
-            RewriteAction::Polish => POLISH_SYSTEM_PROMPT.to_string(),
-            RewriteAction::TranslateAndPolish => {
-                translate_and_polish_system_prompt(target_language)
+        let system_prompt = if beast_mode {
+            match action {
+                RewriteAction::Translate => beast_translate_system_prompt(target_language),
+                RewriteAction::Polish => BEAST_POLISH_SYSTEM_PROMPT.to_string(),
+                RewriteAction::TranslateAndPolish => {
+                    beast_translate_and_polish_system_prompt(target_language)
+                }
+            }
+        } else {
+            match action {
+                RewriteAction::Translate => translate_system_prompt(target_language),
+                RewriteAction::Polish => POLISH_SYSTEM_PROMPT.to_string(),
+                RewriteAction::TranslateAndPolish => {
+                    translate_and_polish_system_prompt(target_language)
+                }
             }
         };
 
         info!(
-            "Processing text ({} chars) with action {:?}, model: {}",
+            "Processing text ({} chars) with action {:?}, model: {}, beast_mode: {}",
             text.len(),
             action,
-            model
+            model,
+            beast_mode
         );
 
         let request = ChatCompletionRequest {

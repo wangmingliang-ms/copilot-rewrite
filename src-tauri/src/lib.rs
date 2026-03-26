@@ -97,6 +97,9 @@ pub struct Settings {
     pub api_token: String,
     /// Polling interval in milliseconds (50-500)
     pub poll_interval_ms: u64,
+    /// Beast mode — LLM freely rewrites with full creative freedom
+    #[serde(default)]
+    pub beast_mode: bool,
     /// AI model to use (e.g. "gpt-4o", "claude-3.5-sonnet")
     pub model: String,
 }
@@ -153,6 +156,7 @@ impl Default for Settings {
             blacklisted_apps: vec![],
             api_token: String::new(),
             poll_interval_ms: 100,
+            beast_mode: false,
             model: "claude-sonnet-4".to_string(),
         }
     }
@@ -206,7 +210,7 @@ async fn process_text(
 
     let result = state
         .copilot_client
-        .process(&request.text, &request.action, &settings.target_language, &settings.api_token, &settings.model)
+        .process(&request.text, &request.action, &settings.target_language, &settings.api_token, &settings.model, settings.beast_mode)
         .await
         .map_err(|e| format!("Copilot API error: {}", e))?;
 
@@ -239,7 +243,7 @@ async fn process_and_show_preview(
 
     // Call Copilot API
     match state.copilot_client
-        .process(&request.text, &request.action, &settings.target_language, &settings.api_token, &settings.model)
+        .process(&request.text, &request.action, &settings.target_language, &settings.api_token, &settings.model, settings.beast_mode)
         .await
     {
         Ok(result) => {

@@ -16,6 +16,7 @@ interface Settings {
   target_language: string;
   auto_start: boolean;
   poll_interval_ms: number;
+  beast_mode: boolean;
   model: string;
 }
 
@@ -39,6 +40,7 @@ const SettingsPanel: FC = () => {
     target_language: "English",
     auto_start: false,
     poll_interval_ms: 100,
+    beast_mode: false,
     model: "claude-sonnet-4",
   });
   const [loginStep, setLoginStep] = useState<"idle" | "loading" | "code" | "waiting" | "error">("idle");
@@ -283,6 +285,24 @@ const SettingsPanel: FC = () => {
           {!settings.model && (
             <p className="text-xs text-red-500 mt-1">⚠ Model is required. Please select one.</p>
           )}
+        </section>
+
+        {/* Beast Mode */}
+        <section className="bg-white rounded-xl shadow-sm border border-gray-200 p-5 mb-4">
+          <label className="flex items-center justify-between cursor-pointer">
+            <div>
+              <span className="text-sm font-semibold text-gray-700">🐺 Beast Mode</span>
+              <p className="text-xs text-gray-400 mt-1">
+                LLM fully rewrites with creative freedom — adds examples, restructures, crafts the best version
+              </p>
+            </div>
+            <input
+              type="checkbox"
+              checked={settings.beast_mode}
+              onChange={(e) => setSettings({ ...settings, beast_mode: e.target.checked })}
+              className="w-4 h-4 rounded border-gray-300 text-copilot-blue focus:ring-copilot-blue ml-4 flex-shrink-0"
+            />
+          </label>
         </section>
 
         {/* General Section */}

@@ -24,6 +24,7 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
   const [showOriginal, setShowOriginal] = useState(false);
   const [showRaw, setShowRaw] = useState(false);
   const [currentModel, setCurrentModel] = useState<string>("");
+  const [beastMode, setBeastMode] = useState<boolean>(false);
 
   // Listen for backend events
   useEffect(() => {
@@ -67,7 +68,8 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
 
   // Load current model display name from settings + models list
   useEffect(() => {
-    invoke<{ model: string }>("get_settings").then(async (s) => {
+    invoke<{ model: string; beast_mode: boolean }>("get_settings").then(async (s) => {
+      setBeastMode(s.beast_mode || false);
       if (!s.model) { setCurrentModel(""); return; }
       try {
         const models = await invoke<CopilotModel[]>("list_models");
@@ -408,6 +410,9 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
             </button>
             {currentModel && (
               <span className="text-[10px] text-gray-400 font-mono truncate max-w-[120px]" title={currentModel}>{currentModel}</span>
+            )}
+            {beastMode && (
+              <span className="text-[10px]" title="Beast Mode">🐺</span>
             )}
             <button
               onClick={() => invoke("open_settings").catch(() => {})}
