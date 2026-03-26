@@ -470,6 +470,21 @@ fn open_log_file() -> Result<(), String> {
     }
 }
 
+/// Open the logs directory in Explorer
+#[tauri::command]
+fn open_log_dir() -> Result<(), String> {
+    let log_dir = dirs::config_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("copilot-rewrite")
+        .join("logs");
+    let _ = std::fs::create_dir_all(&log_dir);
+    std::process::Command::new("explorer")
+        .arg(&log_dir)
+        .spawn()
+        .map_err(|e| format!("Failed to open logs directory: {}", e))?;
+    Ok(())
+}
+
 /// Replace selected text in the source application
 /// Must restore focus to the original app window before pasting
 /// IMPORTANT: SendInput must run on a dedicated thread (not tokio async pool)
@@ -653,6 +668,7 @@ pub fn run() {
             open_url,
             open_settings,
             open_log_file,
+            open_log_dir,
         ])
         .setup(move |app| {
             let app_handle = app.handle().clone();

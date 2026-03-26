@@ -349,12 +349,21 @@ const SettingsPanel: FC = () => {
         )}
 
         <div className="flex items-center justify-between mt-3 text-xs text-gray-400">
-          <button
-            onClick={() => invoke("open_log_file").catch(() => {})}
-            className="hover:text-copilot-blue transition-colors underline"
-          >
-            View Log
-          </button>
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => invoke("open_log_file").catch(() => {})}
+              className="hover:text-copilot-blue transition-colors underline"
+            >
+              View Log
+            </button>
+            <span>|</span>
+            <button
+              onClick={() => invoke("open_log_dir").catch(() => {})}
+              className="hover:text-copilot-blue transition-colors underline"
+            >
+              Log Directory
+            </button>
+          </div>
           <div className="flex items-center gap-2">
             {updater.status === "checking" ? (
               <span className="text-gray-400">Checking...</span>
