@@ -196,19 +196,19 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
       <div className="w-screen h-screen flex items-center justify-center" style={{ padding: "20px", background: "transparent" }}>
         <div className="w-full h-full flex items-center justify-center"
           style={{
-            background: "rgba(255,255,255,0.95)",
-            borderRadius: "24px",
-            border: "1px solid #e0e0e0",
-            boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+            background: "linear-gradient(135deg, #fff 0%, #f0f4ff 100%)",
+            borderRadius: "14px",
+            border: "1px solid rgba(0,120,212,0.15)",
+            boxShadow: "0 4px 16px rgba(0,120,212,0.12), 0 1px 3px rgba(0,0,0,0.08)",
           }}
         >
           <button
             onPointerDown={(e) => { e.preventDefault(); handleIconClick(); }}
-            className="w-full h-full flex items-center justify-center"
-            style={{ cursor: "pointer", borderRadius: "24px" }}
+            className="w-full h-full flex items-center justify-center group"
+            style={{ cursor: "pointer", borderRadius: "14px" }}
             title="Translate & Polish"
           >
-            <svg className="w-7 h-7" viewBox="0 0 24 24" fill="none" stroke="#0078D4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg className="w-6 h-6 transition-transform group-hover:scale-110" viewBox="0 0 24 24" fill="none" stroke="#0078D4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M5 8l4-4 4 4" />
               <path d="M9 4v8" />
               <path d="M12 20l3-6 3 6" />
@@ -229,13 +229,13 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
       <div className="w-screen h-screen flex items-center justify-center" style={{ padding: "20px", background: "transparent" }}>
         <div className="w-full h-full flex items-center justify-center"
           style={{
-            background: "rgba(255,255,255,0.95)",
-            borderRadius: "24px",
-            border: "1px solid #e0e0e0",
-            boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+            background: "linear-gradient(135deg, #fff 0%, #f0f4ff 100%)",
+            borderRadius: "14px",
+            border: "1px solid rgba(0,120,212,0.15)",
+            boxShadow: "0 4px 16px rgba(0,120,212,0.12), 0 1px 3px rgba(0,0,0,0.08)",
           }}
         >
-          <div className="h-6 w-6 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
+          <div className="h-5 w-5 animate-spin rounded-full border-2 border-copilot-blue border-t-transparent" />
         </div>
       </div>
     );
@@ -245,20 +245,27 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
   if (state === "error") {
     return (
       <div className="w-screen h-screen" style={{ padding: "20px", background: "transparent" }}>
-        <div className="flex flex-col rounded-xl h-full"
+        <div className="flex flex-col rounded-2xl h-full overflow-hidden"
           style={{
-            background: "rgba(255,255,255,0.98)",
-            border: "1px solid #e0e0e0",
-            boxShadow: "0 4px 16px rgba(0,0,0,0.15)",
+            background: "#fff",
+            border: "1px solid rgba(0,0,0,0.08)",
+            boxShadow: "0 8px 32px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.06)",
           }}
         >
-          <div className="px-4 py-3">
-            <p className="text-xs text-red-500">{error}</p>
+          <div className="px-5 py-4 flex items-start gap-2.5">
+            <div className="flex-shrink-0 w-5 h-5 rounded-full bg-red-50 flex items-center justify-center mt-0.5">
+              <svg className="w-3 h-3 text-red-500" viewBox="0 0 12 12" fill="currentColor">
+                <path d="M6 0a6 6 0 100 12A6 6 0 006 0zm.75 9h-1.5V7.5h1.5V9zm0-3h-1.5V3h1.5v3z"/>
+              </svg>
+            </div>
+            <p className="text-[13px] leading-[1.5] text-red-600">{error}</p>
           </div>
-          <div className="flex justify-end border-t border-gray-100 px-3 py-2">
+          <div className="flex justify-end border-t border-gray-100 px-3 py-2"
+            style={{ background: "rgba(249,250,251,0.8)" }}
+          >
             <button
               onClick={handleDismiss}
-              className="rounded-md px-3 py-1.5 text-xs font-medium text-gray-500 hover:bg-gray-100"
+              className="rounded-lg px-3 py-1.5 text-xs font-medium text-gray-500 hover:bg-gray-200/60 transition-colors"
             >
               Close
             </button>
@@ -271,56 +278,84 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
   // ── Expanded state (auto-sized with result) ──
   return (
     <div className="w-screen h-screen" style={{ padding: "20px", background: "transparent" }}>
-      <div className="flex flex-col rounded-xl h-full"
+      <div className="flex flex-col rounded-2xl h-full overflow-hidden"
         style={{
-          background: "rgba(255,255,255,0.98)",
-          border: "1px solid #e0e0e0",
-          boxShadow: "0 4px 16px rgba(0,0,0,0.15)",
+          background: "#fff",
+          border: "1px solid rgba(0,0,0,0.08)",
+          boxShadow: "0 8px 32px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.06)",
         }}
       >
-        <div className="px-4 py-3 overflow-auto flex-1" style={{ maxHeight: "340px", userSelect: "text", WebkitUserSelect: "text" }}>
+        {/* Content area */}
+        <div className="overflow-auto flex-1 px-5 py-4" style={{ maxHeight: "340px", userSelect: "text", WebkitUserSelect: "text" }}>
           {reorganizedHtml && (
             <>
-              <div className="text-[10px] font-medium text-gray-400 uppercase tracking-wider mb-1">Reorganized</div>
+              <div className="flex items-center gap-1.5 mb-2">
+                <div className="w-1 h-3.5 rounded-full bg-gray-300" />
+                <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Reorganized</span>
+              </div>
               <div
-                className="text-sm leading-snug text-gray-600 prose prose-sm max-w-none prose-p:my-1 prose-li:my-0 prose-ul:my-1 prose-ol:my-1 prose-headings:my-1"
+                className="text-[13px] leading-[1.6] text-gray-500 prose prose-sm max-w-none prose-p:my-1 prose-li:my-0.5 prose-ul:my-1 prose-ol:my-1 prose-headings:my-1.5"
                 dangerouslySetInnerHTML={{ __html: reorganizedHtml }}
               />
-              <hr className="my-2 border-gray-200" />
-              <div className="text-[10px] font-medium text-gray-400 uppercase tracking-wider mb-1">Translation</div>
+              <div className="my-3 border-t border-gray-100" />
+              <div className="flex items-center gap-1.5 mb-2">
+                <div className="w-1 h-3.5 rounded-full bg-copilot-blue" />
+                <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Translation</span>
+              </div>
             </>
           )}
           <div
-            className="text-sm leading-snug text-gray-800 prose prose-sm max-w-none prose-p:my-1 prose-li:my-0 prose-ul:my-1 prose-ol:my-1 prose-headings:my-1"
+            className="text-[13px] leading-[1.6] text-gray-800 prose prose-sm max-w-none prose-p:my-1 prose-li:my-0.5 prose-ul:my-1 prose-ol:my-1 prose-headings:my-1.5 prose-strong:text-gray-900"
             dangerouslySetInnerHTML={{ __html: translatedHtml }}
           />
         </div>
-        <div className="flex items-center justify-end gap-1.5 border-t border-gray-100 px-3 py-2">
+
+        {/* Action bar */}
+        <div className="flex items-center justify-between border-t border-gray-100 px-3 py-2"
+          style={{ background: "rgba(249,250,251,0.8)" }}
+        >
           <button
             onClick={handleDismiss}
-            className="rounded-md px-3 py-1.5 text-xs font-medium text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+            className="flex items-center justify-center w-7 h-7 rounded-lg text-gray-400 hover:bg-gray-200/60 hover:text-gray-600 transition-colors"
+            title="Dismiss"
           >
-            ✕
+            <svg className="w-3.5 h-3.5" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <path d="M1 1l12 12M13 1L1 13" />
+            </svg>
           </button>
-          <button
-            onClick={handleRefresh}
-            className="rounded-md px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-100"
-            title="Regenerate"
-          >
-            🔄
-          </button>
-          <button
-            onClick={handleCopy}
-            className="rounded-md px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-100"
-          >
-            📋
-          </button>
-          <button
-            onClick={handleReplace}
-            className="rounded-md bg-copilot-blue px-3 py-1.5 text-xs font-medium text-white hover:bg-copilot-blue-hover"
-          >
-            Replace
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={handleRefresh}
+              className="flex items-center justify-center w-7 h-7 rounded-lg text-gray-500 hover:bg-gray-200/60 hover:text-gray-700 transition-colors"
+              title="Regenerate"
+            >
+              <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M2.5 8a5.5 5.5 0 0 1 9.3-4" />
+                <path d="M13.5 8a5.5 5.5 0 0 1-9.3 4" />
+                <path d="M11.5 1.5v3h3" />
+                <path d="M4.5 14.5v-3h-3" />
+              </svg>
+            </button>
+            <button
+              onClick={handleCopy}
+              className="flex items-center justify-center w-7 h-7 rounded-lg text-gray-500 hover:bg-gray-200/60 hover:text-gray-700 transition-colors"
+              title="Copy"
+            >
+              <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="5" y="5" width="9" height="9" rx="1.5" />
+                <path d="M11 5V3.5A1.5 1.5 0 0 0 9.5 2h-6A1.5 1.5 0 0 0 2 3.5v6A1.5 1.5 0 0 0 3.5 11H5" />
+              </svg>
+            </button>
+            <button
+              onClick={handleReplace}
+              className="flex items-center gap-1.5 rounded-lg bg-copilot-blue px-3 py-1.5 text-xs font-medium text-white hover:bg-copilot-blue-hover transition-colors ml-1"
+            >
+              <svg className="w-3 h-3" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M10 2L4.5 7.5 2 5" />
+              </svg>
+              Replace
+            </button>
+          </div>
         </div>
       </div>
     </div>
