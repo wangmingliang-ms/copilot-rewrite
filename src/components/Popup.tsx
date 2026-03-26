@@ -129,9 +129,16 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
     // Wait a tick for DOM to settle after render
     const timer = setTimeout(() => {
       if (contentRef.current) {
-        const height = contentRef.current.scrollHeight;
+        // Sum up all direct children's heights to get natural content height
+        let totalHeight = 0;
+        const children = contentRef.current.children;
+        for (let i = 0; i < children.length; i++) {
+          totalHeight += (children[i] as HTMLElement).scrollHeight;
+        }
+        // Add border (2px)
+        totalHeight += 2;
         // Clamp and tell backend to resize
-        invoke("resize_popup_content", { height: Math.min(Math.max(height, 80), 400) }).catch(() => {});
+        invoke("resize_popup_content", { height: Math.min(Math.max(totalHeight, 80), 400) }).catch(() => {});
       }
     }, 50);
     return () => clearTimeout(timer);
