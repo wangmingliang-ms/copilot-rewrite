@@ -330,15 +330,7 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
         {/* Layer 1: Translation (visible when original is collapsed) */}
         {!showOriginal && (
           <div className="flex-1 min-h-0 overflow-auto px-5 pt-5 pb-3" style={{ userSelect: "text", WebkitUserSelect: "text" }}>
-            {refreshing ? (
-              <div className="space-y-3 animate-pulse">
-                <div className="h-3 bg-gray-200 rounded w-full" />
-                <div className="h-3 bg-gray-200 rounded w-11/12" />
-                <div className="h-3 bg-gray-200 rounded w-4/5" />
-                <div className="h-3 bg-gray-200 rounded w-full" />
-                <div className="h-3 bg-gray-200 rounded w-3/4" />
-              </div>
-            ) : showRaw ? (
+            {showRaw ? (
               <pre className="text-[12px] leading-[1.6] text-gray-700 whitespace-pre-wrap break-words font-mono">{translated}</pre>
             ) : (
               <div
