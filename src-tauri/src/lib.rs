@@ -74,6 +74,12 @@ pub struct SelectionInfo {
     /// Bounding rect of the input element (physical pixels, optional)
     #[serde(skip)]
     pub input_rect: Option<(i32, i32, i32, i32)>, // (x, y, w, h)
+    /// Name of the source application (e.g. "Teams", "chrome")
+    #[serde(default)]
+    pub app_name: String,
+    /// Window title of the source application
+    #[serde(default)]
+    pub window_title: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -210,7 +216,7 @@ async fn process_text(
 
     let result = state
         .copilot_client
-        .process(&request.text, &request.action, &settings.target_language, &settings.api_token, &settings.model, settings.beast_mode)
+        .process(&request.text, &request.action, &settings.target_language, &settings.api_token, &settings.model, settings.beast_mode, "")
         .await
         .map_err(|e| format!("Copilot API error: {}", e))?;
 
@@ -235,6 +241,13 @@ async fn process_and_show_preview(
         return Err("Not logged in. Please sign in via Settings.".to_string());
     }
 
+    // Get app context from current selection for prompt contextualization
+    let app_context = {
+        let sel = state.current_selection.lock();
+        sel.as_ref().map(|s| format!("App: {}, Window: {}", s.app_name, s.window_title))
+            .unwrap_or_default()
+    };
+
     // Mark popup as "processing" to pause UIA monitoring
     *state.preview_visible.lock() = true;
 
@@ -243,7 +256,7 @@ async fn process_and_show_preview(
 
     // Call Copilot API
     match state.copilot_client
-        .process(&request.text, &request.action, &settings.target_language, &settings.api_token, &settings.model, settings.beast_mode)
+        .process(&request.text, &request.action, &settings.target_language, &settings.api_token, &settings.model, settings.beast_mode, &app_context)
         .await
     {
         Ok(result) => {

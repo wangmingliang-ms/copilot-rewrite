@@ -8,10 +8,50 @@ use std::time::{Duration, Instant};
 use tauri::Emitter;
 use tauri::{AppHandle, Manager};
 use windows::Win32::Foundation::POINT;
-use windows::Win32::UI::WindowsAndMessaging::{GetCursorPos, GetForegroundWindow};
+use windows::Win32::UI::WindowsAndMessaging::{GetCursorPos, GetForegroundWindow, GetWindowTextW, GetWindowThreadProcessId};
+use windows::Win32::System::Threading::{OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_FORMAT, PROCESS_QUERY_LIMITED_INFORMATION};
 
 use super::uia::UiaEngine;
 use crate::overlay;
+
+/// Get the process name and window title for a given HWND
+fn get_window_context(hwnd: isize) -> (String, String) {
+    let h = windows::Win32::Foundation::HWND(hwnd as *mut _);
+
+    // Window title
+    let window_title = {
+        let mut buf = [0u16; 512];
+        let len = unsafe { GetWindowTextW(h, &mut buf) } as usize;
+        String::from_utf16_lossy(&buf[..len])
+    };
+
+    // Process name
+    let app_name = {
+        let mut pid = 0u32;
+        unsafe { GetWindowThreadProcessId(h, Some(&mut pid)) };
+        if pid > 0 {
+            if let Ok(process) = (unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) }) {
+                let mut buf = [0u16; 512];
+                let mut size = buf.len() as u32;
+                if unsafe { QueryFullProcessImageNameW(process, PROCESS_NAME_FORMAT(0), windows::core::PWSTR(buf.as_mut_ptr()), &mut size) }.is_ok() {
+                    let path = String::from_utf16_lossy(&buf[..size as usize]);
+                    // Extract just the filename without extension
+                    path.rsplit('\\').next().unwrap_or(&path)
+                        .strip_suffix(".exe").unwrap_or(&path)
+                        .to_string()
+                } else {
+                    String::new()
+                }
+            } else {
+                String::new()
+            }
+        } else {
+            String::new()
+        }
+    };
+
+    (app_name, window_title)
+}
 
 /// Minimum time between showing the popup (debounce)
 const DEBOUNCE_MS: u64 = 200;
@@ -118,6 +158,7 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
                                 // Debounce complete — show popup icon
                                 let mouse_pos = get_cursor_position();
                                 let source_hwnd = unsafe { GetForegroundWindow().0 as isize };
+                                let (app_name, window_title) = get_window_context(source_hwnd);
 
                                 // Get bounding rect of the focused input element
                                 let input_rect = if let Some(ref uia_engine) = uia {
@@ -134,6 +175,8 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
                                     source: SelectionSource::UIA,
                                     source_hwnd: Some(source_hwnd),
                                     input_rect,
+                                    app_name,
+                                    window_title,
                                 };
 
                                 show_popup(app_handle.clone(), &state, selection_info);

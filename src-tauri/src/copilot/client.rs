@@ -323,6 +323,7 @@ impl CopilotClient {
         github_token: &str,
         model: &str,
         beast_mode: bool,
+        app_context: &str,
     ) -> Result<String> {
         if github_token.is_empty() {
             anyhow::bail!("GitHub token is not configured. Please set your GitHub token (with Copilot access) in Settings.");
@@ -350,12 +351,24 @@ impl CopilotClient {
             }
         };
 
+        // Append app context to system prompt if available
+        let system_prompt = if !app_context.is_empty() {
+            format!(
+                "{}\n\nCONTEXT: The user is writing in: {}. Adapt the tone and formality level to match this context (e.g., casual for chat apps like Teams/Slack, professional for email apps like Outlook, technical for developer tools like GitHub/VS Code).",
+                system_prompt,
+                app_context
+            )
+        } else {
+            system_prompt
+        };
+
         info!(
-            "Processing text ({} chars) with action {:?}, model: {}, beast_mode: {}",
+            "Processing text ({} chars) with action {:?}, model: {}, beast_mode: {}, context: {}",
             text.len(),
             action,
             model,
-            beast_mode
+            beast_mode,
+            if app_context.is_empty() { "none" } else { app_context }
         );
 
         let request = ChatCompletionRequest {
