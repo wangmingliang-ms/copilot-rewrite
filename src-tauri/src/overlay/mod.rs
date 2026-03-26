@@ -29,6 +29,8 @@ const ICON_SIZE: f64 = 48.0;
 const EXPANDED_WIDTH: f64 = 400.0;
 const EXPANDED_MIN_HEIGHT: f64 = 80.0;
 const EXPANDED_MAX_HEIGHT: f64 = 400.0;
+/// Shadow margin (logical px) — extra space around content for CSS box-shadow
+const SHADOW_MARGIN: f64 = 20.0;
 /// Button bar height
 const BUTTONS_HEIGHT: f64 = 40.0;
 /// Text area padding
@@ -173,11 +175,16 @@ pub fn expand_popup(app_handle: &AppHandle, text: &str) {
         // Remove WS_EX_NOACTIVATE so buttons are clickable
         set_noactivate(app_handle, false);
 
-        // Resize and reposition
-        let _ = window.set_size(LogicalSize::new(w_logical, height));
-        let _ = window.set_position(Position::Logical(LogicalPosition::new(x, y)));
+        // Add shadow margin: window is larger than content, positioned offset by margin
+        let win_w = w_logical + SHADOW_MARGIN * 2.0;
+        let win_h = height + SHADOW_MARGIN * 2.0;
+        let win_x = x - SHADOW_MARGIN;
+        let win_y = y - SHADOW_MARGIN;
 
-        debug!("Popup expanded to {:.0}x{:.0} at ({:.0}, {:.0})", w_logical, height, x, y);
+        let _ = window.set_size(LogicalSize::new(win_w, win_h));
+        let _ = window.set_position(Position::Logical(LogicalPosition::new(win_x, win_y)));
+
+        debug!("Popup expanded to {:.0}x{:.0} (content {:.0}x{:.0}) at ({:.0}, {:.0})", win_w, win_h, w_logical, height, win_x, win_y);
     }
 }
 

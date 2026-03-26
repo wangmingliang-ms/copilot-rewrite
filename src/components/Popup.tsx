@@ -225,23 +225,25 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
   // ── Error state ──
   if (state === "error") {
     return (
-      <div className="flex flex-col rounded-xl shadow-popup"
-        style={{
-          background: "rgba(255,255,255,0.98)",
-          border: "1px solid #e0e0e0",
-          boxShadow: "0 4px 16px rgba(0,0,0,0.15)",
-        }}
-      >
-        <div className="px-4 py-3">
-          <p className="text-xs text-red-500">{error}</p>
-        </div>
-        <div className="flex justify-end border-t border-gray-100 px-3 py-2">
-          <button
-            onClick={handleDismiss}
-            className="rounded-md px-3 py-1.5 text-xs font-medium text-gray-500 hover:bg-gray-100"
-          >
-            Close
-          </button>
+      <div className="w-screen h-screen" style={{ padding: "20px", background: "transparent" }}>
+        <div className="flex flex-col rounded-xl h-full"
+          style={{
+            background: "rgba(255,255,255,0.98)",
+            border: "1px solid #e0e0e0",
+            boxShadow: "0 4px 16px rgba(0,0,0,0.15)",
+          }}
+        >
+          <div className="px-4 py-3">
+            <p className="text-xs text-red-500">{error}</p>
+          </div>
+          <div className="flex justify-end border-t border-gray-100 px-3 py-2">
+            <button
+              onClick={handleDismiss}
+              className="rounded-md px-3 py-1.5 text-xs font-medium text-gray-500 hover:bg-gray-100"
+            >
+              Close
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -249,49 +251,51 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
 
   // ── Expanded state (auto-sized with result) ──
   return (
-    <div className="flex flex-col rounded-xl"
-      style={{
-        background: "rgba(255,255,255,0.98)",
-        border: "1px solid #e0e0e0",
-        boxShadow: "0 4px 16px rgba(0,0,0,0.15)",
-      }}
-    >
-      <div className="px-4 py-3 overflow-auto" style={{ maxHeight: "340px" }}>
-        {reorganizedHtml && (
-          <>
-            <div className="text-[10px] font-medium text-gray-400 uppercase tracking-wider mb-1">Reorganized</div>
-            <div
-              className="text-sm leading-relaxed text-gray-600 prose prose-sm max-w-none"
-              dangerouslySetInnerHTML={{ __html: reorganizedHtml }}
-            />
-            <hr className="my-2 border-gray-200" />
-            <div className="text-[10px] font-medium text-gray-400 uppercase tracking-wider mb-1">Translation</div>
-          </>
-        )}
-        <div
-          className="text-sm leading-relaxed text-gray-800 prose prose-sm max-w-none"
-          dangerouslySetInnerHTML={{ __html: translatedHtml }}
-        />
-      </div>
-      <div className="flex items-center justify-end gap-1.5 border-t border-gray-100 px-3 py-2">
-        <button
-          onClick={handleDismiss}
-          className="rounded-md px-3 py-1.5 text-xs font-medium text-gray-400 hover:bg-gray-100 hover:text-gray-600"
-        >
-          ✕
-        </button>
-        <button
-          onClick={handleCopy}
-          className="rounded-md px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-100"
-        >
-          📋
-        </button>
-        <button
-          onClick={handleReplace}
-          className="rounded-md bg-copilot-blue px-3 py-1.5 text-xs font-medium text-white hover:bg-copilot-blue-hover"
-        >
-          Replace
-        </button>
+    <div className="w-screen h-screen" style={{ padding: "20px", background: "transparent" }}>
+      <div className="flex flex-col rounded-xl h-full"
+        style={{
+          background: "rgba(255,255,255,0.98)",
+          border: "1px solid #e0e0e0",
+          boxShadow: "0 4px 16px rgba(0,0,0,0.15)",
+        }}
+      >
+        <div className="px-4 py-3 overflow-auto flex-1" style={{ maxHeight: "340px" }}>
+          {reorganizedHtml && (
+            <>
+              <div className="text-[10px] font-medium text-gray-400 uppercase tracking-wider mb-1">Reorganized</div>
+              <div
+                className="text-sm leading-relaxed text-gray-600 prose prose-sm max-w-none"
+                dangerouslySetInnerHTML={{ __html: reorganizedHtml }}
+              />
+              <hr className="my-2 border-gray-200" />
+              <div className="text-[10px] font-medium text-gray-400 uppercase tracking-wider mb-1">Translation</div>
+            </>
+          )}
+          <div
+            className="text-sm leading-relaxed text-gray-800 prose prose-sm max-w-none"
+            dangerouslySetInnerHTML={{ __html: translatedHtml }}
+          />
+        </div>
+        <div className="flex items-center justify-end gap-1.5 border-t border-gray-100 px-3 py-2">
+          <button
+            onClick={handleDismiss}
+            className="rounded-md px-3 py-1.5 text-xs font-medium text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+          >
+            ✕
+          </button>
+          <button
+            onClick={handleCopy}
+            className="rounded-md px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-100"
+          >
+            📋
+          </button>
+          <button
+            onClick={handleReplace}
+            className="rounded-md bg-copilot-blue px-3 py-1.5 text-xs font-medium text-white hover:bg-copilot-blue-hover"
+          >
+            Replace
+          </button>
+        </div>
       </div>
     </div>
   );
