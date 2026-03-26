@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useMemo, type FC } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef, type FC } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { marked } from "marked";
@@ -119,6 +119,23 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
     window.addEventListener("blur", handleBlur);
     return () => window.removeEventListener("blur", handleBlur);
   }, [state]);
+
+  // Ref for expanded content container to measure actual height
+  const contentRef = useRef<HTMLDivElement>(null);
+
+  // Resize popup window to fit rendered content
+  useEffect(() => {
+    if (state !== "expanded" || !contentRef.current) return;
+    // Wait a tick for DOM to settle after render
+    const timer = setTimeout(() => {
+      if (contentRef.current) {
+        const height = contentRef.current.scrollHeight;
+        // Clamp and tell backend to resize
+        invoke("resize_popup_content", { height: Math.min(Math.max(height, 80), 400) }).catch(() => {});
+      }
+    }, 50);
+    return () => clearTimeout(timer);
+  }, [state, translatedHtml, reorganizedHtml, showOriginal, showRaw]);
 
   const handleIconClick = useCallback(async () => {
     if (!authStatus.logged_in) {
@@ -280,7 +297,7 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
   // ── Expanded state (auto-sized with result) ──
   return (
     <div className="w-screen h-screen" style={{ padding: "20px", background: "transparent" }}>
-      <div className="flex flex-col rounded-lg overflow-hidden"
+      <div ref={contentRef} className="flex flex-col rounded-lg overflow-hidden"
         style={{
           background: "#fff",
           border: "1px solid rgba(0,0,0,0.08)",

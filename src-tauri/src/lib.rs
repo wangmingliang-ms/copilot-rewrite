@@ -472,6 +472,16 @@ async fn dismiss_popup(
     Ok(())
 }
 
+/// Resize popup to fit actual rendered content height (called from frontend after render)
+#[tauri::command]
+async fn resize_popup_content(
+    app: tauri::AppHandle,
+    height: f64,
+) -> Result<(), String> {
+    overlay::resize_popup_to_content(&app, height);
+    Ok(())
+}
+
 // ─── App Entry Point ──────────────────────────────────────────────
 
 pub fn run() {
@@ -492,6 +502,7 @@ pub fn run() {
             toggle_enabled,
             is_enabled,
             dismiss_popup,
+            resize_popup_content,
             start_github_login,
             poll_github_login,
             get_auth_status,

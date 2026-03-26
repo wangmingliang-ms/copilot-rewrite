@@ -133,7 +133,9 @@ pub fn show_popup_icon(app_handle: &AppHandle, mouse_x: i32, mouse_y: i32, input
 /// Uses input element rect for width and vertical positioning when available.
 pub fn expand_popup(app_handle: &AppHandle, text: &str) {
     if let Some(window) = app_handle.get_webview_window("popup") {
-        let height = estimate_height(text);
+        // Extract translated text from JSON for height estimation
+        let est_text = extract_translated(text).unwrap_or(text);
+        let height = estimate_height(est_text);
         let (screen_w, screen_h, _) = get_primary_screen_info(app_handle);
         let stored_input = *INPUT_RECT.lock();
 
@@ -264,6 +266,80 @@ fn estimate_height(text: &str) -> f64 {
     let text_height = total_lines * LINE_HEIGHT_PX;
     let height = text_height + TEXT_PADDING + BUTTONS_HEIGHT;
     height.clamp(EXPANDED_MIN_HEIGHT, EXPANDED_MAX_HEIGHT)
+}
+
+/// Extract "translated" field from JSON response for height estimation
+fn extract_translated(text: &str) -> Option<&str> {
+    // Quick JSON parse: find "translated": "..." value
+    let marker = "\"translated\"";
+    let idx = text.find(marker)?;
+    let rest = &text[idx + marker.len()..];
+    // Skip whitespace and colon
+    let rest = rest.trim_start();
+    let rest = rest.strip_prefix(':')?;
+    let rest = rest.trim_start();
+    let rest = rest.strip_prefix('"')?;
+    // Find the end of the string value (handle escaped quotes)
+    let mut end = 0;
+    let mut escaped = false;
+    for (i, c) in rest.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if c == '\\' {
+            escaped = true;
+            continue;
+        }
+        if c == '"' {
+            end = i;
+            break;
+        }
+    }
+    if end > 0 { Some(&rest[..end]) } else { None }
+}
+
+/// Resize expanded popup to fit actual rendered content height (called from frontend)
+pub fn resize_popup_to_content(app_handle: &AppHandle, content_height: f64) {
+    if let Some(window) = app_handle.get_webview_window("popup") {
+        let height = content_height.clamp(EXPANDED_MIN_HEIGHT, EXPANDED_MAX_HEIGHT);
+        let (screen_w, screen_h, _) = get_primary_screen_info(app_handle);
+        let stored_input = *INPUT_RECT.lock();
+
+        // Determine width (same logic as expand_popup)
+        let w_logical = if let Some((rx, ry, rw, _)) = stored_input {
+            let scale = get_scale_at(rx, ry);
+            (rw as f64 / scale).max(200.0)
+        } else {
+            EXPANDED_WIDTH
+        };
+
+        // Get current position and adjust Y if needed for new height
+        if let Ok(pos) = window.outer_position() {
+            let scale = window.scale_factor().unwrap_or(1.0);
+            let current_x = pos.x as f64 / scale;
+            let current_y = pos.y as f64 / scale;
+            
+            // Content position (inside shadow margin)
+            let content_x = current_x + SHADOW_MARGIN;
+            let mut content_y = current_y + SHADOW_MARGIN;
+
+            // If overflows bottom, push up
+            if content_y + height > screen_h {
+                content_y = screen_h - height - 8.0;
+            }
+
+            let win_w = w_logical + SHADOW_MARGIN * 2.0;
+            let win_h = height + SHADOW_MARGIN * 2.0;
+            let win_x = content_x - SHADOW_MARGIN;
+            let win_y = content_y - SHADOW_MARGIN;
+
+            let _ = window.set_size(LogicalSize::new(win_w, win_h));
+            let _ = window.set_position(Position::Logical(LogicalPosition::new(win_x, win_y)));
+
+            debug!("Popup resized to content: {:.0}x{:.0} (content height {:.0})", win_w, win_h, height);
+        }
+    }
 }
 
 /// Get scale factor at given physical coordinates
