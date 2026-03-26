@@ -414,7 +414,27 @@ fn open_settings(app: tauri::AppHandle) -> Result<(), String> {
         let _ = window.set_focus();
         Ok(())
     } else {
-        Err("Settings window not found".to_string())
+        // Window was destroyed after close — recreate it
+        use tauri::WebviewUrl;
+        let window = tauri::WebviewWindowBuilder::new(
+            &app,
+            "settings",
+            WebviewUrl::App("index.html#/settings".into()),
+        )
+        .title("Copilot Rewrite Settings")
+        .inner_size(480.0, 720.0)
+        .resizable(false)
+        .decorations(true)
+        .transparent(false)
+        .always_on_top(false)
+        .visible(true)
+        .skip_taskbar(false)
+        .center()
+        .build()
+        .map_err(|e| format!("Failed to create settings window: {}", e))?;
+
+        let _ = window.set_focus();
+        Ok(())
     }
 }
 
