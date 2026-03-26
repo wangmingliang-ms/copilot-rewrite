@@ -31,6 +31,7 @@ Rules:
 - Auto-detect the source language
 - Preserve the original meaning
 - You may freely reorder sentences, adjust wording, and restructure paragraphs to make the translation clear, logical, and natural in {target_language}
+- The output MUST sound like it was originally written by a native {target_language} speaker — eliminate all "translationese" (awkward literal phrasing, unnatural word order, sentence patterns borrowed from the source language)
 - If the text is already in {target_language}, just polish it for clarity
 - Do NOT add explanations, notes, or any extra text
 - Return ONLY the translated text"#,
@@ -62,7 +63,7 @@ Step 2 — REORGANIZE IN ORIGINAL LANGUAGE: Rewrite the content in the original 
 
 Step 3 — THINK IN {target_language}: Before translating word by word, re-think the content using {target_language} thought patterns and conventions. Different languages organize ideas differently — {target_language} may prefer different sentence structures, emphasis patterns, or logical flows. Restructure the content to feel natural in {target_language} thinking.
 
-Step 4 — OUTPUT IN {target_language}: Write the final version in clear, natural, and idiomatic {target_language}. The result should read as if originally written by a native {target_language} speaker in a professional context — not as a translation. Use the same Markdown formatting as Step 2.
+Step 4 — OUTPUT IN {target_language}: Write the final version in clear, natural, and idiomatic {target_language}. The result MUST read as if originally written by a native {target_language} speaker — NOT as a translation. Eliminate all signs of "translationese": avoid awkward literal phrasing, unnatural word order, or sentence patterns borrowed from the source language. Every sentence should sound like something a native speaker would actually write. Use the same Markdown formatting as Step 2.
 
 You MUST respond with a JSON object containing exactly two fields:
 {{"reorganized": "the polished text in the original language (Step 2)", "translated": "the {target_language} output (Step 4)"}}
@@ -91,7 +92,7 @@ Step 2 — REWRITE FROM SCRATCH: Using the original language, rewrite the conten
 
 Step 3 — THINK IN {target_language}: Before producing the final output, re-think the entire content using {target_language} thought patterns. Different languages have fundamentally different ways of organizing arguments, building emphasis, and flowing logically. Restructure the content to feel native in {target_language} thinking.
 
-Step 4 — OUTPUT IN {target_language}: Write the final version as if you were the best native {target_language} writer crafting this from scratch. It should not read like a translation at all.
+Step 4 — OUTPUT IN {target_language}: Write the final version as if you were the best native {target_language} writer crafting this from scratch. It MUST NOT read like a translation at all — zero translationese, zero borrowed sentence patterns from the source language. Every phrase should sound completely natural to a native {target_language} reader.
 
 CRITICAL RULES:
 - Your freedom is in HOW to express ideas, NOT in WHAT to express. Never change the substance — only improve the delivery.
@@ -129,7 +130,7 @@ Step 2 — REWRITE IN ORIGINAL LANGUAGE: Using the original language, rewrite th
 
 Step 3 — THINK IN {target_language}: Before translating, re-think the entire content using {target_language} thought patterns. Different languages have fundamentally different ways of organizing arguments, building emphasis, and flowing logically. Restructure the content to feel native in {target_language} thinking — not just a word-for-word conversion.
 
-Step 4 — OUTPUT IN {target_language}: Write the final version as if you were the best native {target_language} writer crafting this from scratch. It should not read like a translation at all. Use the same Markdown formatting as Step 2.
+Step 4 — OUTPUT IN {target_language}: Write the final version as if you were the best native {target_language} writer crafting this from scratch. It MUST NOT read like a translation at all — zero translationese, zero borrowed sentence patterns from the source language. Every phrase should sound completely natural to a native {target_language} reader. Use the same Markdown formatting as Step 2.
 
 You MUST respond with a JSON object containing exactly two fields:
 {{"reorganized": "your rewrite in the original language (Step 2)", "translated": "your {target_language} output (Step 4)"}}
