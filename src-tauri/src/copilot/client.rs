@@ -395,6 +395,31 @@ impl CopilotClient {
                 version: m.version.unwrap_or_default(),
                 owned_by: m.owned_by.unwrap_or_default(),
             })
+            // Filter out non-chat models, deprecated models, and internal-only
+            .filter(|m| {
+                let id = m.id.as_str();
+                let name_lower = m.name.to_lowercase();
+                // Skip embeddings
+                if id.contains("embedding") { return false; }
+                // Skip internal-only models
+                if name_lower.contains("internal") { return false; }
+                // Skip deprecated old models
+                if id.starts_with("gpt-3.5") || (id.starts_with("gpt-4") && !id.starts_with("gpt-4.") && !id.starts_with("gpt-4o")) { return false; }
+                // Skip date-suffixed variants (e.g. gpt-4o-2024-11-20) — keep only the alias
+                if id.contains("-2024-") || id.contains("-2025-") { return false; }
+                // Skip preview aliases that duplicate main models
+                if id == "gpt-4-o-preview" { return false; }
+                // Skip router/account-prefixed models
+                if id.starts_with("accounts/") { return false; }
+                true
+            })
+            .collect();
+
+        // Deduplicate by name — keep the first (shortest id) for each name
+        let mut seen_names = std::collections::HashSet::new();
+        let models: Vec<CopilotModel> = models
+            .into_iter()
+            .filter(|m| seen_names.insert(m.name.clone()))
             .collect();
 
         if models.is_empty() {
