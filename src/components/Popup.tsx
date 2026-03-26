@@ -185,7 +185,7 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
     setError(null);
     try {
       await invoke("process_and_show_preview", {
-        request: { text: selection.text, action: "TranslateAndPolish" },
+        request: { text: selection.text, action: "TranslateAndPolish", is_refresh: true },
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));

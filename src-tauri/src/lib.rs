@@ -171,6 +171,8 @@ pub enum RewriteAction {
 pub struct ProcessRequest {
     pub text: String,
     pub action: RewriteAction,
+    #[serde(default)]
+    pub is_refresh: bool,
 }
 
 /// Response from the Copilot API processing
@@ -241,8 +243,10 @@ async fn process_and_show_preview(
         .await
     {
         Ok(result) => {
-            // Expand popup window to fit result text
-            overlay::expand_popup(&app, &result);
+            // Expand popup window to fit result text (skip on refresh to avoid flicker)
+            if !request.is_refresh {
+                overlay::expand_popup(&app, &result);
+            }
 
             let response = ProcessResponse {
                 original: request.text,
