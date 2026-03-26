@@ -278,7 +278,7 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
           boxShadow: "0 4px 16px rgba(0,0,0,0.15)",
         }}
       >
-        <div className="px-4 py-3 overflow-auto flex-1" style={{ maxHeight: "340px" }}>
+        <div className="px-4 py-3 overflow-auto flex-1" style={{ maxHeight: "340px", userSelect: "text", WebkitUserSelect: "text" }}>
           {reorganizedHtml && (
             <>
               <div className="text-[10px] font-medium text-gray-400 uppercase tracking-wider mb-1">Reorganized</div>
