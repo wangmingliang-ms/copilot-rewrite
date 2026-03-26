@@ -25,9 +25,13 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
       setResult(event.payload);
       setError(null);
       setState("expanded");
+      setRefreshing(false);
+      refreshingRef.current = false;
     });
 
     const unLoading = listen("show-preview-loading", () => {
+      // When refreshing, stay in expanded state — button shows its own spinner
+      if (refreshingRef.current) return;
       setState("spinning");
       setError(null);
       setResult(null);
@@ -36,6 +40,8 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
     const unError = listen<string>("show-preview-error", (event) => {
       setError(event.payload);
       setState("error");
+      setRefreshing(false);
+      refreshingRef.current = false;
     });
 
     // Reset to icon state when popup is hidden and re-shown
@@ -166,10 +172,12 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
   }, [authStatus, selection]);
 
   const [refreshing, setRefreshing] = useState(false);
+  const refreshingRef = useRef(false);
 
   const handleRefresh = useCallback(async () => {
     if (!selection || refreshing) return;
     setRefreshing(true);
+    refreshingRef.current = true;
     setError(null);
     try {
       await invoke("process_and_show_preview", {
@@ -178,8 +186,8 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setState("error");
-    } finally {
       setRefreshing(false);
+      refreshingRef.current = false;
     }
   }, [selection, refreshing]);
 
@@ -219,6 +227,7 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
     setShowOriginal(false);
     setShowRaw(false);
     setRefreshing(false);
+    refreshingRef.current = false;
   };
 
   // ── Icon state (48×48) ──
