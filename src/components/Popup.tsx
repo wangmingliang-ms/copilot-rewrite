@@ -241,8 +241,6 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
     if (!outputText) return;
     try {
       await invoke("copy_to_clipboard", { text: outputText });
-      await invoke("dismiss_popup");
-      resetState();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -444,7 +442,11 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
           <div className="flex items-center gap-1">
             {/* Markdown/Preview toggle */}
             <button
-              onClick={() => setShowRaw(!showRaw)}
+              onClick={() => {
+                const next = !showRaw;
+                setShowRaw(next);
+                invoke("log_action", { action: `Markdown view ${next ? "ON" : "OFF"}` }).catch(() => {});
+              }}
               className={`flex items-center justify-center w-7 h-7 rounded-lg transition-colors ${showRaw ? "text-blue-500 bg-blue-50 hover:bg-blue-100" : "text-gray-400 hover:bg-gray-200/60 hover:text-gray-600"}`}
               title={showRaw ? "Show preview" : "Show markdown"}
             >

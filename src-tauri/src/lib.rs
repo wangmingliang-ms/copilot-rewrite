@@ -532,7 +532,14 @@ async fn replace_text(
 /// Copy text to clipboard
 #[tauri::command]
 async fn copy_to_clipboard(text: String) -> Result<(), String> {
+    info!("[POPUP] Copied to clipboard — {} chars", text.len());
     clipboard::set_text(&text).map_err(|e| format!("Clipboard error: {}", e))
+}
+
+/// Log a frontend action (for actions that don't call backend)
+#[tauri::command]
+fn log_action(action: String) {
+    info!("[POPUP] {}", action);
 }
 
 /// Get current settings
@@ -669,6 +676,7 @@ pub fn run() {
             open_settings,
             open_log_file,
             open_log_dir,
+            log_action,
         ])
         .setup(move |app| {
             let app_handle = app.handle().clone();
