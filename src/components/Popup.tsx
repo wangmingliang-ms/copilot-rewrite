@@ -165,10 +165,11 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
     }
   }, [authStatus, selection]);
 
+  const [refreshing, setRefreshing] = useState(false);
+
   const handleRefresh = useCallback(async () => {
-    if (!selection) return;
-    setState("spinning");
-    setResult(null);
+    if (!selection || refreshing) return;
+    setRefreshing(true);
     setError(null);
     try {
       await invoke("process_and_show_preview", {
@@ -177,8 +178,10 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setState("error");
+    } finally {
+      setRefreshing(false);
     }
-  }, [selection]);
+  }, [selection, refreshing]);
 
   const handleReplace = useCallback(async () => {
     if (!outputText) return;
@@ -215,6 +218,7 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
     setError(null);
     setShowOriginal(false);
     setShowRaw(false);
+    setRefreshing(false);
   };
 
   // ── Icon state (48×48) ──
@@ -380,15 +384,20 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
             </button>
             <button
               onClick={handleRefresh}
-              className="flex items-center justify-center w-7 h-7 rounded-lg text-gray-500 hover:bg-gray-200/60 hover:text-gray-700 transition-colors"
+              disabled={refreshing}
+              className={`flex items-center justify-center w-7 h-7 rounded-lg transition-colors ${refreshing ? "text-gray-300 cursor-not-allowed" : "text-gray-500 hover:bg-gray-200/60 hover:text-gray-700"}`}
               title="Regenerate"
             >
-              <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M2.5 8a5.5 5.5 0 0 1 9.3-4" />
-                <path d="M13.5 8a5.5 5.5 0 0 1-9.3 4" />
-                <path d="M11.5 1.5v3h3" />
-                <path d="M4.5 14.5v-3h-3" />
-              </svg>
+              {refreshing ? (
+                <div className="h-3.5 w-3.5 animate-spin rounded-full border-[1.5px] border-gray-400 border-t-transparent" />
+              ) : (
+                <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M2.5 8a5.5 5.5 0 0 1 9.3-4" />
+                  <path d="M13.5 8a5.5 5.5 0 0 1-9.3 4" />
+                  <path d="M11.5 1.5v3h3" />
+                  <path d="M4.5 14.5v-3h-3" />
+                </svg>
+              )}
             </button>
             <button
               onClick={handleCopy}
