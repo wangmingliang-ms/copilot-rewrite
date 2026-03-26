@@ -463,6 +463,7 @@ async fn dismiss_popup(
 ) -> Result<(), String> {
     overlay::hide_popup(&app);
     *state.preview_visible.lock() = false;
+    *state.current_selection.lock() = None;
     // Briefly pause monitoring so popup doesn't immediately re-appear
     *state.enabled.lock() = false;
     let state_clone = state.inner().clone();

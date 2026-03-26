@@ -6,7 +6,7 @@ use log::{debug, error, info, warn};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tauri::Emitter;
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 use windows::Win32::Foundation::POINT;
 use windows::Win32::UI::WindowsAndMessaging::{GetCursorPos, GetForegroundWindow};
 
@@ -44,6 +44,9 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
     loop {
         // Check if monitoring is enabled
         if !*state.enabled.lock() {
+            // Clear state so same text can re-trigger after re-enable
+            last_selection = None;
+            debounce_text = None;
             std::thread::sleep(Duration::from_millis(500));
             continue;
         }
@@ -52,7 +55,20 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
         let poll_interval = state.settings.lock().poll_interval_ms;
 
         // Try to get selected text via UIA
-        let selected_text = if let Some(ref uia_engine) = uia {
+        // Skip if the foreground window is our own popup (e.g., user selecting text in preview)
+        let is_own_window = {
+            let fg = unsafe { GetForegroundWindow().0 as isize };
+            if let Some(popup) = app_handle.get_webview_window("popup") {
+                popup.hwnd().map(|h| h.0 as isize == fg).unwrap_or(false)
+            } else {
+                false
+            }
+        };
+
+        let selected_text = if is_own_window {
+            // Don't poll UIA when our own popup is focused
+            None
+        } else if let Some(ref uia_engine) = uia {
             match uia_engine.get_selected_text() {
                 Ok(text) => text,
                 Err(e) => {
