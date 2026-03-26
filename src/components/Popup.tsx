@@ -50,6 +50,36 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
     };
   }, []);
 
+  // Split result into reorganized + translated sections (divided by "---")
+  const { reorganized, translated } = useMemo(() => {
+    if (!result?.result) return { reorganized: "", translated: "" };
+    const text = result.result;
+    const dividerMatch = text.match(/\n---\n/);
+    if (dividerMatch && dividerMatch.index !== undefined) {
+      return {
+        reorganized: text.slice(0, dividerMatch.index).trim(),
+        translated: text.slice(dividerMatch.index + dividerMatch[0].length).trim(),
+      };
+    }
+    return { reorganized: "", translated: text.trim() };
+  }, [result?.result]);
+
+  // Render markdown
+  const reorganizedHtml = useMemo(() => {
+    if (!reorganized) return "";
+    marked.setOptions({ breaks: true, gfm: true });
+    return marked.parse(reorganized) as string;
+  }, [reorganized]);
+
+  const translatedHtml = useMemo(() => {
+    if (!translated) return "";
+    marked.setOptions({ breaks: true, gfm: true });
+    return marked.parse(translated) as string;
+  }, [translated]);
+
+  // The text to use for Replace/Copy — always the translated version
+  const outputText = translated || result?.result || "";
+
   // Dismiss on Escape
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -97,26 +127,26 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
   }, [authStatus, selection]);
 
   const handleReplace = useCallback(async () => {
-    if (!result) return;
+    if (!outputText) return;
     try {
-      await invoke("replace_text", { text: result.result });
+      await invoke("replace_text", { text: outputText });
       await invoke("dismiss_popup");
       resetState();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
-  }, [result]);
+  }, [outputText]);
 
   const handleCopy = useCallback(async () => {
-    if (!result) return;
+    if (!outputText) return;
     try {
-      await invoke("copy_to_clipboard", { text: result.result });
+      await invoke("copy_to_clipboard", { text: outputText });
       await invoke("dismiss_popup");
       resetState();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
-  }, [result]);
+  }, [outputText]);
 
   const handleDismiss = useCallback(async () => {
     try {
@@ -203,14 +233,6 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
     );
   }
 
-  // Render markdown result
-  const renderedHtml = useMemo(() => {
-    if (!result?.result) return "";
-    // Configure marked for inline rendering (no wrapping <p> for single lines)
-    marked.setOptions({ breaks: true, gfm: true });
-    return marked.parse(result.result) as string;
-  }, [result?.result]);
-
   // ── Expanded state (auto-sized with result) ──
   return (
     <div className="flex flex-col rounded-xl"
@@ -221,9 +243,20 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
       }}
     >
       <div className="px-4 py-3 overflow-auto" style={{ maxHeight: "340px" }}>
+        {reorganizedHtml && (
+          <>
+            <div className="text-[10px] font-medium text-gray-400 uppercase tracking-wider mb-1">Reorganized</div>
+            <div
+              className="text-sm leading-relaxed text-gray-600 prose prose-sm max-w-none"
+              dangerouslySetInnerHTML={{ __html: reorganizedHtml }}
+            />
+            <hr className="my-2 border-gray-200" />
+            <div className="text-[10px] font-medium text-gray-400 uppercase tracking-wider mb-1">Translation</div>
+          </>
+        )}
         <div
           className="text-sm leading-relaxed text-gray-800 prose prose-sm max-w-none"
-          dangerouslySetInnerHTML={{ __html: renderedHtml }}
+          dangerouslySetInnerHTML={{ __html: translatedHtml }}
         />
       </div>
       <div className="flex items-center justify-end gap-1.5 border-t border-gray-100 px-3 py-2">
