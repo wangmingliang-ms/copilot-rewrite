@@ -287,8 +287,9 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
           boxShadow: "0 8px 32px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.06)",
         }}
       >
-        {/* Content area */}
-        <div className="overflow-auto px-5 pt-6 pb-3" style={{ maxHeight: "340px", userSelect: "text", WebkitUserSelect: "text" }}>
+        {/* Content area — padding stays fixed, content scrolls inside */}
+        <div className="px-5 pt-5 pb-3">
+          <div className="overflow-auto" style={{ maxHeight: "320px", userSelect: "text", WebkitUserSelect: "text" }}>
           {/* Translation — hero content, no label needed when it's the only section */}
           <div
             className="text-[13.5px] leading-[1.7] text-gray-800 prose prose-sm max-w-none prose-p:my-1 prose-li:my-0.5 prose-ul:my-1.5 prose-ol:my-1.5 prose-headings:my-1.5 prose-strong:text-gray-900"
@@ -317,6 +318,7 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
               )}
             </div>
           )}
+          </div>
         </div>
 
         {/* Action bar */}
