@@ -117,11 +117,12 @@ pub fn show_popup_icon(app_handle: &AppHandle, mouse_x: i32, mouse_y: i32, input
         *POPUP_POS.lock() = (x, y);
         *INPUT_RECT.lock() = input_rect;
 
-        // Ensure icon size + WS_EX_NOACTIVATE
+        // Ensure icon size (+ shadow margin) + WS_EX_NOACTIVATE
         set_noactivate(app_handle, true);
-        resize_popup_physical(app_handle, ICON_SIZE, ICON_SIZE);
+        let sm_physical = SHADOW_MARGIN * scale;
+        resize_popup_physical(app_handle, ICON_SIZE + sm_physical * 2.0, ICON_SIZE + sm_physical * 2.0);
 
-        let _ = window.set_position(Position::Logical(LogicalPosition::new(x, y)));
+        let _ = window.set_position(Position::Logical(LogicalPosition::new(x - SHADOW_MARGIN, y - SHADOW_MARGIN)));
         let _ = window.show();
 
         debug!("Popup icon shown at ({:.0}, {:.0})", x, y);
@@ -191,7 +192,13 @@ pub fn expand_popup(app_handle: &AppHandle, text: &str) {
 /// Shrink popup back to icon size and re-apply WS_EX_NOACTIVATE
 pub fn shrink_popup(app_handle: &AppHandle) {
     set_noactivate(app_handle, true);
-    resize_popup_physical(app_handle, ICON_SIZE, ICON_SIZE);
+    // Include shadow margin in the physical size
+    let scale = {
+        let (px, py) = *POPUP_POS.lock();
+        get_scale_at((px * 1.5) as i32, (py * 1.5) as i32) // approximate
+    };
+    let sm_physical = SHADOW_MARGIN * scale;
+    resize_popup_physical(app_handle, ICON_SIZE + sm_physical * 2.0, ICON_SIZE + sm_physical * 2.0);
 }
 
 /// Hide the popup window

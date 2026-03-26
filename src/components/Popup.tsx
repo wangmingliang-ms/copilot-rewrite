@@ -178,30 +178,32 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
   // ── Icon state (48×48) ──
   if (state === "icon") {
     return (
-      <div className="w-screen h-screen flex items-center justify-center"
-        style={{
-          background: "rgba(255,255,255,0.95)",
-          borderRadius: "24px",
-          border: "1px solid #e0e0e0",
-          boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
-        }}
-      >
-        <button
-          onPointerDown={(e) => { e.preventDefault(); handleIconClick(); }}
-          className="w-full h-full flex items-center justify-center"
-          style={{ cursor: "pointer", borderRadius: "24px" }}
-          title="Translate & Polish"
+      <div className="w-screen h-screen flex items-center justify-center" style={{ padding: "20px", background: "transparent" }}>
+        <div className="w-full h-full flex items-center justify-center"
+          style={{
+            background: "rgba(255,255,255,0.95)",
+            borderRadius: "24px",
+            border: "1px solid #e0e0e0",
+            boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+          }}
         >
-          <svg className="w-7 h-7" viewBox="0 0 24 24" fill="none" stroke="#0078D4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M5 8l4-4 4 4" />
-            <path d="M9 4v8" />
-            <path d="M12 20l3-6 3 6" />
-            <path d="M13.5 17h3" />
-            <path d="M2 16h4" />
-            <path d="M6 12c0 3-2.5 4-2.5 4" />
-            <path d="M6 12c0 0 2 1 4 1" />
-          </svg>
-        </button>
+          <button
+            onPointerDown={(e) => { e.preventDefault(); handleIconClick(); }}
+            className="w-full h-full flex items-center justify-center"
+            style={{ cursor: "pointer", borderRadius: "24px" }}
+            title="Translate & Polish"
+          >
+            <svg className="w-7 h-7" viewBox="0 0 24 24" fill="none" stroke="#0078D4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M5 8l4-4 4 4" />
+              <path d="M9 4v8" />
+              <path d="M12 20l3-6 3 6" />
+              <path d="M13.5 17h3" />
+              <path d="M2 16h4" />
+              <path d="M6 12c0 3-2.5 4-2.5 4" />
+              <path d="M6 12c0 0 2 1 4 1" />
+            </svg>
+          </button>
+        </div>
       </div>
     );
   }
@@ -209,15 +211,17 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
   // ── Spinning state (48×48 with spinner) ──
   if (state === "spinning") {
     return (
-      <div className="w-screen h-screen flex items-center justify-center"
-        style={{
-          background: "rgba(255,255,255,0.95)",
-          borderRadius: "24px",
-          border: "1px solid #e0e0e0",
-          boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
-        }}
-      >
-        <div className="h-6 w-6 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
+      <div className="w-screen h-screen flex items-center justify-center" style={{ padding: "20px", background: "transparent" }}>
+        <div className="w-full h-full flex items-center justify-center"
+          style={{
+            background: "rgba(255,255,255,0.95)",
+            borderRadius: "24px",
+            border: "1px solid #e0e0e0",
+            boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+          }}
+        >
+          <div className="h-6 w-6 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
+        </div>
       </div>
     );
   }
