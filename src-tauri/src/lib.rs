@@ -280,6 +280,8 @@ async fn process_and_show_preview(
         Err(e) => {
             let err_msg = format!("Copilot API error: {}", e);
             warn!("[POPUP] Error — {}", err_msg);
+            // Reset preview_visible so monitor can resume detecting selections
+            *state.preview_visible.lock() = false;
             let _ = app.emit("show-preview-error", &err_msg);
             Err(err_msg)
         }

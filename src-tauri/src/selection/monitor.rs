@@ -101,8 +101,21 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
             seen_generation = current_gen;
         }
 
-        let preview_is_visible = *state.preview_visible.lock();
+        let mut preview_is_visible = *state.preview_visible.lock();
         let poll_interval = state.settings.lock().poll_interval_ms;
+
+        // Safety check: if preview_visible flag is stuck but popup is actually hidden, auto-reset
+        if preview_is_visible {
+            if let Some(popup) = app_handle.get_webview_window("popup") {
+                if let Ok(visible) = popup.is_visible() {
+                    if !visible {
+                        warn!("preview_visible was true but popup is hidden — auto-resetting");
+                        *state.preview_visible.lock() = false;
+                        preview_is_visible = false;
+                    }
+                }
+            }
+        }
 
         // Try to get selected text via UIA
         // Skip if the foreground window is our own popup (e.g., user selecting text in preview)
