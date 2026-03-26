@@ -123,26 +123,24 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
   // Ref for expanded content container to measure actual height
   const contentRef = useRef<HTMLDivElement>(null);
 
-  // Resize popup window to fit rendered content
+  // Resize popup window to fit rendered content (only on initial expand)
   useEffect(() => {
     if (state !== "expanded" || !contentRef.current) return;
     // Wait a tick for DOM to settle after render
     const timer = setTimeout(() => {
       if (contentRef.current) {
-        // Sum up all direct children's heights to get natural content height
-        let totalHeight = 0;
-        const children = contentRef.current.children;
-        for (let i = 0; i < children.length; i++) {
-          totalHeight += (children[i] as HTMLElement).scrollHeight;
-        }
-        // Add border (2px) + small buffer to prevent scrollbar from rounding errors
-        totalHeight += 4;
+        // Temporarily remove maxHeight to measure natural content height
+        const card = contentRef.current;
+        const oldMaxH = card.style.maxHeight;
+        card.style.maxHeight = "none";
+        const totalHeight = card.scrollHeight;
+        card.style.maxHeight = oldMaxH;
         // Clamp and tell backend to resize
         invoke("resize_popup_content", { height: Math.min(Math.max(totalHeight, 80), 400) }).catch(() => {});
       }
     }, 50);
     return () => clearTimeout(timer);
-  }, [state, translatedHtml, reorganizedHtml, showOriginal, showRaw]);
+  }, [state, translatedHtml, reorganizedHtml]); // Only resize on content change, NOT on toggle/showRaw
 
   const handleIconClick = useCallback(async () => {
     if (!authStatus.logged_in) {
