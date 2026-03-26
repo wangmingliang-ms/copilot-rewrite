@@ -17,20 +17,31 @@ fn main() {
     }
 
     // FILE_SHARE_NONE = 0 means no other process can open this file
-    let _lock_file = match OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .share_mode(0) // No sharing — fails if another instance has it open
-        .open(&lock_path)
-    {
-        Ok(f) => f,
-        Err(_) => {
-            eprintln!("Copilot Rewrite is already running.");
-            std::process::exit(0);
+    // Retry a few times to handle restart scenarios where old process is still exiting
+    let mut lock_file = None;
+    for attempt in 0..10 {
+        match OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .share_mode(0)
+            .open(&lock_path)
+        {
+            Ok(f) => {
+                lock_file = Some(f);
+                break;
+            }
+            Err(_) if attempt < 9 => {
+                std::thread::sleep(std::time::Duration::from_millis(200));
+            }
+            Err(_) => {
+                eprintln!("Copilot Rewrite is already running.");
+                std::process::exit(0);
+            }
         }
-    };
+    }
 
     // _lock_file stays open for program lifetime, preventing second instances
+    let _lock_file = lock_file;
     copilot_rewrite_lib::run()
 }

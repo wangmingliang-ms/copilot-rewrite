@@ -1,5 +1,5 @@
 // System tray module
-// Creates a tray icon with Settings, Enable/Disable toggle, and Quit options
+// Creates a tray icon with Settings, Enable/Disable toggle, Restart, and Quit options
 
 use log::info;
 use std::sync::Arc;
@@ -21,6 +21,9 @@ pub fn setup_tray(app_handle: &AppHandle, state: Arc<AppState>) -> Result<(), Bo
     let toggle_item = MenuItemBuilder::with_id("toggle", "Disable")
         .build(app_handle)?;
 
+    let restart_item = MenuItemBuilder::with_id("restart", "Restart")
+        .build(app_handle)?;
+
     let quit_item = MenuItemBuilder::with_id("quit", "Quit")
         .build(app_handle)?;
 
@@ -29,6 +32,7 @@ pub fn setup_tray(app_handle: &AppHandle, state: Arc<AppState>) -> Result<(), Bo
         .separator()
         .item(&toggle_item)
         .separator()
+        .item(&restart_item)
         .item(&quit_item)
         .build()?;
 
@@ -64,6 +68,15 @@ pub fn setup_tray(app_handle: &AppHandle, state: Arc<AppState>) -> Result<(), Bo
                             }
                         }
                     }
+                }
+                "restart" => {
+                    info!("Restart requested from tray");
+                    // Spawn new instance after a short delay to allow lock file release
+                    if let Ok(exe) = std::env::current_exe() {
+                        let _ = std::process::Command::new(exe)
+                            .spawn();
+                    }
+                    app.exit(0);
                 }
                 "quit" => {
                     info!("Quit requested from tray");
