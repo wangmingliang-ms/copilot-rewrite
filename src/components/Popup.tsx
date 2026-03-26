@@ -226,7 +226,7 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
         <div className="w-full h-full flex items-center justify-center"
           style={{
             background: "linear-gradient(135deg, #fff 0%, #f0f4ff 100%)",
-            borderRadius: "14px",
+            borderRadius: "50%",
             border: "1px solid rgba(0,120,212,0.15)",
             boxShadow: "0 4px 16px rgba(0,120,212,0.12), 0 1px 3px rgba(0,0,0,0.08)",
           }}
@@ -234,7 +234,7 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
           <button
             onPointerDown={(e) => { e.preventDefault(); handleIconClick(); }}
             className="w-full h-full flex items-center justify-center group"
-            style={{ cursor: "pointer", borderRadius: "14px" }}
+            style={{ cursor: "pointer", borderRadius: "50%" }}
             title="Translate & Polish"
           >
             <img
@@ -256,7 +256,7 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
         <div className="w-full h-full flex items-center justify-center"
           style={{
             background: "linear-gradient(135deg, #fff 0%, #f0f4ff 100%)",
-            borderRadius: "14px",
+            borderRadius: "50%",
             border: "1px solid rgba(0,120,212,0.15)",
             boxShadow: "0 4px 16px rgba(0,120,212,0.12), 0 1px 3px rgba(0,0,0,0.08)",
           }}
