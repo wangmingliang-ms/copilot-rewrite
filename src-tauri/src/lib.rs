@@ -441,22 +441,32 @@ fn open_settings(app: tauri::AppHandle) -> Result<(), String> {
     }
 }
 
-/// Open the log file in the default text editor
+/// Open today's log file in the default text editor
 #[tauri::command]
 fn open_log_file() -> Result<(), String> {
-    let log_path = dirs::config_dir()
+    let log_dir = dirs::config_dir()
         .unwrap_or_else(|| std::path::PathBuf::from("."))
         .join("copilot-rewrite")
-        .join("copilot-rewrite.log");
+        .join("logs");
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    let log_path = log_dir.join(format!("{}.log", today));
     if log_path.exists() {
-        // Use explorer to open — handles paths with spaces correctly
         std::process::Command::new("explorer")
             .arg(&log_path)
             .spawn()
             .map_err(|e| format!("Failed to open log file: {}", e))?;
         Ok(())
     } else {
-        Err("Log file not found".to_string())
+        // Try opening the logs directory instead
+        if log_dir.exists() {
+            std::process::Command::new("explorer")
+                .arg(&log_dir)
+                .spawn()
+                .map_err(|e| format!("Failed to open logs directory: {}", e))?;
+            Ok(())
+        } else {
+            Err("No log files found".to_string())
+        }
     }
 }
 
@@ -572,28 +582,22 @@ async fn resize_popup_content(
 // ─── App Entry Point ──────────────────────────────────────────────
 
 pub fn run() {
-    // Set up logging to both stderr and a log file
+    // Set up logging to both stderr and date-rotated log files
     let log_dir = dirs::config_dir()
         .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join("copilot-rewrite");
+        .join("copilot-rewrite")
+        .join("logs");
     let _ = std::fs::create_dir_all(&log_dir);
-    let log_path = log_dir.join("copilot-rewrite.log");
+    let log_dir_for_closure = log_dir.clone();
 
-    // Append mode — keep history across sessions
-    let log_file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&log_path)
-        .ok();
-
-    // Write a session separator on startup
-    if let Some(ref file) = log_file {
-        use std::io::Write;
-        let _ = writeln!(
-            &*file,
-            "\n--- Session started: {} ---",
-            chrono::Local::now().format("%Y-%m-%d %H:%M:%S")
-        );
+    // Write a session separator to today's log
+    {
+        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+        let log_path = log_dir.join(format!("{}.log", today));
+        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&log_path) {
+            use std::io::Write;
+            let _ = writeln!(f, "\n--- Session started: {} ---", chrono::Local::now().format("%Y-%m-%d %H:%M:%S"));
+        }
     }
 
     env_logger::Builder::new()
@@ -601,21 +605,23 @@ pub fn run() {
         .filter_module("copilot_rewrite", LevelFilter::Debug)
         .format(move |buf, record| {
             use std::io::Write;
+            let now = chrono::Local::now();
             let line = format!(
                 "[{} {} {}] {}\n",
-                chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
+                now.format("%Y-%m-%d %H:%M:%S"),
                 record.level(),
                 record.module_path().unwrap_or(""),
                 record.args()
             );
             // Write to stderr (all levels — for terminal debugging)
             let _ = buf.write_all(line.as_bytes());
-            // Write to log file (INFO and above only — skip noisy debug)
+            // Write to date-rotated log file (INFO and above only)
             if record.level() <= log::Level::Info {
-                if let Some(ref file) = log_file {
-                    use std::io::Write as _;
-                    let _ = (&*file).write_all(line.as_bytes());
-                    let _ = (&*file).flush();
+                let today = now.format("%Y-%m-%d").to_string();
+                let log_path = log_dir_for_closure.join(format!("{}.log", today));
+                if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&log_path) {
+                    let _ = f.write_all(line.as_bytes());
+                    let _ = f.flush();
                 }
             }
             Ok(())
