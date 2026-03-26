@@ -31,7 +31,7 @@
         "label": "settings",
         "title": "Copilot Rewrite Settings",
         "width": 480,
-        "height": 600,
+        "height": 640,
         "resizable": false,
         "decorations": true,
         "transparent": false,

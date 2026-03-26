@@ -148,9 +148,9 @@ const SettingsPanel: FC = () => {
         <p className="text-xs text-gray-500 mb-4">Settings</p>
 
         {/* Account Section */}
-        <section className="bg-white rounded-lg shadow-sm border border-gray-200 px-4 py-3 mb-3">
-          <h2 className="text-xs font-semibold text-gray-500 uppercase mb-2 flex items-center gap-1.5">
-            <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="currentColor">
+        <section className="bg-white rounded-xl shadow-sm border border-gray-200 p-5 mb-4">
+          <h2 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+            <svg className="w-4 h-4" viewBox="0 0 16 16" fill="currentColor">
               <path fillRule="evenodd" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" />
             </svg>
             GitHub Account
@@ -162,18 +162,25 @@ const SettingsPanel: FC = () => {
                 <img
                   src={`https://github.com/${authStatus.username}.png?size=64`}
                   alt={authStatus.username || "User"}
-                  className="w-6 h-6 rounded-full"
+                  className="w-8 h-8 rounded-full"
                   onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
                 />
-                <span className="text-sm font-medium text-gray-900">{authStatus.username}</span>
-                <span className="text-xs text-green-600">● Connected</span>
+                <div>
+                  <p className="text-sm font-medium text-gray-900">{authStatus.username || "Connected"}</p>
+                  <p className="text-xs text-green-600">● Copilot active</p>
+                </div>
               </div>
-              <button onClick={handleLogout} className="text-xs text-red-500 hover:text-red-700">Sign out</button>
+              <button
+                onClick={handleLogout}
+                className="text-xs text-red-500 hover:text-red-700 transition-colors"
+              >
+                Sign out
+              </button>
             </div>
           ) : loginStep === "idle" ? (
             <button
               onClick={handleLogin}
-              className="w-full rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 flex items-center justify-center gap-2"
+              className="w-full rounded-lg bg-gray-900 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-gray-800 active:scale-[0.98] flex items-center justify-center gap-2"
             >
               <svg className="w-4 h-4" viewBox="0 0 16 16" fill="currentColor">
                 <path fillRule="evenodd" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" />
@@ -181,41 +188,48 @@ const SettingsPanel: FC = () => {
               Sign in with GitHub
             </button>
           ) : loginStep === "loading" ? (
-            <div className="flex items-center justify-center py-2">
-              <div className="h-4 w-4 animate-spin rounded-full border-2 border-gray-300 border-t-gray-900" />
-              <span className="ml-2 text-sm text-gray-500">Connecting...</span>
+            <div className="flex items-center justify-center py-4">
+              <div className="h-5 w-5 animate-spin rounded-full border-2 border-gray-300 border-t-gray-900" />
+              <span className="ml-3 text-sm text-gray-500">Connecting...</span>
             </div>
           ) : loginStep === "code" && deviceCode ? (
             <div>
               <p className="text-sm text-gray-600 mb-2">Copy this code and enter it on GitHub:</p>
-              <div className="rounded-lg bg-gray-50 border-2 border-dashed border-gray-200 p-2 mb-2 text-center">
-                <span className="font-mono text-lg font-bold tracking-[0.3em] text-gray-900 select-all">{deviceCode.user_code}</span>
+              <div className="rounded-lg bg-gray-50 border-2 border-dashed border-gray-200 p-3 mb-3 text-center">
+                <span className="font-mono text-xl font-bold tracking-[0.3em] text-gray-900 select-all">
+                  {deviceCode.user_code}
+                </span>
               </div>
               <button
                 onClick={handleCopyAndOpen}
-                className="w-full rounded-lg bg-copilot-blue px-4 py-2 text-sm font-medium text-white hover:bg-copilot-blue-hover flex items-center justify-center gap-2"
+                className="w-full rounded-lg bg-copilot-blue px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-copilot-blue-hover flex items-center justify-center gap-2"
               >
                 {copied ? "✓ Copied!" : "📋 Copy & Open GitHub"}
               </button>
             </div>
           ) : loginStep === "waiting" ? (
-            <div className="text-center py-2">
+            <div className="text-center py-3">
               {deviceCode && (
-                <div className="rounded-lg bg-gray-50 border border-gray-200 p-1.5 mb-2">
-                  <span className="font-mono text-base font-bold tracking-[0.2em] text-gray-400">{deviceCode.user_code}</span>
+                <div className="rounded-lg bg-gray-50 border border-gray-200 p-2 mb-3">
+                  <span className="font-mono text-lg font-bold tracking-[0.2em] text-gray-400">{deviceCode.user_code}</span>
                 </div>
               )}
               <div className="flex items-center justify-center">
-                <div className="h-4 w-4 animate-spin rounded-full border-2 border-copilot-blue border-t-transparent" />
-                <span className="ml-2 text-sm text-gray-500">Waiting for authorization...</span>
+                <div className="h-5 w-5 animate-spin rounded-full border-2 border-copilot-blue border-t-transparent" />
+                <span className="ml-3 text-sm text-gray-500">Waiting for authorization...</span>
               </div>
             </div>
           ) : loginStep === "error" ? (
             <div>
-              <div className="rounded-lg bg-red-50 border border-red-200 p-2 mb-2">
+              <div className="rounded-lg bg-red-50 border border-red-200 p-3 mb-3">
                 <p className="text-sm text-red-700">{loginError}</p>
               </div>
-              <button onClick={handleLogin} className="w-full rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800">Try Again</button>
+              <button
+                onClick={handleLogin}
+                className="w-full rounded-lg bg-gray-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-gray-800"
+              >
+                Try Again
+              </button>
             </div>
           ) : null}
         </section>
