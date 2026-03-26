@@ -149,11 +149,11 @@ pub fn expand_popup(app_handle: &AppHandle, text: &str) {
             let input_w = (rw as f64 / scale).max(200.0);
             let input_h = rh as f64 / scale;
 
-            // Position popup so its bottom edge touches the input's top edge
-            let mut py = input_y - height;
+            // Position popup above input with 12px gap (shadow clearance)
+            let mut py = input_y - height - 12.0;
             if py < 0.0 {
-                // Not enough room above — go below the input
-                py = input_y + input_h;
+                // Not enough room above — go below the input (with gap)
+                py = input_y + input_h + 12.0;
             }
             // If still overflows bottom, clamp
             if py + height > screen_h {
@@ -309,7 +309,8 @@ fn extract_translated(text: &str) -> Option<&str> {
 /// Anchors the bottom edge — grows/shrinks upward
 pub fn resize_popup_to_content(app_handle: &AppHandle, content_height: f64) {
     if let Some(window) = app_handle.get_webview_window("popup") {
-        let height = content_height.clamp(EXPANDED_MIN_HEIGHT, EXPANDED_MAX_HEIGHT);
+        // Add 20px buffer to avoid sub-pixel scrollbar
+        let height = (content_height + 20.0).clamp(EXPANDED_MIN_HEIGHT, EXPANDED_MAX_HEIGHT);
         let stored_input = *INPUT_RECT.lock();
         let bottom = *POPUP_BOTTOM.lock();
 
