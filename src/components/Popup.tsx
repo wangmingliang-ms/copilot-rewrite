@@ -140,6 +140,21 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
     }
   }, [authStatus, selection]);
 
+  const handleRefresh = useCallback(async () => {
+    if (!selection) return;
+    setState("spinning");
+    setResult(null);
+    setError(null);
+    try {
+      await invoke("process_and_show_preview", {
+        request: { text: selection.text, action: "TranslateAndPolish" },
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setState("error");
+    }
+  }, [selection]);
+
   const handleReplace = useCallback(async () => {
     if (!outputText) return;
     try {
@@ -286,6 +301,13 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
             className="rounded-md px-3 py-1.5 text-xs font-medium text-gray-400 hover:bg-gray-100 hover:text-gray-600"
           >
             ✕
+          </button>
+          <button
+            onClick={handleRefresh}
+            className="rounded-md px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-100"
+            title="Regenerate"
+          >
+            🔄
           </button>
           <button
             onClick={handleCopy}
