@@ -142,15 +142,20 @@ const SettingsPanel: FC = () => {
   }, []);
 
   return (
-    <div className="min-h-screen bg-gray-50 p-4">
-      <div className="max-w-lg mx-auto">
-        <div className="flex items-baseline justify-between mb-3">
-          <h1 className="text-lg font-bold text-gray-900">Copilot Rewrite</h1>
-          {saved && <span className="text-xs text-green-500">✓ Saved</span>}
-        </div>
+    <div className="min-h-screen bg-gray-50 p-5">
+      <div className="max-w-md mx-auto">
+        <h1 className="text-lg font-bold text-gray-900 mb-0.5">Copilot Rewrite</h1>
+        <p className="text-xs text-gray-500 mb-4">Settings</p>
 
         {/* Account Section */}
         <section className="bg-white rounded-lg shadow-sm border border-gray-200 px-4 py-3 mb-3">
+          <h2 className="text-xs font-semibold text-gray-500 uppercase mb-2 flex items-center gap-1.5">
+            <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="currentColor">
+              <path fillRule="evenodd" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" />
+            </svg>
+            GitHub Account
+          </h2>
+
           {authStatus.logged_in ? (
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -215,76 +220,78 @@ const SettingsPanel: FC = () => {
           ) : null}
         </section>
 
-        {/* Model + Language — side by side */}
+        {/* Model Section */}
         <section className="bg-white rounded-lg shadow-sm border border-gray-200 px-4 py-3 mb-3">
-          <div className="flex gap-3">
-            {/* Model */}
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center justify-between mb-1.5">
-                <span className="text-xs font-semibold text-gray-500 uppercase">Model</span>
-                <button onClick={fetchModels} className="text-xs text-copilot-blue hover:underline" disabled={modelsLoading}>
-                  {modelsLoading ? "..." : "↻"}
-                </button>
-              </div>
-              <select
-                value={settings.model}
-                onChange={(e) => setSettings({ ...settings, model: e.target.value })}
-                className={`w-full rounded border px-2 py-1.5 text-sm focus:outline-none focus:ring-1 ${
-                  !settings.model
-                    ? "border-red-400 focus:ring-red-500"
-                    : "border-gray-200 focus:border-copilot-blue focus:ring-copilot-blue"
-                }`}
-              >
-                {!settings.model && <option value="" disabled>— Select —</option>}
-                {models.map((model) => (
-                  <option key={model.id} value={model.id}>
-                    {model.name}{model.preview ? " (Preview)" : ""}
-                  </option>
-                ))}
-                {models.length === 0 && settings.model && (
-                  <option value={settings.model}>{settings.model}</option>
-                )}
-              </select>
-              {!settings.model && <p className="text-xs text-red-500 mt-0.5">Required</p>}
-            </div>
-
-            {/* Language */}
-            <div className="w-40 flex-shrink-0">
-              <span className="text-xs font-semibold text-gray-500 uppercase block mb-1.5">Language</span>
-              <select
-                value={settings.target_language}
-                onChange={(e) => setSettings({ ...settings, target_language: e.target.value })}
-                className="w-full rounded border border-gray-200 px-2 py-1.5 text-sm focus:border-copilot-blue focus:outline-none focus:ring-1 focus:ring-copilot-blue"
-              >
-                {LANGUAGES.map((lang) => <option key={lang} value={lang}>{lang}</option>)}
-              </select>
-            </div>
+          <div className="flex items-center justify-between mb-1.5">
+            <h2 className="text-xs font-semibold text-gray-500 uppercase">AI Model</h2>
+            <button onClick={fetchModels} className="text-xs text-copilot-blue hover:underline" disabled={modelsLoading}>
+              {modelsLoading ? "..." : "↻ Refresh"}
+            </button>
           </div>
+          <select
+            value={settings.model}
+            onChange={(e) => setSettings({ ...settings, model: e.target.value })}
+            className={`w-full rounded border px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 ${
+              !settings.model
+                ? "border-red-400 focus:ring-red-500"
+                : "border-gray-200 focus:border-copilot-blue focus:ring-copilot-blue"
+            }`}
+          >
+            {!settings.model && <option value="" disabled>— Select a model —</option>}
+            {models.map((model) => (
+              <option key={model.id} value={model.id}>
+                {model.name}{model.preview ? " (Preview)" : ""} — {model.vendor || model.id}
+              </option>
+            ))}
+            {models.length === 0 && settings.model && (
+              <option value={settings.model}>{settings.model}</option>
+            )}
+          </select>
+          {!settings.model && <p className="text-xs text-red-500 mt-0.5">⚠ Model is required</p>}
         </section>
 
-        {/* Beast Mode + Auto Start — side by side */}
+        {/* Language Section */}
         <section className="bg-white rounded-lg shadow-sm border border-gray-200 px-4 py-3 mb-3">
-          <div className="flex items-center gap-6">
-            <label className="flex items-center gap-2 cursor-pointer flex-1">
-              <input
-                type="checkbox"
-                checked={settings.beast_mode}
-                onChange={(e) => setSettings({ ...settings, beast_mode: e.target.checked })}
-                className="w-4 h-4 rounded border-gray-300 text-copilot-blue focus:ring-copilot-blue"
-              />
-              <span className="text-sm text-gray-700">🐺 Beast Mode</span>
-            </label>
-            <label className="flex items-center gap-2 cursor-pointer flex-1">
-              <input
-                type="checkbox"
-                checked={settings.auto_start}
-                onChange={(e) => setSettings({ ...settings, auto_start: e.target.checked })}
-                className="w-4 h-4 rounded border-gray-300 text-copilot-blue focus:ring-copilot-blue"
-              />
-              <span className="text-sm text-gray-700">Start on login</span>
-            </label>
-          </div>
+          <h2 className="text-xs font-semibold text-gray-500 uppercase mb-1.5">Target Language</h2>
+          <select
+            value={settings.target_language}
+            onChange={(e) => setSettings({ ...settings, target_language: e.target.value })}
+            className="w-full rounded border border-gray-200 px-2.5 py-1.5 text-sm focus:border-copilot-blue focus:outline-none focus:ring-1 focus:ring-copilot-blue"
+          >
+            {LANGUAGES.map((lang) => <option key={lang} value={lang}>{lang}</option>)}
+          </select>
         </section>
+
+        {/* Beast Mode */}
+        <section className="bg-white rounded-lg shadow-sm border border-gray-200 px-4 py-3 mb-3">
+          <label className="flex items-center justify-between cursor-pointer">
+            <div>
+              <span className="text-sm font-medium text-gray-700">🐺 Beast Mode</span>
+              <p className="text-xs text-gray-400 mt-0.5">Full creative rewrite — examples, restructuring, best version</p>
+            </div>
+            <input
+              type="checkbox"
+              checked={settings.beast_mode}
+              onChange={(e) => setSettings({ ...settings, beast_mode: e.target.checked })}
+              className="w-4 h-4 rounded border-gray-300 text-copilot-blue focus:ring-copilot-blue ml-3 flex-shrink-0"
+            />
+          </label>
+        </section>
+
+        {/* General */}
+        <section className="bg-white rounded-lg shadow-sm border border-gray-200 px-4 py-3 mb-3">
+          <label className="flex items-center justify-between cursor-pointer">
+            <span className="text-sm text-gray-700">Start on Windows login</span>
+            <input
+              type="checkbox"
+              checked={settings.auto_start}
+              onChange={(e) => setSettings({ ...settings, auto_start: e.target.checked })}
+              className="w-4 h-4 rounded border-gray-300 text-copilot-blue focus:ring-copilot-blue"
+            />
+          </label>
+        </section>
+
+        {saved && <p className="text-center text-xs text-green-500 mt-1">✓ Saved</p>}
 
         <div className="flex items-center justify-between mt-3 text-xs text-gray-400">
           <button
