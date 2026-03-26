@@ -444,8 +444,9 @@ fn open_log_file() -> Result<(), String> {
         .join("copilot-rewrite")
         .join("copilot-rewrite.log");
     if log_path.exists() {
-        std::process::Command::new("cmd")
-            .args(["/c", "start", "", &log_path.to_string_lossy()])
+        // Use explorer to open — handles paths with spaces correctly
+        std::process::Command::new("explorer")
+            .arg(&log_path)
             .spawn()
             .map_err(|e| format!("Failed to open log file: {}", e))?;
         Ok(())
@@ -572,13 +573,22 @@ pub fn run() {
     let _ = std::fs::create_dir_all(&log_dir);
     let log_path = log_dir.join("copilot-rewrite.log");
 
-    // Truncate log file on startup (keep only current session)
+    // Append mode — keep history across sessions
     let log_file = std::fs::OpenOptions::new()
         .create(true)
-        .write(true)
-        .truncate(true)
+        .append(true)
         .open(&log_path)
         .ok();
+
+    // Write a session separator on startup
+    if let Some(ref file) = log_file {
+        use std::io::Write;
+        let _ = writeln!(
+            &*file,
+            "\n--- Session started: {} ---",
+            chrono::Local::now().format("%Y-%m-%d %H:%M:%S")
+        );
+    }
 
     env_logger::Builder::new()
         .filter_level(LevelFilter::Info)
@@ -592,13 +602,15 @@ pub fn run() {
                 record.module_path().unwrap_or(""),
                 record.args()
             );
-            // Write to stderr (default)
+            // Write to stderr (all levels — for terminal debugging)
             let _ = buf.write_all(line.as_bytes());
-            // Also write to log file
-            if let Some(ref file) = log_file {
-                use std::io::Write as _;
-                let _ = (&*file).write_all(line.as_bytes());
-                let _ = (&*file).flush();
+            // Write to log file (INFO and above only — skip noisy debug)
+            if record.level() <= log::Level::Info {
+                if let Some(ref file) = log_file {
+                    use std::io::Write as _;
+                    let _ = (&*file).write_all(line.as_bytes());
+                    let _ = (&*file).flush();
+                }
             }
             Ok(())
         })
