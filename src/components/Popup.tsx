@@ -286,7 +286,7 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
         }}
       >
         {/* Content area */}
-        <div className="overflow-auto flex-1 px-5 pt-5 pb-3" style={{ maxHeight: "340px", userSelect: "text", WebkitUserSelect: "text" }}>
+        <div className="overflow-auto px-5 pt-5 pb-3" style={{ maxHeight: "340px", userSelect: "text", WebkitUserSelect: "text" }}>
           {reorganizedHtml && (
             <>
               {/* Reorganized section — muted card */}

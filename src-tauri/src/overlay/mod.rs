@@ -33,8 +33,8 @@ const EXPANDED_MAX_HEIGHT: f64 = 400.0;
 const SHADOW_MARGIN: f64 = 20.0;
 /// Button bar height
 const BUTTONS_HEIGHT: f64 = 34.0;
-/// Text area padding (top 20 + bottom 12 + reorganized card ~24)
-const TEXT_PADDING: f64 = 56.0;
+/// Text area padding (top 20 + bottom 12 + labels ~16)
+const TEXT_PADDING: f64 = 48.0;
 /// Approximate line height
 const LINE_HEIGHT_PX: f64 = 18.0;
 /// Approximate characters per line
