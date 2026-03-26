@@ -420,9 +420,20 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
             {currentModel && (
               <span className="text-[10px] text-gray-400 font-mono truncate max-w-[120px]" title={currentModel}>{currentModel}</span>
             )}
-            {beastMode && (
-              <span className="text-[10px]" title="Beast Mode">🐺</span>
-            )}
+            <button
+              onClick={async () => {
+                const newVal = !beastMode;
+                setBeastMode(newVal);
+                try {
+                  const s = await invoke<{ model: string; beast_mode: boolean }>("get_settings");
+                  await invoke("update_settings", { settings: { ...s, beast_mode: newVal } });
+                } catch {}
+              }}
+              className={`flex items-center justify-center w-7 h-7 rounded-lg transition-colors ${beastMode ? "text-amber-600 bg-amber-50 hover:bg-amber-100" : "text-gray-400 hover:bg-gray-200/60 hover:text-gray-600"}`}
+              title={beastMode ? "Beast Mode ON — click to disable" : "Beast Mode OFF — click to enable"}
+            >
+              <span className="text-sm leading-none">🐺</span>
+            </button>
             <button
               onClick={() => invoke("open_settings").catch(() => {})}
               className="flex items-center justify-center w-7 h-7 rounded-lg text-gray-400 hover:bg-gray-200/60 hover:text-gray-600 transition-colors"
