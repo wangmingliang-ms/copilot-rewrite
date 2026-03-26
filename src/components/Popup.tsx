@@ -420,38 +420,16 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
             {currentModel && (
               <span className="text-[10px] text-gray-400 font-mono truncate max-w-[120px]" title={currentModel}>{currentModel}</span>
             )}
-            <button
-              onClick={async () => {
-                const newVal = !beastMode;
-                setBeastMode(newVal);
-                try {
-                  const s = await invoke<{ model: string; beast_mode: boolean }>("get_settings");
-                  await invoke("update_settings", { settings: { ...s, beast_mode: newVal } });
-                } catch {}
-                // Auto-refresh with new mode
-                if (selection && !refreshing) {
-                  setRefreshing(true);
-                  refreshingRef.current = true;
-                  setError(null);
-                  try {
-                    await invoke("process_and_show_preview", {
-                      request: { text: selection.text, action: "TranslateAndPolish", is_refresh: true },
-                    });
-                  } catch (err) {
-                    setError(err instanceof Error ? err.message : String(err));
-                    setState("error");
-                    setRefreshing(false);
-                    refreshingRef.current = false;
-                  }
-                }
-              }}
-              className={`flex items-center justify-center w-7 h-7 rounded-lg transition-colors ${beastMode ? "text-blue-500 bg-blue-50 hover:bg-blue-100" : "text-gray-400 hover:bg-gray-200/60 hover:text-gray-600"}`}
-              title={beastMode ? "Beast Mode: ON\nLLM will fully rewrite with creative freedom — adds examples, restructures, crafts the best version.\nClick to disable." : "Beast Mode: OFF\nClick to enable creative rewriting."}
-            >
-              <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="currentColor">
-                <path d="M1 2.5L3.5 8l-1 2.5C2.5 10.5 4 13 8 14c4-1 5.5-3.5 5.5-3.5L12.5 8 15 2.5 11.5 5 8 1 4.5 5z" />
-              </svg>
-            </button>
+            {beastMode && (
+              <span
+                className="flex items-center justify-center w-7 h-7 rounded-lg text-blue-500 bg-blue-50"
+                title="Beast Mode: ON — LLM will fully rewrite with creative freedom. Change in Settings."
+              >
+                <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M1 2.5L3.5 8l-1 2.5C2.5 10.5 4 13 8 14c4-1 5.5-3.5 5.5-3.5L12.5 8 15 2.5 11.5 5 8 1 4.5 5z" />
+                </svg>
+              </span>
+            )}
             <button
               onClick={() => invoke("open_settings").catch(() => {})}
               className="flex items-center justify-center w-7 h-7 rounded-lg text-gray-400 hover:bg-gray-200/60 hover:text-gray-600 transition-colors"
