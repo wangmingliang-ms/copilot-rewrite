@@ -30,7 +30,7 @@ fn get_window_context(hwnd: isize) -> (String, String) {
         let mut pid = 0u32;
         unsafe { GetWindowThreadProcessId(h, Some(&mut pid)) };
         if pid > 0 {
-            if let Ok(process) = (unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) }) {
+            if let Ok(process) = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) } {
                 let mut buf = [0u16; 512];
                 let mut size = buf.len() as u32;
                 if unsafe { QueryFullProcessImageNameW(process, PROCESS_NAME_FORMAT(0), windows::core::PWSTR(buf.as_mut_ptr()), &mut size) }.is_ok() {
