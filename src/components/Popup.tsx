@@ -72,7 +72,6 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
       setState("icon");
       setResult(null);
       setError(null);
-      refreshSettings();
     });
 
     return () => {
@@ -193,6 +192,9 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
     }
     if (!selection) return;
 
+    // Refresh settings display (model name + beast mode) before sending request
+    refreshSettings();
+
     setState("spinning");
     try {
       await invoke("process_and_show_preview", {
@@ -202,7 +204,7 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
       setError(err instanceof Error ? err.message : String(err));
       setState("error");
     }
-  }, [authStatus, selection]);
+  }, [authStatus, selection, refreshSettings]);
 
   const [refreshing, setRefreshing] = useState(false);
   const refreshingRef = useRef(false);
