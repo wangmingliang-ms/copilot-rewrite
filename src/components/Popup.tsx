@@ -280,27 +280,25 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
   // ── Expanded state (auto-sized with result) ──
   return (
     <div className="w-screen h-screen" style={{ padding: "20px", background: "transparent" }}>
-      <div className="flex flex-col rounded-lg overflow-hidden pt-1"
+      <div className="flex flex-col rounded-lg overflow-hidden"
         style={{
           background: "#fff",
           border: "1px solid rgba(0,0,0,0.08)",
           boxShadow: "0 8px 32px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.06)",
+          maxHeight: "calc(100% - 40px)",
         }}
       >
-        {/* Translation — scrollable */}
-        <div className="px-5 pt-5 pb-3">
-          <div className="overflow-auto" style={{ maxHeight: "280px", userSelect: "text", WebkitUserSelect: "text" }}>
-            <div
-              className="text-[13.5px] leading-[1.7] text-gray-800 prose prose-sm max-w-none prose-p:my-1 prose-li:my-0.5 prose-ul:my-1.5 prose-ol:my-1.5 prose-headings:my-1.5 prose-strong:text-gray-900"
-              dangerouslySetInnerHTML={{ __html: translatedHtml }}
-            />
-          </div>
-        </div>
+        {/* Scrollable content area — translation + original */}
+        <div className="flex-1 min-h-0 overflow-auto px-5 pt-5 pb-3" style={{ userSelect: "text", WebkitUserSelect: "text" }}>
+          {/* Translation */}
+          <div
+            className="text-[13.5px] leading-[1.7] text-gray-800 prose prose-sm max-w-none prose-p:my-1 prose-li:my-0.5 prose-ul:my-1.5 prose-ol:my-1.5 prose-headings:my-1.5 prose-strong:text-gray-900"
+            dangerouslySetInnerHTML={{ __html: translatedHtml }}
+          />
 
-        {/* Reorganized — fixed below translation, above action bar */}
-        {reorganizedHtml && (
-          <div className="px-5 pb-2">
-            <div className="pt-2 border-t border-gray-100">
+          {/* Reorganized — collapsible, scrolls with content */}
+          {reorganizedHtml && (
+            <div className="mt-3 pt-3 border-t border-gray-100">
               <button
                 onClick={() => setShowOriginal(!showOriginal)}
                 className="flex items-center gap-1 text-[11px] text-gray-400 hover:text-gray-600 transition-colors"
@@ -314,18 +312,16 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
                 <span className="font-medium tracking-wide uppercase">Original (reorganized)</span>
               </button>
               {showOriginal && (
-                <div className="mt-2 overflow-auto text-[12px] leading-[1.55] text-gray-400 prose prose-sm max-w-none prose-p:my-0.5 prose-li:my-0.5 prose-ul:my-1 prose-ol:my-1"
-                  style={{ maxHeight: "120px" }}
-                >
+                <div className="mt-2 text-[12px] leading-[1.55] text-gray-400 prose prose-sm max-w-none prose-p:my-0.5 prose-li:my-0.5 prose-ul:my-1 prose-ol:my-1">
                   <div dangerouslySetInnerHTML={{ __html: reorganizedHtml }} />
                 </div>
               )}
             </div>
-          </div>
-        )}
+          )}
+        </div>
 
-        {/* Action bar */}
-        <div className="flex items-center justify-between border-t border-gray-100 px-3 py-2"
+        {/* Action bar — always visible at bottom */}
+        <div className="flex-shrink-0 flex items-center justify-between border-t border-gray-100 px-3 py-2"
           style={{ background: "rgba(249,250,251,0.8)" }}
         >
           <button
