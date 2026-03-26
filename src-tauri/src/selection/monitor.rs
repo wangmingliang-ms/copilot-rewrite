@@ -66,8 +66,10 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
         };
 
         let selected_text = if is_own_window {
-            // Don't poll UIA when our own popup is focused
-            None
+            // Don't poll UIA when our own popup is focused — preserve current state
+            debug!("Skipping UIA poll — own popup is foreground");
+            std::thread::sleep(Duration::from_millis(poll_interval));
+            continue;
         } else if let Some(ref uia_engine) = uia {
             match uia_engine.get_selected_text() {
                 Ok(text) => text,
@@ -95,6 +97,9 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
                         let text_changed = last_selection.as_ref() != Some(&text_trimmed);
 
                         if text_changed {
+                            debug!("Selection changed: {} chars (was {} chars)",
+                                text_trimmed.len(),
+                                last_selection.as_ref().map(|s| s.len()).unwrap_or(0));
                             debounce_text = Some(text_trimmed.clone());
                             last_change_time = Instant::now();
                             last_selection = Some(text_trimmed);
@@ -131,9 +136,8 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
         } else {
             // No selection detected
             if last_selection.is_some() && !preview_is_visible {
-                // Only hide if popup is NOT in expanded/spinning state.
-                // When user clicks the expanded popup, the source app loses focus
-                // and UIA returns no selection — but we must keep the popup alive.
+                debug!("Selection cleared — hiding popup (was {} chars)",
+                    last_selection.as_ref().map(|s| s.len()).unwrap_or(0));
                 last_selection = None;
                 debounce_text = None;
                 overlay::hide_popup(&app_handle);
