@@ -49,6 +49,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -60,6 +61,17 @@
     "windows": {
       "webviewInstallMode": {
         "type": "skip"
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDZCRTdERDAyNUY5NkMyMzcKUldRM3dwWmZBdDNuYTVPOEhPVm93NUdaSGt2dEwrMlRhQVhMRDlCQnh6QVJXbzV1VWkvMDBVT3YK",
+      "endpoints": [
+        "https://github.com/user/copilot-rewrite/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
       }
     }
   }

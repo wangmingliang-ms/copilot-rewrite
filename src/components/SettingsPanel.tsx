@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, type FC } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-shell";
+import { useUpdater } from "../hooks/useUpdater";
 
 interface AuthStatus {
   logged_in: boolean;
@@ -50,6 +51,7 @@ const SettingsPanel: FC = () => {
   const [saved, setSaved] = useState(false);
   const [models, setModels] = useState<CopilotModel[]>([]);
   const [modelsLoading, setModelsLoading] = useState(false);
+  const updater = useUpdater(5_000); // auto-check 5s after settings opens
 
   // Load on mount
   const [initialLoaded, setInitialLoaded] = useState(false);
@@ -307,6 +309,45 @@ const SettingsPanel: FC = () => {
 
         {saved && <p className="text-center text-xs text-green-500 mt-1">✓ Saved</p>}
 
+        {/* Update Section */}
+        {updater.status === "available" && (
+          <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 mt-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-blue-900">Update available: v{updater.version}</p>
+                {updater.notes && <p className="text-xs text-blue-700 mt-0.5 line-clamp-2">{updater.notes}</p>}
+              </div>
+              <button
+                onClick={updater.downloadAndInstall}
+                className="ml-3 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 transition-colors whitespace-nowrap"
+              >
+                Update Now
+              </button>
+            </div>
+          </div>
+        )}
+        {updater.status === "downloading" && (
+          <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 mt-3">
+            <p className="text-sm font-medium text-blue-900 mb-2">Downloading update... {updater.progress}%</p>
+            <div className="w-full bg-blue-200 rounded-full h-1.5">
+              <div
+                className="bg-blue-600 h-1.5 rounded-full transition-all duration-300"
+                style={{ width: `${updater.progress}%` }}
+              />
+            </div>
+          </div>
+        )}
+        {updater.status === "ready" && (
+          <div className="bg-green-50 border border-green-200 rounded-lg px-4 py-3 mt-3">
+            <p className="text-sm font-medium text-green-800">✓ Update installed — restarting...</p>
+          </div>
+        )}
+        {updater.status === "error" && (
+          <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-2 mt-3">
+            <p className="text-xs text-red-600">{updater.error}</p>
+          </div>
+        )}
+
         <div className="flex items-center justify-between mt-3 text-xs text-gray-400">
           <button
             onClick={() => invoke("open_log_file").catch(() => {})}
@@ -314,7 +355,20 @@ const SettingsPanel: FC = () => {
           >
             View Log
           </button>
-          <span>v0.1.0</span>
+          <div className="flex items-center gap-2">
+            {updater.status === "checking" ? (
+              <span className="text-gray-400">Checking...</span>
+            ) : updater.status === "idle" || updater.status === "upToDate" || updater.status === "error" ? (
+              <button
+                onClick={updater.checkForUpdate}
+                className="hover:text-copilot-blue transition-colors"
+                title="Check for updates"
+              >
+                {updater.status === "upToDate" ? "✓ Up to date" : "Check updates"}
+              </button>
+            ) : null}
+            <span>v0.1.0</span>
+          </div>
         </div>
       </div>
     </div>
