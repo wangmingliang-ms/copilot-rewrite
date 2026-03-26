@@ -139,7 +139,7 @@ pub fn expand_popup(app_handle: &AppHandle, text: &str) {
             let scale = get_scale_at(rx, ry);
             let input_x = rx as f64 / scale;
             let input_y = ry as f64 / scale;
-            let input_w = (rw as f64 / scale).clamp(200.0, 800.0);
+            let input_w = (rw as f64 / scale).max(200.0);
             let input_h = rh as f64 / scale;
 
             // Try above the input first
