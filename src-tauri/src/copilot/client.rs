@@ -60,10 +60,15 @@ Step 1 — REORGANIZE: The user's input may be casual, disorganized, rambling, o
 
 Step 2 — TRANSLATE: Translate the reorganized content into clear, natural, and idiomatic {target_language}. Avoid colloquial expressions and slang. The result should read as if originally written by a native {target_language} speaker in a professional context.
 
+Formatting:
+- Use Markdown formatting when it improves readability (bullet lists, numbered lists, **bold** for emphasis, etc.)
+- If the original text contains multiple distinct points, organize them as a list
+- Keep formatting minimal and purposeful — don't over-format simple sentences
+
 Rules:
 - Auto-detect the source language
 - The final output must be accurate, well-organized, logical, and easy to understand
-- Do NOT add explanations, notes, section headers, or any extra text
+- Do NOT add explanations, notes, section headers, or any extra text beyond the content itself
 - Return ONLY the final translated text in {target_language}"#,
     )
 }

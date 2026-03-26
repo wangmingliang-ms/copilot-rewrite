@@ -1,6 +1,7 @@
-import { useState, useCallback, useEffect, type FC } from "react";
+import { useState, useCallback, useEffect, useMemo, type FC } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { marked } from "marked";
 import { SelectionInfo, ProcessResponse } from "../hooks/useSelection";
 
 type PopupState = "icon" | "spinning" | "expanded" | "error";
@@ -202,6 +203,14 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
     );
   }
 
+  // Render markdown result
+  const renderedHtml = useMemo(() => {
+    if (!result?.result) return "";
+    // Configure marked for inline rendering (no wrapping <p> for single lines)
+    marked.setOptions({ breaks: true, gfm: true });
+    return marked.parse(result.result) as string;
+  }, [result?.result]);
+
   // ── Expanded state (auto-sized with result) ──
   return (
     <div className="flex flex-col rounded-xl"
@@ -212,9 +221,10 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
       }}
     >
       <div className="px-4 py-3 overflow-auto" style={{ maxHeight: "340px" }}>
-        <div className="text-sm leading-relaxed text-gray-800 whitespace-pre-wrap">
-          {result?.result}
-        </div>
+        <div
+          className="text-sm leading-relaxed text-gray-800 prose prose-sm max-w-none"
+          dangerouslySetInnerHTML={{ __html: renderedHtml }}
+        />
       </div>
       <div className="flex items-center justify-end gap-1.5 border-t border-gray-100 px-3 py-2">
         <button
