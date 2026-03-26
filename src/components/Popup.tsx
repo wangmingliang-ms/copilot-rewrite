@@ -135,8 +135,8 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
         for (let i = 0; i < children.length; i++) {
           totalHeight += (children[i] as HTMLElement).scrollHeight;
         }
-        // Add border (2px)
-        totalHeight += 2;
+        // Add border (2px) + small buffer to prevent scrollbar from rounding errors
+        totalHeight += 4;
         // Clamp and tell backend to resize
         invoke("resize_popup_content", { height: Math.min(Math.max(totalHeight, 80), 400) }).catch(() => {});
       }

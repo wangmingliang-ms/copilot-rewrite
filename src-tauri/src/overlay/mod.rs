@@ -48,6 +48,8 @@ const POPUP_OFFSET_Y: f64 = 16.0;
 static POPUP_POS: Mutex<(f64, f64)> = Mutex::new((0.0, 0.0));
 /// Stored input element rect (physical pixels) — for expand_popup sizing/positioning
 static INPUT_RECT: Mutex<Option<(i32, i32, i32, i32)>> = Mutex::new(None);
+/// Stored popup bottom edge (logical Y) — anchored during content resizing
+static POPUP_BOTTOM: Mutex<f64> = Mutex::new(0.0);
 
 /// Set up popup window styles — strip frame, apply WS_EX_NOACTIVATE
 pub fn setup_popup_window(app_handle: &AppHandle) {
@@ -147,11 +149,11 @@ pub fn expand_popup(app_handle: &AppHandle, text: &str) {
             let input_w = (rw as f64 / scale).max(200.0);
             let input_h = rh as f64 / scale;
 
-            // Try above the input first
-            let mut py = input_y - height - 4.0;
+            // Position popup so its bottom edge touches the input's top edge
+            let mut py = input_y - height;
             if py < 0.0 {
                 // Not enough room above — go below the input
-                py = input_y + input_h + 4.0;
+                py = input_y + input_h;
             }
             // If still overflows bottom, clamp
             if py + height > screen_h {
@@ -184,10 +186,14 @@ pub fn expand_popup(app_handle: &AppHandle, text: &str) {
         let win_x = x - SHADOW_MARGIN;
         let win_y = y - SHADOW_MARGIN;
 
+        // Store the bottom edge position (content bottom Y) for anchor-bottom resizing
+        let content_bottom = y + height;
+        *POPUP_BOTTOM.lock() = content_bottom;
+
         let _ = window.set_size(LogicalSize::new(win_w, win_h));
         let _ = window.set_position(Position::Logical(LogicalPosition::new(win_x, win_y)));
 
-        debug!("Popup expanded to {:.0}x{:.0} (content {:.0}x{:.0}) at ({:.0}, {:.0})", win_w, win_h, w_logical, height, win_x, win_y);
+        debug!("Popup expanded to {:.0}x{:.0} (content {:.0}x{:.0}) at ({:.0}, {:.0}), bottom={:.0}", win_w, win_h, w_logical, height, win_x, win_y, content_bottom);
     }
 }
 
@@ -300,11 +306,12 @@ fn extract_translated(text: &str) -> Option<&str> {
 }
 
 /// Resize expanded popup to fit actual rendered content height (called from frontend)
+/// Anchors the bottom edge — grows/shrinks upward
 pub fn resize_popup_to_content(app_handle: &AppHandle, content_height: f64) {
     if let Some(window) = app_handle.get_webview_window("popup") {
         let height = content_height.clamp(EXPANDED_MIN_HEIGHT, EXPANDED_MAX_HEIGHT);
-        let (screen_w, screen_h, _) = get_primary_screen_info(app_handle);
         let stored_input = *INPUT_RECT.lock();
+        let bottom = *POPUP_BOTTOM.lock();
 
         // Determine width (same logic as expand_popup)
         let w_logical = if let Some((rx, ry, rw, _)) = stored_input {
@@ -314,31 +321,29 @@ pub fn resize_popup_to_content(app_handle: &AppHandle, content_height: f64) {
             EXPANDED_WIDTH
         };
 
-        // Get current position and adjust Y if needed for new height
-        if let Ok(pos) = window.outer_position() {
-            let scale = window.scale_factor().unwrap_or(1.0);
-            let current_x = pos.x as f64 / scale;
-            let current_y = pos.y as f64 / scale;
-            
-            // Content position (inside shadow margin)
-            let content_x = current_x + SHADOW_MARGIN;
-            let mut content_y = current_y + SHADOW_MARGIN;
-
-            // If overflows bottom, push up
-            if content_y + height > screen_h {
-                content_y = screen_h - height - 8.0;
-            }
-
-            let win_w = w_logical + SHADOW_MARGIN * 2.0;
-            let win_h = height + SHADOW_MARGIN * 2.0;
-            let win_x = content_x - SHADOW_MARGIN;
-            let win_y = content_y - SHADOW_MARGIN;
-
-            let _ = window.set_size(LogicalSize::new(win_w, win_h));
-            let _ = window.set_position(Position::Logical(LogicalPosition::new(win_x, win_y)));
-
-            debug!("Popup resized to content: {:.0}x{:.0} (content height {:.0})", win_w, win_h, height);
+        // Anchor bottom edge: content top = bottom - height
+        let mut content_y = bottom - height;
+        if content_y < 0.0 {
+            content_y = 0.0;
         }
+
+        // Get current X position (keep it stable)
+        let content_x = if let Ok(pos) = window.outer_position() {
+            let scale = window.scale_factor().unwrap_or(1.0);
+            pos.x as f64 / scale + SHADOW_MARGIN
+        } else {
+            0.0
+        };
+
+        let win_w = w_logical + SHADOW_MARGIN * 2.0;
+        let win_h = height + SHADOW_MARGIN * 2.0;
+        let win_x = content_x - SHADOW_MARGIN;
+        let win_y = content_y - SHADOW_MARGIN;
+
+        let _ = window.set_size(LogicalSize::new(win_w, win_h));
+        let _ = window.set_position(Position::Logical(LogicalPosition::new(win_x, win_y)));
+
+        debug!("Popup resized to content: {:.0}x{:.0} (content height {:.0}), bottom anchored at {:.0}", win_w, win_h, height, bottom);
     }
 }
 
