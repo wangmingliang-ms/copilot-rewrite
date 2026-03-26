@@ -9,7 +9,7 @@ pub mod replacement;
 pub mod selection;
 pub mod tray;
 
-use log::{info, warn};
+use log::{info, warn, LevelFilter};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -436,6 +436,24 @@ fn open_settings(app: tauri::AppHandle) -> Result<(), String> {
     }
 }
 
+/// Open the log file in the default text editor
+#[tauri::command]
+fn open_log_file() -> Result<(), String> {
+    let log_path = dirs::config_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("copilot-rewrite")
+        .join("copilot-rewrite.log");
+    if log_path.exists() {
+        std::process::Command::new("cmd")
+            .args(["/c", "start", "", &log_path.to_string_lossy()])
+            .spawn()
+            .map_err(|e| format!("Failed to open log file: {}", e))?;
+        Ok(())
+    } else {
+        Err("Log file not found".to_string())
+    }
+}
+
 /// Replace selected text in the source application
 /// Must restore focus to the original app window before pasting
 /// IMPORTANT: SendInput must run on a dedicated thread (not tokio async pool)
@@ -547,7 +565,44 @@ async fn resize_popup_content(
 // ─── App Entry Point ──────────────────────────────────────────────
 
 pub fn run() {
-    env_logger::init();
+    // Set up logging to both stderr and a log file
+    let log_dir = dirs::config_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("copilot-rewrite");
+    let _ = std::fs::create_dir_all(&log_dir);
+    let log_path = log_dir.join("copilot-rewrite.log");
+
+    // Truncate log file on startup (keep only current session)
+    let log_file = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(&log_path)
+        .ok();
+
+    env_logger::Builder::new()
+        .filter_level(LevelFilter::Info)
+        .filter_module("copilot_rewrite", LevelFilter::Debug)
+        .format(move |buf, record| {
+            use std::io::Write;
+            let line = format!(
+                "[{} {} {}] {}\n",
+                chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
+                record.level(),
+                record.module_path().unwrap_or(""),
+                record.args()
+            );
+            // Write to stderr (default)
+            let _ = buf.write_all(line.as_bytes());
+            // Also write to log file
+            if let Some(ref file) = log_file {
+                use std::io::Write as _;
+                let _ = (&*file).write_all(line.as_bytes());
+                let _ = (&*file).flush();
+            }
+            Ok(())
+        })
+        .init();
 
     let app_state = Arc::new(AppState::new());
 
@@ -572,6 +627,7 @@ pub fn run() {
             list_models,
             open_url,
             open_settings,
+            open_log_file,
         ])
         .setup(move |app| {
             let app_handle = app.handle().clone();

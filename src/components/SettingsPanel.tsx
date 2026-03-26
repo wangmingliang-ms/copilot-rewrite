@@ -324,7 +324,15 @@ const SettingsPanel: FC = () => {
           <p className="text-center text-xs text-green-500 mt-2 transition-opacity">✓ Saved</p>
         )}
 
-        <p className="text-center text-xs text-gray-400 mt-4">Copilot Rewrite v0.1.0</p>
+        <div className="text-center mt-4 space-y-1">
+          <button
+            onClick={() => invoke("open_log_file").catch(() => {})}
+            className="text-xs text-gray-400 hover:text-copilot-blue transition-colors underline"
+          >
+            View Log File
+          </button>
+          <p className="text-xs text-gray-400">Copilot Rewrite v0.1.0</p>
+        </div>
       </div>
     </div>
   );
