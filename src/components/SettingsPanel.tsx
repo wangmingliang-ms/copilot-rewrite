@@ -69,6 +69,7 @@ const SettingsPanel: FC = () => {
     if (!initialLoaded) return;
     const timer = setTimeout(() => {
       invoke("update_settings", { settings }).then(() => {
+        invoke("log_action", { action: `Settings saved — model=${settings.model}, lang=${settings.target_language}, beast=${settings.beast_mode}, autoStart=${settings.auto_start}` }).catch(() => {});
         setSaved(true);
         setTimeout(() => setSaved(false), 1500);
       }).catch((err) => console.error("Auto-save failed:", err));
@@ -90,6 +91,7 @@ const SettingsPanel: FC = () => {
   }, []);
 
   const handleLogin = useCallback(async () => {
+    invoke("log_action", { action: "Login started" }).catch(() => {});
     setLoginStep("loading");
     setLoginError(null);
     try {
@@ -135,6 +137,7 @@ const SettingsPanel: FC = () => {
   }, [deviceCode]);
 
   const handleLogout = useCallback(async () => {
+    invoke("log_action", { action: "Logout clicked" }).catch(() => {});
     try {
       await invoke("logout");
       setAuthStatus({ logged_in: false, username: null });
@@ -240,13 +243,16 @@ const SettingsPanel: FC = () => {
         <section className="bg-white rounded-lg shadow-sm border border-gray-200 px-4 py-3 mb-3">
           <div className="flex items-center justify-between mb-1.5">
             <h2 className="text-xs font-semibold text-gray-500 uppercase">AI Model</h2>
-            <button onClick={fetchModels} className="text-xs text-copilot-blue hover:underline" disabled={modelsLoading}>
+            <button onClick={() => { invoke("log_action", { action: "Refresh models clicked" }).catch(() => {}); fetchModels(); }} className="text-xs text-copilot-blue hover:underline" disabled={modelsLoading}>
               {modelsLoading ? "..." : "↻ Refresh"}
             </button>
           </div>
           <select
             value={settings.model}
-            onChange={(e) => setSettings({ ...settings, model: e.target.value })}
+            onChange={(e) => {
+              invoke("log_action", { action: `Model changed to: ${e.target.value}` }).catch(() => {});
+              setSettings({ ...settings, model: e.target.value });
+            }}
             className={`w-full rounded border px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 ${
               !settings.model
                 ? "border-red-400 focus:ring-red-500"
@@ -271,7 +277,10 @@ const SettingsPanel: FC = () => {
           <h2 className="text-xs font-semibold text-gray-500 uppercase mb-1.5">Target Language</h2>
           <select
             value={settings.target_language}
-            onChange={(e) => setSettings({ ...settings, target_language: e.target.value })}
+            onChange={(e) => {
+              invoke("log_action", { action: `Language changed to: ${e.target.value}` }).catch(() => {});
+              setSettings({ ...settings, target_language: e.target.value });
+            }}
             className="w-full rounded border border-gray-200 px-2.5 py-1.5 text-sm focus:border-copilot-blue focus:outline-none focus:ring-1 focus:ring-copilot-blue"
           >
             {LANGUAGES.map((lang) => <option key={lang} value={lang}>{lang}</option>)}
@@ -288,7 +297,10 @@ const SettingsPanel: FC = () => {
             <input
               type="checkbox"
               checked={settings.beast_mode}
-              onChange={(e) => setSettings({ ...settings, beast_mode: e.target.checked })}
+              onChange={(e) => {
+              invoke("log_action", { action: `Beast mode ${e.target.checked ? "enabled" : "disabled"}` }).catch(() => {});
+              setSettings({ ...settings, beast_mode: e.target.checked });
+            }}
               className="w-4 h-4 rounded border-gray-300 text-copilot-blue focus:ring-copilot-blue ml-3 flex-shrink-0"
             />
           </label>
@@ -301,7 +313,10 @@ const SettingsPanel: FC = () => {
             <input
               type="checkbox"
               checked={settings.auto_start}
-              onChange={(e) => setSettings({ ...settings, auto_start: e.target.checked })}
+              onChange={(e) => {
+              invoke("log_action", { action: `Auto-start ${e.target.checked ? "enabled" : "disabled"}` }).catch(() => {});
+              setSettings({ ...settings, auto_start: e.target.checked });
+            }}
               className="w-4 h-4 rounded border-gray-300 text-copilot-blue focus:ring-copilot-blue"
             />
           </label>
@@ -318,7 +333,10 @@ const SettingsPanel: FC = () => {
                 {updater.notes && <p className="text-xs text-blue-700 mt-0.5 line-clamp-2">{updater.notes}</p>}
               </div>
               <button
-                onClick={updater.downloadAndInstall}
+                onClick={() => {
+                  invoke("log_action", { action: `Update Now clicked — downloading v${updater.version}` }).catch(() => {});
+                  updater.downloadAndInstall();
+                }}
                 className="ml-3 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 transition-colors whitespace-nowrap"
               >
                 Update Now
@@ -351,14 +369,20 @@ const SettingsPanel: FC = () => {
         <div className="flex items-center justify-between mt-3 text-xs text-gray-400">
           <div className="flex items-center gap-1.5">
             <button
-              onClick={() => invoke("open_log_file").catch(() => {})}
+              onClick={() => {
+                invoke("log_action", { action: "View Log clicked" }).catch(() => {});
+                invoke("open_log_file").catch(() => {});
+              }}
               className="hover:text-copilot-blue transition-colors underline"
             >
               View Log
             </button>
             <span>|</span>
             <button
-              onClick={() => invoke("open_log_dir").catch(() => {})}
+              onClick={() => {
+                invoke("log_action", { action: "Log Directory clicked" }).catch(() => {});
+                invoke("open_log_dir").catch(() => {});
+              }}
               className="hover:text-copilot-blue transition-colors underline"
             >
               Log Directory
@@ -369,7 +393,10 @@ const SettingsPanel: FC = () => {
               <span className="text-gray-400">Checking...</span>
             ) : updater.status === "idle" || updater.status === "upToDate" || updater.status === "error" ? (
               <button
-                onClick={updater.checkForUpdate}
+                onClick={() => {
+                  invoke("log_action", { action: "Check updates clicked" }).catch(() => {});
+                  updater.checkForUpdate();
+                }}
                 className="hover:text-copilot-blue transition-colors"
                 title="Check for updates"
               >

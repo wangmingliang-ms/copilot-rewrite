@@ -182,6 +182,7 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
 
   const handleIconClick = useCallback(async () => {
     if (!authStatus.logged_in) {
+      invoke("log_action", { action: "Icon clicked — not logged in, opening Settings" }).catch(() => {});
       try {
         await invoke("open_settings");
       } catch {
@@ -192,6 +193,7 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
     }
     if (!selection) return;
 
+    invoke("log_action", { action: `Icon clicked — starting translation (${selection.text.length} chars)` }).catch(() => {});
     // Refresh settings display (model name + beast mode) before sending request
     refreshSettings();
 
@@ -211,6 +213,7 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
 
   const handleRefresh = useCallback(async () => {
     if (!selection || refreshing) return;
+    invoke("log_action", { action: "Refresh clicked" }).catch(() => {});
     setRefreshing(true);
     refreshingRef.current = true;
     setError(null);
@@ -387,7 +390,11 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
         {reorganizedHtml && (
           <div className="flex-shrink-0 px-5 border-t border-gray-100">
             <button
-              onClick={() => setShowOriginal(!showOriginal)}
+              onClick={() => {
+                const next = !showOriginal;
+                setShowOriginal(next);
+                invoke("log_action", { action: `Original section ${next ? "expanded" : "collapsed"}` }).catch(() => {});
+              }}
               className="flex items-center gap-1 text-[11px] text-gray-400 hover:text-gray-600 transition-colors py-2 w-full"
             >
               <svg
@@ -429,7 +436,10 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
               </span>
             )}
             <button
-              onClick={() => invoke("open_settings").catch(() => {})}
+              onClick={() => {
+                invoke("log_action", { action: "Settings button clicked" }).catch(() => {});
+                invoke("open_settings").catch(() => {});
+              }}
               className="flex items-center justify-center w-7 h-7 rounded-lg text-gray-400 hover:bg-gray-200/60 hover:text-gray-600 transition-colors"
               title="Settings"
             >
