@@ -61,11 +61,27 @@ const SettingsPanel: FC = () => {
   const [modelsLoading, setModelsLoading] = useState(false);
 
   // Load on mount
+  const [initialLoaded, setInitialLoaded] = useState(false);
   useEffect(() => {
     invoke<AuthStatus>("get_auth_status").then(setAuthStatus).catch(() => {});
-    invoke<Settings>("get_settings").then(setSettings).catch(() => {});
+    invoke<Settings>("get_settings").then((s) => {
+      setSettings(s);
+      setInitialLoaded(true);
+    }).catch(() => { setInitialLoaded(true); });
     fetchModels();
   }, []);
+
+  // Auto-save settings on any change (skip initial load)
+  useEffect(() => {
+    if (!initialLoaded) return;
+    const timer = setTimeout(() => {
+      invoke("update_settings", { settings }).then(() => {
+        setSaved(true);
+        setTimeout(() => setSaved(false), 1500);
+      }).catch((err) => console.error("Auto-save failed:", err));
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [settings, initialLoaded]);
 
   const fetchModels = useCallback(async () => {
     setModelsLoading(true);
@@ -79,16 +95,6 @@ const SettingsPanel: FC = () => {
       setModelsLoading(false);
     }
   }, []);
-
-  const handleSaveSettings = useCallback(async () => {
-    try {
-      await invoke("update_settings", { settings });
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
-    } catch (err) {
-      console.error("Save failed:", err);
-    }
-  }, [settings]);
 
   const handleLogin = useCallback(async () => {
     setLoginStep("loading");
@@ -162,9 +168,12 @@ const SettingsPanel: FC = () => {
           {authStatus.logged_in ? (
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-full bg-green-100 flex items-center justify-center text-green-600 text-sm font-bold">
-                  {authStatus.username?.[0]?.toUpperCase() || "?"}
-                </div>
+                <img
+                  src={`https://github.com/${authStatus.username}.png?size=64`}
+                  alt={authStatus.username || "User"}
+                  className="w-8 h-8 rounded-full"
+                  onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                />
                 <div>
                   <p className="text-sm font-medium text-gray-900">{authStatus.username || "Connected"}</p>
                   <p className="text-xs text-green-600">● Copilot active</p>
@@ -291,13 +300,10 @@ const SettingsPanel: FC = () => {
           </label>
         </section>
 
-        {/* Save Button */}
-        <button
-          onClick={handleSaveSettings}
-          className="w-full rounded-xl bg-copilot-blue px-4 py-3 text-sm font-medium text-white transition-colors hover:bg-copilot-blue-hover active:scale-[0.99]"
-        >
-          {saved ? "✓ Saved!" : "Save Settings"}
-        </button>
+        {/* Auto-save indicator */}
+        {saved && (
+          <p className="text-center text-xs text-green-500 mt-2 transition-opacity">✓ Saved</p>
+        )}
 
         <p className="text-center text-xs text-gray-400 mt-4">Copilot Rewrite v0.1.0</p>
       </div>

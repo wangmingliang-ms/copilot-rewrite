@@ -252,9 +252,10 @@ impl CopilotClient {
         };
 
         info!(
-            "Processing text ({} chars) with action {:?}",
+            "Processing text ({} chars) with action {:?}, model: {}",
             text.len(),
-            action
+            action,
+            model
         );
 
         let request = ChatCompletionRequest {
