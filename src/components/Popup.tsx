@@ -16,6 +16,7 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
   const [result, setResult] = useState<ProcessResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showOriginal, setShowOriginal] = useState(false);
+  const [showRaw, setShowRaw] = useState(false);
 
   // Listen for backend events
   useEffect(() => {
@@ -190,6 +191,7 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
     setResult(null);
     setError(null);
     setShowOriginal(false);
+    setShowRaw(false);
   };
 
   // ── Icon state (48×48) ──
@@ -291,19 +293,27 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
         {/* Layer 1: Translation (visible when original is collapsed) */}
         {!showOriginal && (
           <div className="flex-1 min-h-0 overflow-auto px-5 pt-5 pb-3" style={{ userSelect: "text", WebkitUserSelect: "text" }}>
-            <div
-              className="text-[13.5px] leading-[1.7] text-gray-800 prose prose-sm max-w-none prose-p:my-1 prose-li:my-0.5 prose-ul:my-1.5 prose-ol:my-1.5 prose-headings:my-1.5 prose-strong:text-gray-900"
-              dangerouslySetInnerHTML={{ __html: translatedHtml }}
-            />
+            {showRaw ? (
+              <pre className="text-[12px] leading-[1.6] text-gray-700 whitespace-pre-wrap break-words font-mono">{translated}</pre>
+            ) : (
+              <div
+                className="text-[13.5px] leading-[1.7] text-gray-800 prose prose-sm max-w-none prose-p:my-1 prose-li:my-0.5 prose-ul:my-1.5 prose-ol:my-1.5 prose-headings:my-1.5 prose-strong:text-gray-900"
+                dangerouslySetInnerHTML={{ __html: translatedHtml }}
+              />
+            )}
           </div>
         )}
 
         {/* Layer 2: Original expanded (fills entire content area when open) */}
         {showOriginal && (
           <div className="flex-1 min-h-0 overflow-auto px-5 pt-5 pb-3" style={{ userSelect: "text", WebkitUserSelect: "text" }}>
-            <div className="text-[12px] leading-[1.55] text-gray-400 prose prose-sm max-w-none prose-p:my-0.5 prose-li:my-0.5 prose-ul:my-1 prose-ol:my-1">
-              <div dangerouslySetInnerHTML={{ __html: reorganizedHtml }} />
-            </div>
+            {showRaw ? (
+              <pre className="text-[12px] leading-[1.6] text-gray-500 whitespace-pre-wrap break-words font-mono">{reorganized}</pre>
+            ) : (
+              <div className="text-[12px] leading-[1.55] text-gray-400 prose prose-sm max-w-none prose-p:my-0.5 prose-li:my-0.5 prose-ul:my-1 prose-ol:my-1">
+                <div dangerouslySetInnerHTML={{ __html: reorganizedHtml }} />
+              </div>
+            )}
           </div>
         )}
 
@@ -339,6 +349,16 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
             </svg>
           </button>
           <div className="flex items-center gap-1">
+            {/* Markdown/Preview toggle */}
+            <button
+              onClick={() => setShowRaw(!showRaw)}
+              className={`flex items-center justify-center w-7 h-7 rounded-lg transition-colors ${showRaw ? "text-blue-500 bg-blue-50 hover:bg-blue-100" : "text-gray-400 hover:bg-gray-200/60 hover:text-gray-600"}`}
+              title={showRaw ? "Show preview" : "Show markdown"}
+            >
+              <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M2.5 3A1.5 1.5 0 0 0 1 4.5v7A1.5 1.5 0 0 0 2.5 13h11a1.5 1.5 0 0 0 1.5-1.5v-7A1.5 1.5 0 0 0 13.5 3h-11zM3 9V7l1.5 2L6 7v2h1V5H6L4.5 7.5 3 5H2v4h1zm7-1h1.5L9.5 11V8H8V5h1v3z" />
+              </svg>
+            </button>
             <button
               onClick={handleRefresh}
               className="flex items-center justify-center w-7 h-7 rounded-lg text-gray-500 hover:bg-gray-200/60 hover:text-gray-700 transition-colors"
