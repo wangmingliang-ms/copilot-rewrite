@@ -134,11 +134,12 @@ fn get_cursor_position() -> (i32, i32) {
 
 /// Show the popup icon near the mouse cursor
 fn show_popup(app_handle: AppHandle, state: &Arc<AppState>, info: SelectionInfo) {
+    let preview: String = info.text.chars().take(50).collect();
     debug!(
         "Showing popup icon at ({}, {}) for text: {}...",
         info.mouse_x,
         info.mouse_y,
-        &info.text[..info.text.len().min(50)]
+        preview
     );
 
     // Store the current selection in state
