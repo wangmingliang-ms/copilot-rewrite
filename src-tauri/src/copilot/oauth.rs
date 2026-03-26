@@ -74,7 +74,7 @@ pub fn load_saved_auth() -> Option<SavedAuth> {
 }
 
 /// Save auth to disk
-fn save_auth(auth: &SavedAuth) -> Result<()> {
+pub fn save_auth(auth: &SavedAuth) -> Result<()> {
     let path = auth_file_path();
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).context("Failed to create config directory")?;

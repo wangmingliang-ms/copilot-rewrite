@@ -294,10 +294,13 @@ async fn poll_github_login(
         .await
         .map_err(|e| format!("Login failed: {}", e))?;
 
-    // Save token to settings
+    // Save token to settings (in memory and to disk)
     {
         let mut settings = state.settings.lock();
         settings.api_token = token;
+        if let Err(e) = settings.save() {
+            warn!("Failed to save settings after login: {}", e);
+        }
     }
 
     // Clear pending device code
@@ -314,29 +317,66 @@ async fn poll_github_login(
 
 /// Check current auth status
 #[tauri::command]
-fn get_auth_status(state: tauri::State<'_, Arc<AppState>>) -> AuthStatus {
-    let settings = state.settings.lock();
+async fn get_auth_status(state: tauri::State<'_, Arc<AppState>>) -> Result<AuthStatus, String> {
+    let settings = state.settings.lock().clone();
     let has_token = !settings.api_token.is_empty();
 
     let username = if has_token {
-        copilot::oauth::load_saved_auth().and_then(|a| a.username)
+        // Try loading from saved auth file first
+        let saved = copilot::oauth::load_saved_auth().and_then(|a| a.username);
+        if saved.is_some() {
+            saved
+        } else {
+            // auth.json missing or has no username — fetch from GitHub API
+            let http = reqwest::Client::new();
+            match http
+                .get("https://api.github.com/user")
+                .header("Authorization", format!("token {}", settings.api_token))
+                .header("User-Agent", "CopilotRewrite/0.1.0")
+                .header("Accept", "application/json")
+                .send()
+                .await
+            {
+                Ok(resp) if resp.status().is_success() => {
+                    #[derive(Deserialize)]
+                    struct GhUser { login: String }
+                    match resp.json::<GhUser>().await {
+                        Ok(user) => {
+                            // Re-save auth.json with username
+                            let auth = copilot::oauth::SavedAuth {
+                                github_token: settings.api_token.clone(),
+                                username: Some(user.login.clone()),
+                            };
+                            let _ = copilot::oauth::save_auth(&auth);
+                            Some(user.login)
+                        }
+                        Err(_) => None,
+                    }
+                }
+                _ => None,
+            }
+        }
     } else {
         None
     };
 
-    AuthStatus {
+    Ok(AuthStatus {
         logged_in: has_token,
         username,
-    }
+    })
 }
 
 /// Log out - clear saved auth
 #[tauri::command]
 fn logout(state: tauri::State<'_, Arc<AppState>>) -> Result<(), String> {
-    // Clear token from settings
+    // Clear token from settings (in memory)
     {
         let mut settings = state.settings.lock();
         settings.api_token.clear();
+        // Save cleared settings to disk so token doesn't persist across restart
+        if let Err(e) = settings.save() {
+            warn!("Failed to save settings after logout: {}", e);
+        }
     }
     // Delete saved auth file
     copilot::oauth::delete_saved_auth().map_err(|e| format!("Logout failed: {}", e))?;
