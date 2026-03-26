@@ -2,7 +2,7 @@
 // Runs in a background thread, emitting selection events to the frontend
 
 use crate::{AppState, SelectionInfo, SelectionSource};
-use log::{debug, error, info, warn};
+use log::{debug, error, info, trace, warn};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tauri::Emitter;
@@ -117,7 +117,7 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
 
         let selected_text = if is_own_window {
             // Don't poll UIA when our own popup is focused — preserve current state
-            debug!("Skipping UIA poll — own popup is foreground");
+            trace!("Skipping UIA poll — own popup is foreground");
             std::thread::sleep(Duration::from_millis(poll_interval));
             continue;
         } else if let Some(ref uia_engine) = uia {

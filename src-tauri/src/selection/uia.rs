@@ -137,7 +137,7 @@ impl UiaEngine {
             if text_str.is_empty() {
                 Ok(None)
             } else {
-                debug!("UIA selected text: {} chars", text_str.len());
+                trace!("UIA selected text: {} chars", text_str.len());
                 Ok(Some(text_str))
             }
         }
