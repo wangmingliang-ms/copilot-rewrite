@@ -414,27 +414,7 @@ fn open_settings(app: tauri::AppHandle) -> Result<(), String> {
         let _ = window.set_focus();
         Ok(())
     } else {
-        // Window was destroyed after close — recreate it
-        use tauri::WebviewUrl;
-        let window = tauri::WebviewWindowBuilder::new(
-            &app,
-            "settings",
-            WebviewUrl::App("index.html#/settings".into()),
-        )
-        .title("Copilot Rewrite Settings")
-        .inner_size(480.0, 720.0)
-        .resizable(false)
-        .decorations(true)
-        .transparent(false)
-        .always_on_top(false)
-        .visible(true)
-        .skip_taskbar(false)
-        .center()
-        .build()
-        .map_err(|e| format!("Failed to create settings window: {}", e))?;
-
-        let _ = window.set_focus();
-        Ok(())
+        Err("Settings window not found".to_string())
     }
 }
 
@@ -583,6 +563,19 @@ pub fn run() {
 
             // Apply window styles to popup (WS_EX_NOACTIVATE, strip frame)
             overlay::setup_popup_window(&app_handle);
+
+            // Settings window: hide on close instead of destroy, so it can be re-shown
+            if let Some(settings_win) = app_handle.get_webview_window("settings") {
+                let settings_handle = app_handle.clone();
+                settings_win.on_window_event(move |event| {
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        api.prevent_close();
+                        if let Some(win) = settings_handle.get_webview_window("settings") {
+                            let _ = win.hide();
+                        }
+                    }
+                });
+            }
 
             // Set up the system tray icon with Enable/Disable/Quit menu
             if let Err(e) = tray::setup_tray(&app_handle, state.clone()) {
