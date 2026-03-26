@@ -251,6 +251,9 @@ async fn process_and_show_preview(
     // Mark popup as "processing" to pause UIA monitoring
     *state.preview_visible.lock() = true;
 
+    info!("[POPUP] Loading — sending request (action={:?}, model={}, beast={}, refresh={}, text_len={})",
+        request.action, settings.model, settings.beast_mode, request.is_refresh, request.text.len());
+
     // Emit loading event (frontend switches to spinning state)
     app.emit("show-preview-loading", ()).map_err(|e| e.to_string())?;
 
@@ -260,6 +263,7 @@ async fn process_and_show_preview(
         .await
     {
         Ok(result) => {
+            info!("[POPUP] Result received — {} chars", result.len());
             // Expand popup window to fit result text (skip on refresh to avoid flicker)
             if !request.is_refresh {
                 overlay::expand_popup(&app, &result);
@@ -275,6 +279,7 @@ async fn process_and_show_preview(
         }
         Err(e) => {
             let err_msg = format!("Copilot API error: {}", e);
+            warn!("[POPUP] Error — {}", err_msg);
             let _ = app.emit("show-preview-error", &err_msg);
             Err(err_msg)
         }
@@ -545,6 +550,7 @@ async fn dismiss_popup(
     app: tauri::AppHandle,
     state: tauri::State<'_, Arc<AppState>>,
 ) -> Result<(), String> {
+    info!("[POPUP] Dismissed");
     overlay::hide_popup(&app);
     *state.preview_visible.lock() = false;
     *state.current_selection.lock() = None;

@@ -127,7 +127,7 @@ pub fn show_popup_icon(app_handle: &AppHandle, mouse_x: i32, mouse_y: i32, input
         let _ = window.set_position(Position::Logical(LogicalPosition::new(x - SHADOW_MARGIN, y - SHADOW_MARGIN)));
         let _ = window.show();
 
-        debug!("Popup icon shown at ({:.0}, {:.0})", x, y);
+        info!("Popup icon shown at ({:.0}, {:.0})", x, y);
     }
 }
 
@@ -193,7 +193,7 @@ pub fn expand_popup(app_handle: &AppHandle, text: &str) {
         let _ = window.set_size(LogicalSize::new(win_w, win_h));
         let _ = window.set_position(Position::Logical(LogicalPosition::new(win_x, win_y)));
 
-        debug!("Popup expanded to {:.0}x{:.0} (content {:.0}x{:.0}) at ({:.0}, {:.0}), bottom={:.0}", win_w, win_h, w_logical, height, win_x, win_y, content_bottom);
+        info!("Popup expanded to {:.0}x{:.0} (content {:.0}x{:.0}) at ({:.0}, {:.0}), bottom={:.0}", win_w, win_h, w_logical, height, win_x, win_y, content_bottom);
     }
 }
 
@@ -211,6 +211,7 @@ pub fn shrink_popup(app_handle: &AppHandle) {
 
 /// Hide the popup window
 pub fn hide_popup(app_handle: &AppHandle) {
+    info!("Popup hidden");
     if let Some(window) = app_handle.get_webview_window("popup") {
         let _ = window.hide();
     }

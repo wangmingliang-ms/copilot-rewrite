@@ -95,7 +95,7 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
         // Check if dismiss happened (generation bumped)
         let current_gen = state.selection_generation.load(std::sync::atomic::Ordering::Relaxed);
         if current_gen != seen_generation {
-            debug!("Generation changed ({} → {}) — resetting monitor state", seen_generation, current_gen);
+            info!("Generation changed ({} → {}) — resetting monitor state (popup was dismissed)", seen_generation, current_gen);
             last_selection = None;
             debounce_text = None;
             seen_generation = current_gen;
@@ -147,7 +147,7 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
                         let text_changed = last_selection.as_ref() != Some(&text_trimmed);
 
                         if text_changed {
-                            debug!("Selection changed: {} chars (was {} chars)",
+                            info!("Selection changed: {} chars (was {} chars)",
                                 text_trimmed.len(),
                                 last_selection.as_ref().map(|s| s.len()).unwrap_or(0));
                             debounce_text = Some(text_trimmed.clone());
@@ -189,7 +189,7 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
         } else {
             // No selection detected
             if last_selection.is_some() && !preview_is_visible {
-                debug!("Selection cleared — hiding popup (was {} chars)",
+                info!("Selection cleared — hiding popup (was {} chars)",
                     last_selection.as_ref().map(|s| s.len()).unwrap_or(0));
                 last_selection = None;
                 debounce_text = None;
@@ -218,7 +218,7 @@ fn get_cursor_position() -> (i32, i32) {
 /// Show the popup icon near the mouse cursor
 fn show_popup(app_handle: AppHandle, state: &Arc<AppState>, info: SelectionInfo) {
     let preview: String = info.text.chars().take(50).collect();
-    debug!(
+    info!(
         "Showing popup icon at ({}, {}) for text: {}...",
         info.mouse_x,
         info.mouse_y,
