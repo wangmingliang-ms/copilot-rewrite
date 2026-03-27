@@ -1,5 +1,5 @@
 // System tray module
-// Creates a tray icon with Settings, Enable/Disable toggle, Restart, and Quit options
+// Creates a tray icon with Settings, Enable/Disable toggle, Restart, Quit, and version info
 
 use log::info;
 use std::sync::Arc;
@@ -18,22 +18,34 @@ pub fn setup_tray(
 ) -> Result<(), Box<dyn std::error::Error>> {
     info!("Setting up system tray...");
 
-    let settings_item = MenuItemBuilder::with_id("settings", "Settings...").build(app_handle)?;
+    let version = app_handle.package_info().version.to_string();
 
-    let toggle_item = MenuItemBuilder::with_id("toggle", "Disable").build(app_handle)?;
+    let version_item = MenuItemBuilder::with_id("version", format!("v{}", version))
+        .build(app_handle)?;
 
-    let restart_item = MenuItemBuilder::with_id("restart", "Restart").build(app_handle)?;
+    let settings_item =
+        MenuItemBuilder::with_id("settings", "⚙️  Settings...").build(app_handle)?;
 
-    let quit_item = MenuItemBuilder::with_id("quit", "Quit").build(app_handle)?;
+    let toggle_item =
+        MenuItemBuilder::with_id("toggle", "⏸  Disable").build(app_handle)?;
+
+    let restart_item =
+        MenuItemBuilder::with_id("restart", "🔄  Restart").build(app_handle)?;
+
+    let quit_item = MenuItemBuilder::with_id("quit", "❌  Quit").build(app_handle)?;
 
     let menu = MenuBuilder::new(app_handle)
-        .item(&settings_item)
+        .item(&version_item)
         .separator()
+        .item(&settings_item)
         .item(&toggle_item)
         .separator()
         .item(&restart_item)
         .item(&quit_item)
         .build()?;
+
+    // Keep a reference to the toggle item for updating text
+    let toggle_ref = toggle_item.clone();
 
     let _tray = TrayIconBuilder::new()
         .menu(&menu)
@@ -41,36 +53,64 @@ pub fn setup_tray(
         .icon(app_handle.default_window_icon().cloned().unwrap())
         .on_menu_event(move |app, event| {
             match event.id().as_ref() {
+                "version" => {
+                    info!("Version clicked — opening release page");
+                    let ver = app.package_info().version.to_string();
+                    let url = format!(
+                        "https://github.com/wangmingliang-ms/copilot-rewrite/releases/tag/v{}",
+                        ver
+                    );
+                    #[cfg(target_os = "windows")]
+                    {
+                        let _ = std::process::Command::new("cmd")
+                            .args(["/C", "start", "", &url])
+                            .spawn();
+                    }
+                }
                 "settings" => {
                     info!("Opening settings window");
                     if let Some(window) = app.get_webview_window("settings") {
                         let _ = window.show();
+                        let _ = window.unminimize();
+                        #[cfg(target_os = "windows")]
+                        {
+                            use windows::Win32::Foundation::HWND;
+                            use windows::Win32::UI::WindowsAndMessaging::{
+                                BringWindowToTop, SetForegroundWindow, ShowWindow, SW_RESTORE,
+                            };
+                            if let Ok(hwnd) = window.hwnd() {
+                                unsafe {
+                                    let h = HWND(hwnd.0);
+                                    let _ = ShowWindow(h, SW_RESTORE);
+                                    let _ = BringWindowToTop(h);
+                                    let _ = SetForegroundWindow(h);
+                                }
+                            }
+                        }
                         let _ = window.set_focus();
                     }
                 }
                 "toggle" => {
                     let mut enabled = state.enabled.lock();
                     *enabled = !*enabled;
-                    let new_label = if *enabled { "Disable" } else { "Enable" };
-                    info!("Toggled monitoring: enabled={}", *enabled);
+                    let is_enabled = *enabled;
+                    info!("Toggled monitoring: enabled={}", is_enabled);
 
                     if let Some(window) = app.get_webview_window("toolbar") {
-                        if !*enabled {
+                        if !is_enabled {
                             let _ = window.hide();
                         }
                     }
 
-                    if let Some(menu) = app.menu() {
-                        if let Some(item) = menu.get("toggle") {
-                            if let Some(menu_item) = item.as_menuitem() {
-                                let _ = menu_item.set_text(new_label);
-                            }
-                        }
-                    }
+                    let new_label = if is_enabled {
+                        "⏸  Disable"
+                    } else {
+                        "▶️  Enable"
+                    };
+                    let _ = toggle_ref.set_text(new_label);
                 }
                 "restart" => {
                     info!("Restart requested from tray");
-                    // Spawn new instance after a short delay to allow lock file release
                     if let Ok(exe) = std::env::current_exe() {
                         let _ = std::process::Command::new(exe).spawn();
                     }
