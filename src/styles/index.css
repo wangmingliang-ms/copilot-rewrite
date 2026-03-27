@@ -72,15 +72,49 @@ html.dark:has(#root .settings-view) #root {
 }
 
 /* GitHub Markdown CSS overrides for compact popup */
+/* Tailwind Preflight resets browser defaults that github-markdown-css relies on.
+   Restore them inside .markdown-body so GFM renders correctly. */
 .markdown-body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif !important;
   color: #1f2937 !important;
+}
+
+/* Restore heading sizes stripped by Preflight (font-size: inherit; font-weight: inherit) */
+.markdown-body h1 { font-size: 2em !important; font-weight: 600 !important; }
+.markdown-body h2 { font-size: 1.5em !important; font-weight: 600 !important; }
+.markdown-body h3 { font-size: 1.25em !important; font-weight: 600 !important; }
+.markdown-body h4 { font-size: 1em !important; font-weight: 600 !important; }
+.markdown-body h5 { font-size: 0.875em !important; font-weight: 600 !important; }
+.markdown-body h6 { font-size: 0.85em !important; font-weight: 600 !important; }
+
+/* Restore link styles stripped by Preflight (color: inherit; text-decoration: inherit) */
+.markdown-body a {
+  color: #0969da !important;
+  text-decoration: underline !important;
+}
+.markdown-body a:hover {
+  text-decoration: underline !important;
+}
+
+/* Restore border-width stripped by Preflight (*, ::before, ::after { border-width: 0 }) */
+.markdown-body table th,
+.markdown-body table td {
+  border: 1px solid #d0d7de !important;
+}
+
+/* Restore img display — Preflight sets display: block which is fine, just ensure no issues */
+.markdown-body img {
+  display: inline-block;
 }
 
 /* Dark mode markdown body */
 .dark .markdown-body {
   color: #e5e7eb !important;
   background: transparent !important;
+}
+
+.dark .markdown-body a {
+  color: #60a5fa !important;
 }
 
 .dark .markdown-body code {
@@ -127,10 +161,6 @@ html.dark:has(#root .settings-view) #root {
 .dark .markdown-body h5,
 .dark .markdown-body h6 {
   color: #f3f4f6 !important;
-}
-
-.dark .markdown-body a {
-  color: #60a5fa !important;
 }
 
 .markdown-body p {
