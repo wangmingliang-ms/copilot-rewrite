@@ -199,33 +199,38 @@ fn make_menu_icon(r: u8, g: u8, b: u8, shape: &str) -> TauriImage<'static> {
                 }
             }
         }
-        "tag" => {
-            // Version tag — rounded rect outline
-            for y in 3..13u32 {
-                for x in 2..14u32 {
-                    let is_border = y == 3 || y == 12 || x == 2 || x == 13;
-                    // Round corners
-                    let is_corner = (x == 2 && y == 3)
-                        || (x == 13 && y == 3)
-                        || (x == 2 && y == 12)
-                        || (x == 13 && y == 12);
-                    if is_border && !is_corner {
-                        let idx = ((y * size + x) * 4) as usize;
+        "info" => {
+            // Info circle (ⓘ) — filled circle with "i" letter inside
+            let cx = 8.0f32;
+            let cy = 8.0f32;
+            let outer_r = 7.0f32;
+            let inner_r = 5.5f32;
+            for y in 0..size {
+                for x in 0..size {
+                    let dx = x as f32 - cx;
+                    let dy = y as f32 - cy;
+                    let dist = (dx * dx + dy * dy).sqrt();
+                    let idx = ((y * size + x) * 4) as usize;
+
+                    if dist <= outer_r {
+                        // Fill the circle background
                         pixels[idx] = r;
                         pixels[idx + 1] = g;
                         pixels[idx + 2] = b;
                         pixels[idx + 3] = 255;
+
+                        // Cut out the "i" letter in white
+                        if dist <= inner_r {
+                            let is_dot = y >= 3 && y <= 5 && x >= 7 && x <= 9;
+                            let is_stem = y >= 7 && y <= 12 && x >= 7 && x <= 9;
+                            if is_dot || is_stem {
+                                pixels[idx] = 255;
+                                pixels[idx + 1] = 255;
+                                pixels[idx + 2] = 255;
+                                pixels[idx + 3] = 255;
+                            }
+                        }
                     }
-                }
-            }
-            // Small dot inside (like a tag hole)
-            for y in 6..9u32 {
-                for x in 4..7u32 {
-                    let idx = ((y * size + x) * 4) as usize;
-                    pixels[idx] = r;
-                    pixels[idx + 1] = g;
-                    pixels[idx + 2] = b;
-                    pixels[idx + 3] = 255;
                 }
             }
         }
@@ -245,14 +250,14 @@ pub fn setup_tray(
     let version = app_handle.package_info().version.to_string();
 
     // Create colored menu icons
-    let tag_icon = make_menu_icon(0x64, 0x9E, 0xF0, "tag"); // blue
+    let info_icon = make_menu_icon(0x64, 0x9E, 0xF0, "info"); // blue info circle
     let gear_icon = make_menu_icon(0x8B, 0x8B, 0x8B, "gear"); // gray
     let pause_icon = make_menu_icon(0xF5, 0xA6, 0x23, "pause"); // amber/orange
     let refresh_icon = make_menu_icon(0x22, 0xC5, 0x5E, "refresh"); // green
     let cross_icon = make_menu_icon(0xEF, 0x44, 0x44, "cross"); // red
 
     let version_item = IconMenuItemBuilder::with_id("version", format!("v{}", version))
-        .icon(tag_icon)
+        .icon(info_icon)
         .build(app_handle)?;
 
     let settings_item = IconMenuItemBuilder::with_id("settings", "Settings...")
