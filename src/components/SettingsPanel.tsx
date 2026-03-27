@@ -260,11 +260,24 @@ const SettingsPanel: FC = () => {
             }`}
           >
             {!settings.model && <option value="" disabled>— Select a model —</option>}
-            {models.map((model) => (
-              <option key={model.id} value={model.id}>
-                {model.name}{model.preview ? " (Preview)" : ""} — {model.vendor || model.id}
-              </option>
-            ))}
+            {(() => {
+              // Group by vendor, sort groups alphabetically, sort models within each group by name
+              const grouped = models.reduce<Record<string, CopilotModel[]>>((acc, m) => {
+                const vendor = m.vendor || "Other";
+                (acc[vendor] = acc[vendor] || []).push(m);
+                return acc;
+              }, {});
+              const sortedVendors = Object.keys(grouped).sort();
+              return sortedVendors.map((vendor) => (
+                <optgroup key={vendor} label={vendor}>
+                  {grouped[vendor].sort((a, b) => a.name.localeCompare(b.name)).map((model) => (
+                    <option key={model.id} value={model.id}>
+                      {model.name}{model.preview ? " (Preview)" : ""}
+                    </option>
+                  ))}
+                </optgroup>
+              ));
+            })()}
             {models.length === 0 && settings.model && (
               <option value={settings.model}>{settings.model}</option>
             )}
