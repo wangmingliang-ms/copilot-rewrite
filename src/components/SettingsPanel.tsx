@@ -270,6 +270,7 @@ const SettingsPanel: FC = () => {
             )}
           </select>
           {!settings.model && <p className="text-xs text-red-500 mt-0.5">⚠ Model is required</p>}
+          <p className="text-[10px] text-gray-400 mt-1">Only models that support chat completions are listed.</p>
         </section>
 
         {/* Language Section */}
