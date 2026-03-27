@@ -76,11 +76,19 @@ const Popup: FC<PopupProps> = ({ selection }) => {
       setError(null);
     });
 
+    // Handle backend-initiated cancellation
+    const unCancelled = listen("request-cancelled", () => {
+      setState("icon");
+      setRefreshing(false);
+      refreshingRef.current = false;
+    });
+
     return () => {
       unResult.then((f) => f());
       unLoading.then((f) => f());
       unError.then((f) => f());
       unSelection.then((f) => f());
+      unCancelled.then((f) => f());
     };
   }, []);
 
@@ -335,20 +343,42 @@ const Popup: FC<PopupProps> = ({ selection }) => {
     );
   }
 
-  // ── Spinning state (48×48 with spinner) ──
+  // ── Spinning state (48×48 with spinner — click to cancel) ──
   if (state === "spinning") {
     return (
       <div className="w-screen h-screen flex items-center justify-center" style={{ padding: "20px", background: "transparent" }}>
-        <div className="w-full h-full flex items-center justify-center"
+        <button
+          className="w-full h-full flex items-center justify-center group"
+          onClick={() => {
+            invoke("cancel_request").catch(() => {});
+            invoke("log_action", { action: "Cancel clicked during spinning" }).catch(() => {});
+            setState("icon");
+          }}
+          title="Click to cancel"
           style={{
             background: "linear-gradient(135deg, #fff 0%, #f0f4ff 100%)",
             borderRadius: "50%",
             border: "1px solid rgba(0,120,212,0.15)",
             boxShadow: "0 4px 16px rgba(0,120,212,0.12), 0 1px 3px rgba(0,0,0,0.08)",
+            cursor: "pointer",
+            transition: "all 0.15s ease",
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.borderColor = "rgba(239,68,68,0.5)";
+            e.currentTarget.style.boxShadow = "0 4px 16px rgba(239,68,68,0.15), 0 1px 3px rgba(0,0,0,0.08)";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.borderColor = "rgba(0,120,212,0.15)";
+            e.currentTarget.style.boxShadow = "0 4px 16px rgba(0,120,212,0.12), 0 1px 3px rgba(0,0,0,0.08)";
           }}
         >
-          <div className="h-5 w-5 animate-spin rounded-full border-2 border-copilot-blue border-t-transparent" />
-        </div>
+          <div className="h-5 w-5 animate-spin rounded-full border-2 border-copilot-blue border-t-transparent group-hover:hidden" />
+          {/* Show X icon on hover */}
+          <svg className="h-4 w-4 text-red-500 hidden group-hover:block" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+            <line x1="4" y1="4" x2="12" y2="12" />
+            <line x1="12" y1="4" x2="4" y2="12" />
+          </svg>
+        </button>
       </div>
     );
   }
@@ -516,13 +546,19 @@ const Popup: FC<PopupProps> = ({ selection }) => {
               </svg>
             </button>
             <button
-              onClick={handleRefresh}
-              disabled={refreshing}
-              className={`flex items-center justify-center w-7 h-7 rounded-lg transition-colors ${refreshing ? "text-gray-300 cursor-not-allowed" : "text-gray-500 hover:bg-gray-200/60 hover:text-gray-700"}`}
-              title="Regenerate"
+              onClick={refreshing ? () => {
+                invoke("cancel_request").catch(() => {});
+                invoke("log_action", { action: "Cancel clicked during refresh" }).catch(() => {});
+                setRefreshing(false);
+                refreshingRef.current = false;
+              } : handleRefresh}
+              className={`flex items-center justify-center w-7 h-7 rounded-lg transition-colors ${refreshing ? "text-red-400 hover:bg-red-50 hover:text-red-500 cursor-pointer" : "text-gray-500 hover:bg-gray-200/60 hover:text-gray-700"}`}
+              title={refreshing ? "Cancel" : "Regenerate"}
             >
               {refreshing ? (
-                <div className="h-3.5 w-3.5 animate-spin rounded-full border-[1.5px] border-gray-400 border-t-transparent" />
+                <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                  <rect x="3" y="3" width="10" height="10" rx="1" fill="currentColor" stroke="none" />
+                </svg>
               ) : (
                 <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M2.5 8a5.5 5.5 0 0 1 9.3-4" />

@@ -32,6 +32,8 @@ pub struct AppState {
     pub copilot_client: copilot::CopilotClient,
     /// Pending OAuth device code (during login flow)
     pub pending_device_code: Mutex<Option<copilot::DeviceCodeResponse>>,
+    /// Cancellation token for in-flight LLM requests
+    pub cancel_token: Mutex<tokio_util::sync::CancellationToken>,
 }
 
 impl AppState {
@@ -56,6 +58,7 @@ impl AppState {
             settings: Mutex::new(settings),
             copilot_client: copilot::CopilotClient::new(),
             pending_device_code: Mutex::new(None),
+            cancel_token: Mutex::new(tokio_util::sync::CancellationToken::new()),
         }
     }
 }
@@ -265,6 +268,10 @@ async fn process_and_show_preview(
             .unwrap_or_default()
     };
 
+    // Create a fresh cancellation token for this request
+    let cancel_token = tokio_util::sync::CancellationToken::new();
+    *state.cancel_token.lock() = cancel_token.clone();
+
     // Mark popup as "processing" to pause UIA monitoring
     *state.preview_visible.lock() = true;
 
@@ -275,45 +282,58 @@ async fn process_and_show_preview(
     app.emit("show-preview-loading", ())
         .map_err(|e| e.to_string())?;
 
-    // Call Copilot API
-    match state
-        .copilot_client
-        .process(
-            &request.text,
-            &request.action,
-            &settings.target_language,
-            &settings.api_token,
-            &settings.model,
-            settings.beast_mode,
-            &app_context,
-        )
-        .await
-    {
-        Ok(result) => {
-            info!("[POPUP] Result received — {} chars", result.len());
-            // Expand popup window to fit result text (skip on refresh to avoid flicker)
-            if !request.is_refresh {
-                overlay::expand_popup(&app, &result);
-            }
+    // Call Copilot API with cancellation support
+    let process_fut = state.copilot_client.process(
+        &request.text,
+        &request.action,
+        &settings.target_language,
+        &settings.api_token,
+        &settings.model,
+        settings.beast_mode,
+        &app_context,
+    );
 
-            let response = ProcessResponse {
-                original: request.text,
-                result,
-                action: request.action,
-            };
-            app.emit("show-preview-result", &response)
-                .map_err(|e| e.to_string())?;
-            Ok(())
+    tokio::select! {
+        result = process_fut => {
+            match result {
+                Ok(result) => {
+                    info!("[POPUP] Result received — {} chars", result.len());
+                    if !request.is_refresh {
+                        overlay::expand_popup(&app, &result);
+                    }
+
+                    let response = ProcessResponse {
+                        original: request.text,
+                        result,
+                        action: request.action,
+                    };
+                    app.emit("show-preview-result", &response)
+                        .map_err(|e| e.to_string())?;
+                    Ok(())
+                }
+                Err(e) => {
+                    let err_msg = format!("Copilot API error: {}", e);
+                    warn!("[POPUP] Error — {}", err_msg);
+                    *state.preview_visible.lock() = false;
+                    let _ = app.emit("show-preview-error", &err_msg);
+                    Err(err_msg)
+                }
+            }
         }
-        Err(e) => {
-            let err_msg = format!("Copilot API error: {}", e);
-            warn!("[POPUP] Error — {}", err_msg);
-            // Reset preview_visible so monitor can resume detecting selections
+        _ = cancel_token.cancelled() => {
+            info!("[POPUP] Request cancelled by user");
             *state.preview_visible.lock() = false;
-            let _ = app.emit("show-preview-error", &err_msg);
-            Err(err_msg)
+            let _ = app.emit("request-cancelled", ());
+            Err("Request cancelled".to_string())
         }
     }
+}
+
+/// Cancel the current in-flight LLM request
+#[tauri::command]
+fn cancel_request(state: tauri::State<'_, Arc<AppState>>) {
+    info!("[POPUP] Cancel requested by user");
+    state.cancel_token.lock().cancel();
 }
 
 /// Start GitHub OAuth Device Flow - returns device code info for user
@@ -733,6 +753,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             process_text,
             process_and_show_preview,
+            cancel_request,
             replace_text,
             copy_to_clipboard,
             copy_html_to_clipboard,
