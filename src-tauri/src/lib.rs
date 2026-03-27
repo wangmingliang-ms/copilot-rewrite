@@ -111,6 +111,13 @@ pub struct Settings {
     pub beast_mode: bool,
     /// AI model to use (e.g. "gpt-4o", "claude-3.5-sonnet")
     pub model: String,
+    /// Replace mode: "rendered" (rich text) or "markdown" (plain text)
+    #[serde(default = "default_replace_mode")]
+    pub replace_mode: String,
+}
+
+fn default_replace_mode() -> String {
+    "rendered".to_string()
 }
 
 impl Settings {
@@ -164,6 +171,7 @@ impl Default for Settings {
             poll_interval_ms: 100,
             beast_mode: true,
             model: "claude-sonnet-4".to_string(),
+            replace_mode: "rendered".to_string(),
         }
     }
 }
@@ -534,8 +542,10 @@ async fn replace_text(
     app: tauri::AppHandle,
     state: tauri::State<'_, Arc<AppState>>,
     text: String,
+    html: Option<String>,
 ) -> Result<(), String> {
-    log::info!("[REPLACE CMD] replace_text called, text_len={}", text.len());
+    let replace_mode = state.settings.lock().replace_mode.clone();
+    log::info!("[REPLACE CMD] replace_text called, text_len={}, html={}, mode={}", text.len(), html.is_some(), replace_mode);
 
     // Temporarily pause selection monitoring to prevent toolbar re-appearing
     *state.enabled.lock() = false;
@@ -556,8 +566,9 @@ async fn replace_text(
     // Run replacement on a dedicated OS thread (NOT tokio pool)
     // SendInput requires proper thread context for input injection
     let text_clone = text.clone();
+    let html_clone = if replace_mode == "rendered" { html.clone() } else { None };
     let result = tokio::task::spawn_blocking(move || {
-        replacement::replace_selected_text(&text_clone, source_hwnd)
+        replacement::replace_selected_text(&text_clone, source_hwnd, html_clone.as_deref())
     })
     .await
     .map_err(|e| format!("Thread error: {}", e))?

@@ -19,6 +19,68 @@ pub fn set_text(text: &str) -> Result<()> {
     Ok(())
 }
 
+/// Set both HTML and plain text content to the system clipboard.
+/// Apps that support rich paste (Teams, Outlook) will use the HTML format;
+/// apps that only support plain text will use the Unicode fallback.
+pub fn set_html(html: &str, plain_text: &str) -> Result<()> {
+    use clipboard_win::raw;
+
+    // CF_HTML format requires a specific header
+    let cf_html = build_cf_html(html);
+
+    // Register CF_HTML format
+    let html_format = unsafe {
+        windows::Win32::System::DataExchange::RegisterClipboardFormatW(
+            windows::core::w!("HTML Format"),
+        )
+    };
+
+    // Open clipboard and set both formats
+    raw::open().map_err(|e| anyhow::anyhow!("Failed to open clipboard: {}", e))?;
+    let _ = raw::empty();
+
+    // Set CF_UNICODETEXT (plain text fallback)
+    let wide: Vec<u16> = plain_text.encode_utf16().chain(std::iter::once(0)).collect();
+    let text_bytes: &[u8] = unsafe {
+        std::slice::from_raw_parts(wide.as_ptr() as *const u8, wide.len() * 2)
+    };
+    if let Err(e) = raw::set(formats::CF_UNICODETEXT, text_bytes) {
+        let _ = raw::close();
+        anyhow::bail!("Failed to set clipboard text: {}", e);
+    }
+
+    // Set CF_HTML (rich text)
+    if let Err(e) = raw::set(html_format, cf_html.as_bytes()) {
+        debug!("Failed to set CF_HTML (non-fatal): {}", e);
+    }
+
+    raw::close().map_err(|e| anyhow::anyhow!("Failed to close clipboard: {}", e))?;
+    Ok(())
+}
+
+/// Build the CF_HTML clipboard format string with required headers
+fn build_cf_html(html_fragment: &str) -> String {
+    // CF_HTML format: https://docs.microsoft.com/en-us/windows/win32/dataxchg/html-clipboard-format
+    let header = "Version:0.9\r\nStartHTML:SSSSSSSSSS\r\nEndHTML:EEEEEEEEEE\r\nStartFragment:FFFFFFFFFF\r\nEndFragment:GGGGGGGGGG\r\n";
+    let prefix = "<html><body>\r\n<!--StartFragment-->";
+    let suffix = "<!--EndFragment-->\r\n</body></html>";
+
+    let start_html = header.len();
+    let start_fragment = start_html + prefix.len();
+    let end_fragment = start_fragment + html_fragment.len();
+    let end_html = end_fragment + suffix.len();
+
+    let mut result = header.to_string();
+    result = result.replace("SSSSSSSSSS", &format!("{:010}", start_html));
+    result = result.replace("EEEEEEEEEE", &format!("{:010}", end_html));
+    result = result.replace("FFFFFFFFFF", &format!("{:010}", start_fragment));
+    result = result.replace("GGGGGGGGGG", &format!("{:010}", end_fragment));
+    result.push_str(prefix);
+    result.push_str(html_fragment);
+    result.push_str(suffix);
+    result
+}
+
 /// RAII guard that saves clipboard content on creation and restores it on drop
 /// Used during text replacement to preserve the user's clipboard
 pub struct ClipboardGuard {

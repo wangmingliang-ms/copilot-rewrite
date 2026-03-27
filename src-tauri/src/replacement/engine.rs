@@ -31,10 +31,11 @@ fn debug_log(msg: &str) {
 }
 
 /// Replace the currently selected text in the specified source application
-pub fn replace_selected_text(text: &str, source_hwnd: Option<isize>) -> Result<()> {
+pub fn replace_selected_text(text: &str, source_hwnd: Option<isize>, html: Option<&str>) -> Result<()> {
     debug_log(&format!(
-        "=== REPLACE START === text_len={}, source_hwnd={:?}",
+        "=== REPLACE START === text_len={}, html={}, source_hwnd={:?}",
         text.len(),
+        html.is_some(),
         source_hwnd
     ));
 
@@ -64,9 +65,15 @@ pub fn replace_selected_text(text: &str, source_hwnd: Option<isize>) -> Result<(
         debug_log("WARNING: No source HWND provided!");
     }
 
-    // Step 3: Write text to clipboard (no guard/restore for now — keep it simple)
-    debug_log("Setting clipboard text...");
-    clipboard::set_text(text).context("Failed to write to clipboard")?;
+    // Step 3: Write text to clipboard (with optional HTML for rich paste)
+    debug_log("Setting clipboard...");
+    if let Some(html_content) = html {
+        debug_log("Using rich HTML clipboard format");
+        clipboard::set_html(html_content, text).context("Failed to write HTML to clipboard")?;
+    } else {
+        debug_log("Using plain text clipboard format");
+        clipboard::set_text(text).context("Failed to write to clipboard")?;
+    }
     debug_log("Clipboard set successfully");
 
     thread::sleep(Duration::from_millis(100));

@@ -3,4 +3,4 @@
 
 pub mod manager;
 
-pub use manager::{get_text, set_text, ClipboardGuard};
+pub use manager::{get_text, set_text, set_html, ClipboardGuard};

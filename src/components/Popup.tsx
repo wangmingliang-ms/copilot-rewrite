@@ -24,12 +24,15 @@ const Popup: FC<PopupProps> = ({ selection }) => {
   const [showRaw, setShowRaw] = useState(false);
   const [currentModel, setCurrentModel] = useState<string>("");
   const [beastMode, setBeastMode] = useState<boolean>(false);
+  const [replaceMode, setReplaceMode] = useState<"rendered" | "markdown">("rendered");
+  const [showReplaceMenu, setShowReplaceMenu] = useState(false);
 
   // Refresh settings (model name + beast mode) from backend
   const refreshSettings = useCallback(async () => {
     try {
-      const s = await invoke<{ model: string; beast_mode: boolean }>("get_settings");
+      const s = await invoke<{ model: string; beast_mode: boolean; replace_mode: string }>("get_settings");
       setBeastMode(s.beast_mode || false);
+      setReplaceMode((s.replace_mode === "markdown" ? "markdown" : "rendered") as "rendered" | "markdown");
       if (!s.model) { setCurrentModel(""); return; }
       try {
         const models = await invoke<CopilotModel[]>("list_models");
@@ -133,11 +136,19 @@ const Popup: FC<PopupProps> = ({ selection }) => {
   // Dismiss on Escape
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") handleDismiss();
+      if (e.key === "Escape") {
+        if (showReplaceMenu) { setShowReplaceMenu(false); return; }
+        handleDismiss();
+      }
     };
+    const handleClick = () => { if (showReplaceMenu) setShowReplaceMenu(false); };
     window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
+    window.addEventListener("click", handleClick, true);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("click", handleClick, true);
+    };
+  }, [showReplaceMenu]);
 
   // Auto-dismiss on blur (when expanded)
   useEffect(() => {
@@ -235,13 +246,26 @@ const Popup: FC<PopupProps> = ({ selection }) => {
   const handleReplace = useCallback(async () => {
     if (!outputText) return;
     try {
-      await invoke("replace_text", { text: outputText });
+      const html = replaceMode === "rendered" && translatedHtml ? translatedHtml : null;
+      await invoke("log_action", { action: `Replace clicked — mode=${replaceMode}, text_len=${outputText.length}` }).catch(() => {});
+      await invoke("replace_text", { text: outputText, html });
       await invoke("dismiss_popup");
       resetState();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
-  }, [outputText]);
+  }, [outputText, translatedHtml, replaceMode]);
+
+  const switchReplaceMode = useCallback(async (mode: "rendered" | "markdown") => {
+    setReplaceMode(mode);
+    setShowReplaceMenu(false);
+    await invoke("log_action", { action: `Replace mode changed to: ${mode}` }).catch(() => {});
+    // Persist the setting
+    try {
+      const s = await invoke<Record<string, unknown>>("get_settings");
+      await invoke("update_settings", { settings: { ...s, replace_mode: mode } });
+    } catch { /* non-critical */ }
+  }, []);
 
   const handleCopy = useCallback(async () => {
     if (!outputText) return;
@@ -507,15 +531,45 @@ const Popup: FC<PopupProps> = ({ selection }) => {
                 <path d="M11 5V3.5A1.5 1.5 0 0 0 9.5 2h-6A1.5 1.5 0 0 0 2 3.5v6A1.5 1.5 0 0 0 3.5 11H5" />
               </svg>
             </button>
-            <button
-              onClick={handleReplace}
-              className="flex items-center gap-1.5 rounded-lg bg-copilot-blue px-3 py-1.5 text-xs font-medium text-white hover:bg-copilot-blue-hover transition-colors ml-1"
-            >
-              <svg className="w-3 h-3" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M10 2L4.5 7.5 2 5" />
-              </svg>
-              Replace
-            </button>
+            <div className="relative ml-1 flex">
+              <button
+                onClick={handleReplace}
+                className="flex items-center gap-1.5 rounded-l-lg bg-copilot-blue px-3 py-1.5 text-xs font-medium text-white hover:bg-copilot-blue-hover transition-colors"
+                title={replaceMode === "rendered" ? "Replace with rendered text" : "Replace with markdown"}
+              >
+                <svg className="w-3 h-3" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M10 2L4.5 7.5 2 5" />
+                </svg>
+                Replace
+              </button>
+              <button
+                onClick={() => setShowReplaceMenu(!showReplaceMenu)}
+                className="flex items-center rounded-r-lg bg-copilot-blue px-1.5 py-1.5 text-white hover:bg-copilot-blue-hover transition-colors border-l border-white/20"
+                title="Replace options"
+              >
+                <svg className="w-2.5 h-2.5" viewBox="0 0 10 10" fill="currentColor">
+                  <path d="M2 3.5L5 6.5L8 3.5" />
+                </svg>
+              </button>
+              {showReplaceMenu && (
+                <div className="absolute bottom-full right-0 mb-1 bg-white rounded-lg shadow-lg border border-gray-200 py-1 min-w-[180px] z-50">
+                  <button
+                    onClick={() => switchReplaceMode("rendered")}
+                    className={`w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 flex items-center gap-2 ${replaceMode === "rendered" ? "text-copilot-blue font-medium" : "text-gray-700"}`}
+                  >
+                    {replaceMode === "rendered" && <span>✓</span>}
+                    <span className={replaceMode !== "rendered" ? "ml-5" : ""}>Rendered text</span>
+                  </button>
+                  <button
+                    onClick={() => switchReplaceMode("markdown")}
+                    className={`w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 flex items-center gap-2 ${replaceMode === "markdown" ? "text-copilot-blue font-medium" : "text-gray-700"}`}
+                  >
+                    {replaceMode === "markdown" && <span>✓</span>}
+                    <span className={replaceMode !== "markdown" ? "ml-5" : ""}>Markdown</span>
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>
