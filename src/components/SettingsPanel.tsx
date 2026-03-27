@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, type FC } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-shell";
+import { getVersion } from "@tauri-apps/api/app";
 import { useUpdater } from "../hooks/useUpdater";
 
 interface AuthStatus {
@@ -52,11 +53,13 @@ const SettingsPanel: FC = () => {
   const [saved, setSaved] = useState(false);
   const [models, setModels] = useState<CopilotModel[]>([]);
   const [modelsLoading, setModelsLoading] = useState(false);
+  const [appVersion, setAppVersion] = useState("0.0.0");
   const updater = useUpdater(5_000); // auto-check 5s after settings opens
 
   // Load on mount
   const [initialLoaded, setInitialLoaded] = useState(false);
   useEffect(() => {
+    getVersion().then(setAppVersion).catch(() => {});
     invoke<AuthStatus>("get_auth_status").then(setAuthStatus).catch(() => {});
     invoke<Settings>("get_settings").then((s) => {
       setSettings(s);
@@ -344,8 +347,16 @@ const SettingsPanel: FC = () => {
           <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 mt-3">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-blue-900">Update available: v{updater.version}</p>
-                {updater.notes && <p className="text-xs text-blue-700 mt-0.5 line-clamp-2">{updater.notes}</p>}
+                <p className="text-sm font-medium text-blue-900">
+                  Update available:{" "}
+                  <a
+                    href="#"
+                    onClick={(e) => { e.preventDefault(); open(`https://github.com/wangmingliang-ms/copilot-rewrite/releases/tag/v${updater.version}`); }}
+                    className="text-blue-600 hover:underline"
+                  >
+                    v{updater.version}
+                  </a>
+                </p>
               </div>
               <button
                 onClick={() => {
@@ -418,7 +429,7 @@ const SettingsPanel: FC = () => {
                 {updater.status === "upToDate" ? "✓ Up to date" : "Check updates"}
               </button>
             ) : null}
-            <span>v0.1.0</span>
+            <span>v{appVersion}</span>
           </div>
         </div>
       </div>
