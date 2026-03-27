@@ -9,7 +9,7 @@ use windows::Win32::System::Com::{
 };
 use windows::Win32::UI::Accessibility::{
     CUIAutomation, IUIAutomation, IUIAutomationElement, IUIAutomationTextPattern,
-    UIA_TextPatternId, UIA_ValuePatternId, UIA_EditControlTypeId, UIA_DocumentControlTypeId,
+    UIA_TextPatternId, UIA_ValuePatternId, UIA_EditControlTypeId,
 };
 
 /// Bounding rectangle of the focused element (physical pixels)
@@ -92,18 +92,21 @@ impl UiaEngine {
     }
 
     /// Check if a UIA element is an editable control
-    /// Returns true for: Edit controls, Document controls (contenteditable),
-    /// and any element that supports ValuePattern (general editability indicator)
+    /// Returns true for: Edit controls (input/textarea),
+    /// Document controls that support ValuePattern (contenteditable),
+    /// and other elements that support ValuePattern
     fn is_editable_element(&self, element: &IUIAutomationElement) -> bool {
         unsafe {
-            // Check ControlType — Edit and Document are always editable
-            if let Ok(control_type) = element.CurrentControlType() {
-                if control_type == UIA_EditControlTypeId || control_type == UIA_DocumentControlTypeId {
-                    return true;
-                }
+            let control_type = element.CurrentControlType().unwrap_or_default();
+
+            // Edit controls are always editable (input fields, textareas)
+            if control_type == UIA_EditControlTypeId {
+                return true;
             }
 
-            // Check if the element supports ValuePattern (indicates editability)
+            // Document controls: only editable if they support ValuePattern
+            // (plain webpage = Document without ValuePattern, contenteditable = Document with ValuePattern)
+            // Also catch any other control type that supports ValuePattern
             if element.GetCurrentPattern(UIA_ValuePatternId).is_ok() {
                 return true;
             }
