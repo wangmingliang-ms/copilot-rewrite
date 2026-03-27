@@ -275,11 +275,17 @@ const Popup: FC<PopupProps> = ({ selection }) => {
   const handleCopy = useCallback(async () => {
     if (!outputText) return;
     try {
-      await invoke("copy_to_clipboard", { text: outputText });
+      if (replaceMode === "rendered" && translatedHtml) {
+        await invoke("log_action", { action: `Copy clicked — mode=rendered, text_len=${outputText.length}` }).catch(() => {});
+        await invoke("copy_html_to_clipboard", { html: translatedHtml, text: outputText });
+      } else {
+        await invoke("log_action", { action: `Copy clicked — mode=markdown, text_len=${outputText.length}` }).catch(() => {});
+        await invoke("copy_to_clipboard", { text: outputText });
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
-  }, [outputText]);
+  }, [outputText, translatedHtml, replaceMode]);
 
   const handleDismiss = useCallback(async () => {
     try {
@@ -543,15 +549,19 @@ const Popup: FC<PopupProps> = ({ selection }) => {
                 title={replaceMode === "rendered" ? "Replace with rendered text" : "Replace with markdown"}
               >
                 {replaceMode === "rendered" ? (
-                  <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="1" y="1" width="14" height="14" rx="2" />
-                    <line x1="4" y1="5" x2="12" y2="5" />
-                    <line x1="4" y1="8" x2="10" y2="8" />
-                    <line x1="4" y1="11" x2="8" y2="11" />
+                  /* Rich text icon — lines with formatting (bold first line) */
+                  <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M2 3h12" strokeWidth="2.2" />
+                    <path d="M2 6.5h9" />
+                    <path d="M2 10h11" />
+                    <path d="M2 13.5h7" />
                   </svg>
                 ) : (
-                  <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 16 16" fill="currentColor">
-                    <path d="M2.5 1A1.5 1.5 0 001 2.5v11A1.5 1.5 0 002.5 15h11a1.5 1.5 0 001.5-1.5v-11A1.5 1.5 0 0013.5 1h-11zM4 4h2l1.5 4L9 4h2l-2.5 6H7L4 4z" />
+                  /* Markdown icon — "MD" in a rounded box */
+                  <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="0.5" y="3" width="15" height="10" rx="2" />
+                    <path d="M3.5 10V6L5.5 8.5 7.5 6v4" />
+                    <path d="M10.5 10V6l2.5 4V6" />
                   </svg>
                 )}
                 Replace

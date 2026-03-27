@@ -591,6 +591,13 @@ async fn copy_to_clipboard(text: String) -> Result<(), String> {
     clipboard::set_text(&text).map_err(|e| format!("Clipboard error: {}", e))
 }
 
+/// Copy HTML + plain text to clipboard (rich text mode)
+#[tauri::command]
+async fn copy_html_to_clipboard(html: String, text: String) -> Result<(), String> {
+    info!("[POPUP] Copied HTML to clipboard — html={} chars, text={} chars", html.len(), text.len());
+    clipboard::set_html(&html, &text).map_err(|e| format!("Clipboard error: {}", e))
+}
+
 /// Log a frontend action (for actions that don't call backend)
 #[tauri::command]
 fn log_action(action: String) {
@@ -728,6 +735,7 @@ pub fn run() {
             process_and_show_preview,
             replace_text,
             copy_to_clipboard,
+            copy_html_to_clipboard,
             get_settings,
             update_settings,
             toggle_enabled,
