@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.2.1] - 2026-03-27
+
+### 🐛 Bug Fixes
+
+- **Version display hardcoded** — Settings footer now reads the version dynamically from Tauri `getVersion()` API instead of a hardcoded string. (`b3b62c2`)
+
+### ✨ Enhancements
+
+- **Clickable version links** — Both the current version in the footer and the new version in the update banner are now clickable links that open the corresponding GitHub Release page. (`b3b62c2`, `1d2630f`)
+
 ## [0.2.0] - 2026-03-27
 
 ### 🐛 Bug Fixes
