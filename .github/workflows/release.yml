@@ -32,6 +32,20 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Extract changelog
+        id: changelog
+        shell: pwsh
+        run: |
+          $content = Get-Content CHANGELOG.md -Raw
+          if ($content -match '(?s)## \[[\d.]+\][^\n]*\n(.*?)(?=\n## |\z)') {
+            $body = $Matches[1].Trim()
+          } else {
+            $body = "See the assets to download and install Copilot Rewrite."
+          }
+          "RELEASE_BODY<<EOF" | Out-File -Append $env:GITHUB_OUTPUT
+          $body | Out-File -Append $env:GITHUB_OUTPUT
+          "EOF" | Out-File -Append $env:GITHUB_OUTPUT
+
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
@@ -41,6 +55,6 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "Copilot Rewrite ${{ github.ref_name }}"
-          releaseBody: "See the assets to download and install Copilot Rewrite."
+          releaseBody: ${{ steps.changelog.outputs.RELEASE_BODY }}
           releaseDraft: false
           prerelease: false
