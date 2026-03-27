@@ -157,6 +157,14 @@ html.dark:has(#root .settings-view) #root {
   padding-left: 1.5em !important;
 }
 
+.markdown-body ul {
+  list-style-type: disc !important;
+}
+
+.markdown-body ol {
+  list-style-type: decimal !important;
+}
+
 .markdown-body li {
   margin-top: 0.15em !important;
   margin-bottom: 0.15em !important;
