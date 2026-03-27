@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.4.0] - 2026-03-27
+
+### ✨ Enhancements
+
+- **Tray icon status indicator** — Tray icon now shows a colored dot in the bottom-right corner: green when active, red when disabled. Tooltip also updates to reflect current state. (`e60267e`)
+- **Colored tray menu icons** — All tray menu items now have custom-drawn colored icons (blue info circle, gray gear, amber pause/green play, green refresh arrow, red X) instead of black-and-white emoji. (`e530b6b`, `eb42028`)
+- **Tray Disable/Enable toggle fixed** — Clicking Disable now properly switches the menu label to Enable (and vice versa). Icon shape and color update dynamically. (`c56be6c`)
+- **Version info in tray menu** — Version number shown at the top of the tray menu; clicking it opens the GitHub Release page. (`c56be6c`)
+- **Update notification auto-opens Settings** — When an update is detected on startup, the Settings window automatically opens and activates so the user immediately sees the update banner. (`fcf214e`)
+
+### 📝 Prompt Improvements
+
+- **Full Markdown formatting** — All prompts now encourage the use of bold, italic, code blocks, blockquotes, tables, headings, ASCII diagrams, colored inline HTML, and emoji for richer, more expressive output. (`8af150c`, `c301cdf`)
+- **Error correction in all modes** — All prompts (normal + beast) now silently fix typos, misspellings, wrong product names, and incorrect terminology. (`131f121`)
+- **Beast mode: stronger rewriting** — Beast mode additionally replaces weak or inappropriate examples with better, more illustrative ones. (`1c3ba8c`)
+
 ## [0.3.0] - 2026-03-27
 
 ### ✨ Enhancements
