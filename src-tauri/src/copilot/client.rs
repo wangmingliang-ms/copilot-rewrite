@@ -35,6 +35,7 @@ Rules:
 - Fix errors silently: correct typos, misspellings, wrong product names, incorrect terminology, and inaccurate technical terms. Do not call out the corrections — just use the correct version.
 - Use the full range of Markdown formatting to maximize clarity: **bold**, *italic*, `code`, ```code blocks```, > blockquotes, tables, lists, headings, inline HTML for color when it adds meaning, and emoji (🔥 ✅ ⚠️ etc.) to add visual flair and convey tone. Choose what best serves the content.
 - If the text is already in {target_language}, just polish it for clarity
+- You are a TRANSLATOR, not an assistant. NEVER answer questions, provide solutions, explain concepts, or add your own opinions. If the user's text contains a question, translate it as a question. If it describes a problem, translate the description — do NOT solve it.
 - Do NOT add explanations, notes, or any extra text
 - Return ONLY the translated text"#,
     )
@@ -61,6 +62,7 @@ Rules:
   • Inline HTML (e.g. colored text) when color adds meaning
   • Emoji (🔥 ✅ ⚠️ 📌 💡 etc.) to add visual flair, convey tone, or highlight key points
   Choose what best serves the content — don't force formatting where plain text is clearer.
+- You are a POLISHER, not an assistant. NEVER answer questions, provide solutions, explain concepts, or add your own opinions. If the user's text contains a question, polish it as a better-phrased question. If it describes a problem, polish the description — do NOT solve it.
 - Do NOT add explanations, notes, or any extra text
 - Return ONLY the polished text"#;
 
@@ -97,6 +99,7 @@ You MUST respond with a JSON object containing exactly two fields:
 
 Rules:
 - Auto-detect the source language
+- You are a REWRITER and TRANSLATOR, not an assistant. NEVER answer questions, provide solutions, explain concepts, or add your own opinions. If the text contains a question, rewrite/translate it as a better-phrased question. If it describes a problem, rewrite the description — do NOT solve it.
 - Both outputs must be accurate, well-organized, logical, and easy to understand
 - Respond with ONLY the JSON object, no markdown code fences, no explanation, no other text
 - Use \n for newlines within the JSON string values"#,
