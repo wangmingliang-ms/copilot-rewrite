@@ -32,7 +32,7 @@ Rules:
 - Preserve the original meaning
 - You may freely reorder sentences, adjust wording, and restructure paragraphs to make the translation clear, logical, and natural in {target_language}
 - The output MUST sound like it was originally written by a native {target_language} speaker — eliminate all "translationese" (awkward literal phrasing, unnatural word order, sentence patterns borrowed from the source language)
-- Use the full range of Markdown formatting to maximize clarity: **bold**, *italic*, `code`, ```code blocks```, > blockquotes, tables, lists, headings, and inline HTML for color when it adds meaning. Choose what best serves the content.
+- Use the full range of Markdown formatting to maximize clarity: **bold**, *italic*, `code`, ```code blocks```, > blockquotes, tables, lists, headings, inline HTML for color when it adds meaning, and emoji (🔥 ✅ ⚠️ etc.) to add visual flair and convey tone. Choose what best serves the content.
 - If the text is already in {target_language}, just polish it for clarity
 - Do NOT add explanations, notes, or any extra text
 - Return ONLY the translated text"#,
@@ -57,6 +57,7 @@ Rules:
   • Headings when content has clear sections
   • ASCII diagrams when visualizing relationships helps
   • Inline HTML (e.g. colored text) when color adds meaning
+  • Emoji (🔥 ✅ ⚠️ 📌 💡 etc.) to add visual flair, convey tone, or highlight key points
   Choose what best serves the content — don't force formatting where plain text is clearer.
 - Do NOT add explanations, notes, or any extra text
 - Return ONLY the polished text"#;
@@ -81,6 +82,7 @@ Use the FULL range of Markdown formatting to maximize clarity and visual impact:
 - Headings (##, ###) when the content has clear sections (but skip for short text)
 - ASCII diagrams or flowcharts when visualizing relationships or processes helps understanding
 - Inline HTML (e.g. <span style="color:red">colored text</span>) when color adds meaning (status indicators, severity levels, etc.)
+- Emoji (🔥 ✅ ⚠️ 📌 💡 🎯 etc.) to add visual flair, convey tone, or highlight key points
 
 Choose formatting that best serves the content — don't force formatting where plain text is clearer.
 
@@ -122,6 +124,7 @@ Leverage the FULL arsenal of Markdown to make your rewrite visually striking and
 - Headings (##, ###) for clear section structure
 - ASCII art, diagrams, or flowcharts when visualizing concepts helps
 - Inline HTML (e.g. <span style="color:...">colored text</span>) for status indicators, severity levels, or visual emphasis
+- Emoji (🔥 ✅ ⚠️ 📌 💡 🎯 etc.) liberally — add personality, visual energy, and highlight key points
 Pick what serves the content best — never force formatting where simplicity wins.
 
 Step 3 — THINK IN {target_language}: Before producing the final output, re-think the entire content using {target_language} thought patterns. Different languages have fundamentally different ways of organizing arguments, building emphasis, and flowing logically. Restructure the content to feel native in {target_language} thinking.
@@ -154,6 +157,7 @@ Leverage the FULL arsenal of Markdown to make your rewrite visually striking and
 - Headings (##, ###) for clear section structure
 - ASCII art, diagrams, or flowcharts when visualizing concepts helps
 - Inline HTML (e.g. <span style="color:...">colored text</span>) for status indicators, severity levels, or visual emphasis
+- Emoji (🔥 ✅ ⚠️ 📌 💡 🎯 etc.) liberally — add personality, visual energy, and highlight key points
 Pick what serves the content best — never force formatting where simplicity wins.
 
 CRITICAL RULES:
@@ -182,6 +186,7 @@ Leverage the FULL arsenal of Markdown to make your rewrite visually striking and
 - Headings (##, ###) for clear section structure
 - ASCII art, diagrams, or flowcharts when visualizing concepts helps
 - Inline HTML (e.g. <span style="color:...">colored text</span>) for status indicators, severity levels, or visual emphasis
+- Emoji (🔥 ✅ ⚠️ 📌 💡 🎯 etc.) liberally — add personality, visual energy, and highlight key points
 Pick what serves the content best — never force formatting where simplicity wins.
 
 Step 3 — THINK IN {target_language}: Before translating, re-think the entire content using {target_language} thought patterns. Different languages have fundamentally different ways of organizing arguments, building emphasis, and flowing logically. Restructure the content to feel native in {target_language} thinking — not just a word-for-word conversion.
