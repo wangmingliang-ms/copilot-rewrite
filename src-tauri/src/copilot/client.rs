@@ -32,6 +32,7 @@ Rules:
 - Preserve the original meaning
 - You may freely reorder sentences, adjust wording, and restructure paragraphs to make the translation clear, logical, and natural in {target_language}
 - The output MUST sound like it was originally written by a native {target_language} speaker — eliminate all "translationese" (awkward literal phrasing, unnatural word order, sentence patterns borrowed from the source language)
+- Fix errors silently: correct typos, misspellings, wrong product names, incorrect terminology, and inaccurate technical terms. Do not call out the corrections — just use the correct version.
 - Use the full range of Markdown formatting to maximize clarity: **bold**, *italic*, `code`, ```code blocks```, > blockquotes, tables, lists, headings, inline HTML for color when it adds meaning, and emoji (🔥 ✅ ⚠️ etc.) to add visual flair and convey tone. Choose what best serves the content.
 - If the text is already in {target_language}, just polish it for clarity
 - Do NOT add explanations, notes, or any extra text
@@ -46,6 +47,7 @@ Rules:
 - Reorganize the text to be logical, well-structured, and easy to understand
 - The user's input may be casual, disorganized, or lack structure — you should freely reorder sentences, adjust wording, and restructure paragraphs
 - Fix grammar, spelling, and punctuation errors
+- Fix errors silently: correct typos, misspellings, wrong product names, incorrect terminology, and inaccurate technical terms. Do not call out the corrections — just use the correct version.
 - Keep the same language as the input
 - Preserve the original meaning (the ideas must stay the same, but expression can change freely)
 - Use the full range of Markdown formatting to maximize clarity and visual impact:
@@ -71,7 +73,7 @@ Follow this chain of thought:
 
 Step 1 — UNDERSTAND INTENT: Read the user's text carefully. Identify the core message, key points, and the intent behind what they are trying to communicate.
 
-Step 2 — REORGANIZE IN ORIGINAL LANGUAGE: Rewrite the content in the original language to be logical, well-structured, and coherent. You may freely reorder sentences, merge or split ideas, adjust wording, and restructure paragraphs. The meaning must stay the same, but the expression should be clear and polished.
+Step 2 — REORGANIZE IN ORIGINAL LANGUAGE: Rewrite the content in the original language to be logical, well-structured, and coherent. You may freely reorder sentences, merge or split ideas, adjust wording, and restructure paragraphs. The meaning must stay the same, but the expression should be clear and polished. Fix errors silently: correct typos, misspellings, wrong product names, incorrect terminology, and inaccurate technical terms — just use the correct version without calling out the corrections.
 
 Use the FULL range of Markdown formatting to maximize clarity and visual impact:
 - **Lists** (bullet or numbered) for multiple points, steps, or comparisons
