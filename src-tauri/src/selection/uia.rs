@@ -9,7 +9,7 @@ use windows::Win32::System::Com::{
 };
 use windows::Win32::UI::Accessibility::{
     CUIAutomation, IUIAutomation, IUIAutomationElement, IUIAutomationTextPattern,
-    UIA_TextPatternId,
+    UIA_TextPatternId, UIA_ValuePatternId, UIA_EditControlTypeId, UIA_DocumentControlTypeId,
 };
 
 /// Bounding rectangle of the focused element (physical pixels)
@@ -72,6 +72,7 @@ impl UiaEngine {
     }
 
     /// Try to get selected text from the focused element using TextPattern
+    /// Only returns text if the focused element is an editable control (input/textarea/contenteditable)
     pub fn get_selected_text(&self) -> Result<Option<String>> {
         let element = match self.get_focused_element() {
             Ok(el) => el,
@@ -81,7 +82,34 @@ impl UiaEngine {
             }
         };
 
+        // Only trigger popup for editable elements (input fields, text areas, contenteditable)
+        if !self.is_editable_element(&element) {
+            trace!("Focused element is not editable — skipping");
+            return Ok(None);
+        }
+
         self.get_text_from_element(&element)
+    }
+
+    /// Check if a UIA element is an editable control
+    /// Returns true for: Edit controls, Document controls (contenteditable),
+    /// and any element that supports ValuePattern (general editability indicator)
+    fn is_editable_element(&self, element: &IUIAutomationElement) -> bool {
+        unsafe {
+            // Check ControlType — Edit and Document are always editable
+            if let Ok(control_type) = element.CurrentControlType() {
+                if control_type == UIA_EditControlTypeId || control_type == UIA_DocumentControlTypeId {
+                    return true;
+                }
+            }
+
+            // Check if the element supports ValuePattern (indicates editability)
+            if element.GetCurrentPattern(UIA_ValuePatternId).is_ok() {
+                return true;
+            }
+
+            false
+        }
     }
 
     /// Extract selected text from a UI Automation element using TextPattern
