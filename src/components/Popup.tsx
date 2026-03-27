@@ -28,6 +28,30 @@ const Popup: FC<PopupProps> = ({ selection }) => {
   const [replaceMode, setReplaceMode] = useState<"rendered" | "markdown">("rendered");
   const [showReplaceMenu, setShowReplaceMenu] = useState(false);
 
+  // Apply theme to this window's <html> based on settings
+  const applyTheme = useCallback(async (themeValue?: string) => {
+    let resolved: "light" | "dark" = "light";
+    const t = themeValue || "system";
+    if (t === "dark") {
+      resolved = "dark";
+    } else if (t === "light") {
+      resolved = "light";
+    } else {
+      // "system" — detect OS preference
+      try {
+        const sys = await invoke<string>("get_system_theme");
+        resolved = sys === "dark" ? "dark" : "light";
+      } catch {
+        resolved = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+      }
+    }
+    if (resolved === "dark") {
+      document.documentElement.classList.add("dark");
+    } else {
+      document.documentElement.classList.remove("dark");
+    }
+  }, []);
+
   // Track dark mode from <html> class
   const [isDark, setIsDark] = useState(() => document.documentElement.classList.contains("dark"));
   useEffect(() => {
@@ -38,11 +62,12 @@ const Popup: FC<PopupProps> = ({ selection }) => {
     return () => observer.disconnect();
   }, []);
 
-  // Refresh settings (model name + beast mode) from backend
+  // Refresh settings (model name + beast mode + theme) from backend
   const refreshSettings = useCallback(async () => {
     try {
-      const s = await invoke<{ model: string; beast_mode: boolean; replace_mode: string }>("get_settings");
+      const s = await invoke<{ model: string; beast_mode: boolean; replace_mode: string; theme?: string }>("get_settings");
       setBeastMode(s.beast_mode || false);
+      applyTheme(s.theme);
       setReplaceMode((s.replace_mode === "markdown" ? "markdown" : "rendered") as "rendered" | "markdown");
       if (!s.model) { setCurrentModel(""); return; }
       try {
@@ -401,8 +426,10 @@ const Popup: FC<PopupProps> = ({ selection }) => {
             e.currentTarget.style.boxShadow = "0 4px 16px rgba(239,68,68,0.15), 0 1px 3px rgba(0,0,0,0.08)";
           }}
           onMouseLeave={(e) => {
-            e.currentTarget.style.borderColor = "rgba(0,120,212,0.15)";
-            e.currentTarget.style.boxShadow = "0 4px 16px rgba(0,120,212,0.12), 0 1px 3px rgba(0,0,0,0.08)";
+            e.currentTarget.style.borderColor = isDark ? "rgba(96,165,250,0.25)" : "rgba(0,120,212,0.15)";
+            e.currentTarget.style.boxShadow = isDark
+              ? "0 4px 16px rgba(0,0,0,0.4), 0 1px 3px rgba(0,0,0,0.3)"
+              : "0 4px 16px rgba(0,120,212,0.12), 0 1px 3px rgba(0,0,0,0.08)";
           }}
         >
           <div className="h-5 w-5 animate-spin rounded-full border-2 border-copilot-blue border-t-transparent group-hover:hidden" />
@@ -546,7 +573,7 @@ const Popup: FC<PopupProps> = ({ selection }) => {
                   invoke("log_action", { action: "Beast icon clicked — opening Settings" }).catch(() => {});
                   invoke("open_settings").catch(() => {});
                 }}
-                className="flex items-center justify-center w-7 h-7 rounded-lg text-blue-500 bg-blue-50 hover:bg-blue-100 transition-colors cursor-pointer"
+                className="flex items-center justify-center w-7 h-7 rounded-lg text-blue-500 bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors cursor-pointer"
                 title="Beast Mode: ON — Click to change in Settings"
               >
                 <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="currentColor">
