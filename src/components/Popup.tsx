@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useMemo, useRef, type FC } from "reac
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { marked } from "marked";
+import "github-markdown-css/github-markdown-light.css";
 import iconImg from "../assets/icon-48.png";
 import { SelectionInfo, ProcessResponse } from "../hooks/useSelection";
 
@@ -434,7 +435,8 @@ const Popup: FC<PopupProps> = ({ selection }) => {
               <pre className="text-[12px] leading-[1.6] text-gray-700 whitespace-pre-wrap break-words font-mono">{translated}</pre>
             ) : (
               <div
-                className="text-[13.5px] leading-[1.7] text-gray-800 prose prose-sm max-w-none prose-p:my-1 prose-li:my-0.5 prose-ul:my-1.5 prose-ol:my-1.5 prose-headings:my-1.5 prose-strong:text-gray-900"
+                className="markdown-body text-[13.5px] leading-[1.7]"
+                style={{ background: "transparent" }}
                 dangerouslySetInnerHTML={{ __html: translatedHtml }}
               />
             )}
@@ -447,7 +449,7 @@ const Popup: FC<PopupProps> = ({ selection }) => {
             {showRaw ? (
               <pre className="text-[12px] leading-[1.6] text-gray-500 whitespace-pre-wrap break-words font-mono">{reorganized}</pre>
             ) : (
-              <div className="text-[12px] leading-[1.55] text-gray-400 prose prose-sm max-w-none prose-p:my-0.5 prose-li:my-0.5 prose-ul:my-1 prose-ol:my-1">
+              <div className="markdown-body text-[12px] leading-[1.55] text-gray-400" style={{ background: "transparent" }}>
                 <div dangerouslySetInnerHTML={{ __html: reorganizedHtml }} />
               </div>
             )}
