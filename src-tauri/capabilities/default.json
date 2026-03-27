@@ -2,7 +2,10 @@
   "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-cli/schema.json",
   "identifier": "default",
   "description": "Capability for all windows",
-  "windows": ["popup", "settings"],
+  "windows": [
+    "popup",
+    "settings"
+  ],
   "permissions": [
     "core:default",
     "core:window:default",
@@ -14,6 +17,7 @@
     "core:window:allow-set-focus",
     "core:window:allow-set-always-on-top",
     "shell:allow-open",
-    "updater:default"
+    "updater:default",
+    "notification:default"
   ]
 }

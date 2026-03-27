@@ -8,8 +8,12 @@ use std::time::{Duration, Instant};
 use tauri::Emitter;
 use tauri::{AppHandle, Manager};
 use windows::Win32::Foundation::POINT;
-use windows::Win32::UI::WindowsAndMessaging::{GetCursorPos, GetForegroundWindow, GetWindowTextW, GetWindowThreadProcessId};
-use windows::Win32::System::Threading::{OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_FORMAT, PROCESS_QUERY_LIMITED_INFORMATION};
+use windows::Win32::System::Threading::{
+    OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_FORMAT, PROCESS_QUERY_LIMITED_INFORMATION,
+};
+use windows::Win32::UI::WindowsAndMessaging::{
+    GetCursorPos, GetForegroundWindow, GetWindowTextW, GetWindowThreadProcessId,
+};
 
 use super::uia::UiaEngine;
 use crate::overlay;
@@ -30,14 +34,28 @@ fn get_window_context(hwnd: isize) -> (String, String) {
         let mut pid = 0u32;
         unsafe { GetWindowThreadProcessId(h, Some(&mut pid)) };
         if pid > 0 {
-            if let Ok(process) = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) } {
+            if let Ok(process) =
+                unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) }
+            {
                 let mut buf = [0u16; 512];
                 let mut size = buf.len() as u32;
-                if unsafe { QueryFullProcessImageNameW(process, PROCESS_NAME_FORMAT(0), windows::core::PWSTR(buf.as_mut_ptr()), &mut size) }.is_ok() {
+                if unsafe {
+                    QueryFullProcessImageNameW(
+                        process,
+                        PROCESS_NAME_FORMAT(0),
+                        windows::core::PWSTR(buf.as_mut_ptr()),
+                        &mut size,
+                    )
+                }
+                .is_ok()
+                {
                     let path = String::from_utf16_lossy(&buf[..size as usize]);
                     // Extract just the filename without extension
-                    path.rsplit('\\').next().unwrap_or(&path)
-                        .strip_suffix(".exe").unwrap_or(&path)
+                    path.rsplit('\\')
+                        .next()
+                        .unwrap_or(&path)
+                        .strip_suffix(".exe")
+                        .unwrap_or(&path)
                         .to_string()
                 } else {
                     String::new()
@@ -72,7 +90,10 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
             Some(engine)
         }
         Err(e) => {
-            error!("Failed to initialize UIA engine: {}. Using clipboard fallback only.", e);
+            error!(
+                "Failed to initialize UIA engine: {}. Using clipboard fallback only.",
+                e
+            );
             None
         }
     };
@@ -80,7 +101,9 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
     let mut last_selection: Option<String> = None;
     let mut last_change_time = Instant::now();
     let mut debounce_text: Option<String> = None;
-    let mut seen_generation = state.selection_generation.load(std::sync::atomic::Ordering::Relaxed);
+    let mut seen_generation = state
+        .selection_generation
+        .load(std::sync::atomic::Ordering::Relaxed);
 
     loop {
         // Check if monitoring is enabled
@@ -93,9 +116,14 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
         }
 
         // Check if dismiss happened (generation bumped)
-        let current_gen = state.selection_generation.load(std::sync::atomic::Ordering::Relaxed);
+        let current_gen = state
+            .selection_generation
+            .load(std::sync::atomic::Ordering::Relaxed);
         if current_gen != seen_generation {
-            info!("Generation changed ({} → {}) — resetting monitor state (popup was dismissed)", seen_generation, current_gen);
+            info!(
+                "Generation changed ({} → {}) — resetting monitor state (popup was dismissed)",
+                seen_generation, current_gen
+            );
             last_selection = None;
             debounce_text = None;
             seen_generation = current_gen;
@@ -160,9 +188,11 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
                         let text_changed = last_selection.as_ref() != Some(&text_trimmed);
 
                         if text_changed {
-                            info!("Selection changed: {} chars (was {} chars)",
+                            info!(
+                                "Selection changed: {} chars (was {} chars)",
                                 text_trimmed.len(),
-                                last_selection.as_ref().map(|s| s.len()).unwrap_or(0));
+                                last_selection.as_ref().map(|s| s.len()).unwrap_or(0)
+                            );
                             debounce_text = Some(text_trimmed.clone());
                             last_change_time = Instant::now();
                             last_selection = Some(text_trimmed);
@@ -175,7 +205,8 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
 
                                 // Get bounding rect of the focused input element
                                 let input_rect = if let Some(ref uia_engine) = uia {
-                                    uia_engine.get_focused_element_rect()
+                                    uia_engine
+                                        .get_focused_element_rect()
                                         .map(|r| (r.x, r.y, r.width, r.height))
                                 } else {
                                     None
@@ -202,8 +233,10 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
         } else {
             // No selection detected
             if last_selection.is_some() && !preview_is_visible {
-                info!("Selection cleared — hiding popup (was {} chars)",
-                    last_selection.as_ref().map(|s| s.len()).unwrap_or(0));
+                info!(
+                    "Selection cleared — hiding popup (was {} chars)",
+                    last_selection.as_ref().map(|s| s.len()).unwrap_or(0)
+                );
                 last_selection = None;
                 debounce_text = None;
                 overlay::hide_popup(&app_handle);
@@ -233,9 +266,7 @@ fn show_popup(app_handle: AppHandle, state: &Arc<AppState>, info: SelectionInfo)
     let preview: String = info.text.chars().take(50).collect();
     info!(
         "Showing popup icon at ({}, {}) for text: {}...",
-        info.mouse_x,
-        info.mouse_y,
-        preview
+        info.mouse_x, info.mouse_y, preview
     );
 
     // Store the current selection in state

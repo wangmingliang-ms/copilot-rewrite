@@ -9,7 +9,7 @@ use windows::Win32::System::Com::{
 };
 use windows::Win32::UI::Accessibility::{
     CUIAutomation, IUIAutomation, IUIAutomationElement, IUIAutomationTextPattern,
-    UIA_TextPatternId, UIA_ValuePatternId, UIA_EditControlTypeId,
+    UIA_EditControlTypeId, UIA_TextPatternId, UIA_ValuePatternId,
 };
 
 /// Bounding rectangle of the focused element (physical pixels)
@@ -34,9 +34,8 @@ impl UiaEngine {
                 .ok()
                 .context("Failed to initialize COM")?;
 
-            let automation: IUIAutomation =
-                CoCreateInstance(&CUIAutomation, None, CLSCTX_ALL)
-                    .context("Failed to create IUIAutomation instance")?;
+            let automation: IUIAutomation = CoCreateInstance(&CUIAutomation, None, CLSCTX_ALL)
+                .context("Failed to create IUIAutomation instance")?;
 
             Ok(Self { automation })
         }

@@ -378,7 +378,11 @@ impl CopilotClient {
             action,
             model,
             beast_mode,
-            if app_context.is_empty() { "none" } else { app_context }
+            if app_context.is_empty() {
+                "none"
+            } else {
+                app_context
+            }
         );
 
         let request = ChatCompletionRequest {
@@ -433,10 +437,13 @@ impl CopilotClient {
         }
 
         // Parse SSE stream response
-        let body = response.text().await.context("Failed to read response body")?;
+        let body = response
+            .text()
+            .await
+            .context("Failed to read response body")?;
         let mut result = String::new();
         let mut actual_model_logged = false;
-        
+
         for line in body.lines() {
             let line = line.trim();
             if let Some(data) = line.strip_prefix("data: ") {
@@ -511,7 +518,10 @@ impl CopilotClient {
             return Ok(Self::default_models());
         }
 
-        let body_text = response.text().await.context("Failed to read models body")?;
+        let body_text = response
+            .text()
+            .await
+            .context("Failed to read models body")?;
         let models_resp: ModelsResponse = match serde_json::from_str(&body_text) {
             Ok(m) => m,
             Err(e) => {
@@ -532,19 +542,26 @@ impl CopilotClient {
                 // Skip non-chat models (e.g. embeddings)
                 if let Some(ref caps) = m.capabilities {
                     if let Some(ref t) = caps.model_type {
-                        if t != "chat" { return false; }
+                        if t != "chat" {
+                            return false;
+                        }
                     }
                 }
                 // Skip models that don't support /chat/completions endpoint
                 if let Some(ref endpoints) = m.supported_endpoints {
                     if !endpoints.iter().any(|e| e == "/chat/completions") {
-                        debug!("Skipping model {} — no /chat/completions support (endpoints: {:?})", m.id, endpoints);
+                        debug!(
+                            "Skipping model {} — no /chat/completions support (endpoints: {:?})",
+                            m.id, endpoints
+                        );
                         return false;
                     }
                 }
                 // Skip internal-only models
                 let name = m.name.as_deref().unwrap_or("");
-                if name.to_lowercase().contains("internal") { return false; }
+                if name.to_lowercase().contains("internal") {
+                    return false;
+                }
                 true
             })
             .map(|m| CopilotModel {
@@ -568,12 +585,54 @@ impl CopilotClient {
     /// Fallback model list when API is unavailable
     fn default_models() -> Vec<CopilotModel> {
         vec![
-            CopilotModel { id: "claude-sonnet-4".into(), name: "Claude Sonnet 4".into(), version: String::new(), vendor: "Anthropic".into(), preview: false, category: "versatile".into() },
-            CopilotModel { id: "gpt-4o".into(), name: "GPT-4o".into(), version: String::new(), vendor: "OpenAI".into(), preview: false, category: "versatile".into() },
-            CopilotModel { id: "gpt-5-mini".into(), name: "GPT-5 Mini".into(), version: String::new(), vendor: "OpenAI".into(), preview: false, category: "versatile".into() },
-            CopilotModel { id: "claude-sonnet-4.5".into(), name: "Claude Sonnet 4.5".into(), version: String::new(), vendor: "Anthropic".into(), preview: false, category: "versatile".into() },
-            CopilotModel { id: "claude-haiku-4.5".into(), name: "Claude Haiku 4.5".into(), version: String::new(), vendor: "Anthropic".into(), preview: false, category: "versatile".into() },
-            CopilotModel { id: "gemini-2.5-pro".into(), name: "Gemini 2.5 Pro".into(), version: String::new(), vendor: "Google".into(), preview: false, category: "versatile".into() },
+            CopilotModel {
+                id: "claude-sonnet-4".into(),
+                name: "Claude Sonnet 4".into(),
+                version: String::new(),
+                vendor: "Anthropic".into(),
+                preview: false,
+                category: "versatile".into(),
+            },
+            CopilotModel {
+                id: "gpt-4o".into(),
+                name: "GPT-4o".into(),
+                version: String::new(),
+                vendor: "OpenAI".into(),
+                preview: false,
+                category: "versatile".into(),
+            },
+            CopilotModel {
+                id: "gpt-5-mini".into(),
+                name: "GPT-5 Mini".into(),
+                version: String::new(),
+                vendor: "OpenAI".into(),
+                preview: false,
+                category: "versatile".into(),
+            },
+            CopilotModel {
+                id: "claude-sonnet-4.5".into(),
+                name: "Claude Sonnet 4.5".into(),
+                version: String::new(),
+                vendor: "Anthropic".into(),
+                preview: false,
+                category: "versatile".into(),
+            },
+            CopilotModel {
+                id: "claude-haiku-4.5".into(),
+                name: "Claude Haiku 4.5".into(),
+                version: String::new(),
+                vendor: "Anthropic".into(),
+                preview: false,
+                category: "versatile".into(),
+            },
+            CopilotModel {
+                id: "gemini-2.5-pro".into(),
+                name: "Gemini 2.5 Pro".into(),
+                version: String::new(),
+                vendor: "Google".into(),
+                preview: false,
+                category: "versatile".into(),
+            },
         ]
     }
 }

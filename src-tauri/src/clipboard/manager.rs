@@ -7,14 +7,15 @@ use log::{debug, warn};
 
 /// Get text content from the system clipboard
 pub fn get_text() -> Result<String> {
-    let text: String =
-        get_clipboard(formats::Unicode).map_err(|e| anyhow::anyhow!("Failed to read clipboard text: {}", e))?;
+    let text: String = get_clipboard(formats::Unicode)
+        .map_err(|e| anyhow::anyhow!("Failed to read clipboard text: {}", e))?;
     Ok(text)
 }
 
 /// Set text content to the system clipboard
 pub fn set_text(text: &str) -> Result<()> {
-    set_clipboard(formats::Unicode, text).map_err(|e| anyhow::anyhow!("Failed to write to clipboard: {}", e))?;
+    set_clipboard(formats::Unicode, text)
+        .map_err(|e| anyhow::anyhow!("Failed to write to clipboard: {}", e))?;
     Ok(())
 }
 

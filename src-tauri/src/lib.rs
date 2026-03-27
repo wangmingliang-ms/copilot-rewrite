@@ -42,7 +42,10 @@ impl AppState {
         // Override token from saved auth if available
         if let Some(saved_auth) = copilot::oauth::load_saved_auth() {
             settings.api_token = saved_auth.github_token;
-            info!("Loaded saved GitHub token for user: {:?}", saved_auth.username);
+            info!(
+                "Loaded saved GitHub token for user: {:?}",
+                saved_auth.username
+            );
         }
 
         Self {
@@ -121,15 +124,13 @@ impl Settings {
         if let Some(path) = Self::settings_path() {
             if path.exists() {
                 match std::fs::read_to_string(&path) {
-                    Ok(json) => {
-                        match serde_json::from_str::<Settings>(&json) {
-                            Ok(s) => {
-                                info!("Loaded settings from {:?}", path);
-                                return s;
-                            }
-                            Err(e) => warn!("Failed to parse settings.json: {}", e),
+                    Ok(json) => match serde_json::from_str::<Settings>(&json) {
+                        Ok(s) => {
+                            info!("Loaded settings from {:?}", path);
+                            return s;
                         }
-                    }
+                        Err(e) => warn!("Failed to parse settings.json: {}", e),
+                    },
                     Err(e) => warn!("Failed to read settings.json: {}", e),
                 }
             }
@@ -139,16 +140,15 @@ impl Settings {
 
     /// Save settings to disk
     pub fn save(&self) -> Result<(), String> {
-        let path = Self::settings_path()
-            .ok_or_else(|| "Cannot determine config directory".to_string())?;
+        let path =
+            Self::settings_path().ok_or_else(|| "Cannot determine config directory".to_string())?;
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
                 .map_err(|e| format!("Failed to create config dir: {}", e))?;
         }
         let json = serde_json::to_string_pretty(self)
             .map_err(|e| format!("Failed to serialize settings: {}", e))?;
-        std::fs::write(&path, json)
-            .map_err(|e| format!("Failed to write settings.json: {}", e))?;
+        std::fs::write(&path, json).map_err(|e| format!("Failed to write settings.json: {}", e))?;
         info!("Settings saved to {:?}", path);
         Ok(())
     }
@@ -216,7 +216,15 @@ async fn process_text(
 
     let result = state
         .copilot_client
-        .process(&request.text, &request.action, &settings.target_language, &settings.api_token, &settings.model, settings.beast_mode, "")
+        .process(
+            &request.text,
+            &request.action,
+            &settings.target_language,
+            &settings.api_token,
+            &settings.model,
+            settings.beast_mode,
+            "",
+        )
         .await
         .map_err(|e| format!("Copilot API error: {}", e))?;
 
@@ -244,7 +252,8 @@ async fn process_and_show_preview(
     // Get app context from current selection for prompt contextualization
     let app_context = {
         let sel = state.current_selection.lock();
-        sel.as_ref().map(|s| format!("App: {}, Window: {}", s.app_name, s.window_title))
+        sel.as_ref()
+            .map(|s| format!("App: {}, Window: {}", s.app_name, s.window_title))
             .unwrap_or_default()
     };
 
@@ -255,11 +264,21 @@ async fn process_and_show_preview(
         request.action, settings.model, settings.beast_mode, request.is_refresh, request.text.len());
 
     // Emit loading event (frontend switches to spinning state)
-    app.emit("show-preview-loading", ()).map_err(|e| e.to_string())?;
+    app.emit("show-preview-loading", ())
+        .map_err(|e| e.to_string())?;
 
     // Call Copilot API
-    match state.copilot_client
-        .process(&request.text, &request.action, &settings.target_language, &settings.api_token, &settings.model, settings.beast_mode, &app_context)
+    match state
+        .copilot_client
+        .process(
+            &request.text,
+            &request.action,
+            &settings.target_language,
+            &settings.api_token,
+            &settings.model,
+            settings.beast_mode,
+            &app_context,
+        )
         .await
     {
         Ok(result) => {
@@ -274,7 +293,8 @@ async fn process_and_show_preview(
                 result,
                 action: request.action,
             };
-            app.emit("show-preview-result", &response).map_err(|e| e.to_string())?;
+            app.emit("show-preview-result", &response)
+                .map_err(|e| e.to_string())?;
             Ok(())
         }
         Err(e) => {
@@ -306,17 +326,16 @@ async fn start_github_login(
 
 /// Poll for GitHub OAuth token completion
 #[tauri::command]
-async fn poll_github_login(
-    state: tauri::State<'_, Arc<AppState>>,
-) -> Result<AuthStatus, String> {
+async fn poll_github_login(state: tauri::State<'_, Arc<AppState>>) -> Result<AuthStatus, String> {
     let device_info = state.pending_device_code.lock().clone();
 
     let device_info = device_info.ok_or("No pending login. Call start_github_login first.")?;
 
     let http = reqwest::Client::new();
-    let token = copilot::oauth::poll_for_token(&http, &device_info.device_code, device_info.interval)
-        .await
-        .map_err(|e| format!("Login failed: {}", e))?;
+    let token =
+        copilot::oauth::poll_for_token(&http, &device_info.device_code, device_info.interval)
+            .await
+            .map_err(|e| format!("Login failed: {}", e))?;
 
     // Save token to settings (in memory and to disk)
     {
@@ -363,7 +382,9 @@ async fn get_auth_status(state: tauri::State<'_, Arc<AppState>>) -> Result<AuthS
             {
                 Ok(resp) if resp.status().is_success() => {
                     #[derive(Deserialize)]
-                    struct GhUser { login: String }
+                    struct GhUser {
+                        login: String,
+                    }
                     match resp.json::<GhUser>().await {
                         Ok(user) => {
                             // Re-save auth.json with username
@@ -441,10 +462,10 @@ fn open_settings(app: tauri::AppHandle) -> Result<(), String> {
         // when called from a background or WS_EX_NOACTIVATE window
         #[cfg(target_os = "windows")]
         {
-            use windows::Win32::UI::WindowsAndMessaging::{
-                SetForegroundWindow, BringWindowToTop, ShowWindow, SW_RESTORE,
-            };
             use windows::Win32::Foundation::HWND;
+            use windows::Win32::UI::WindowsAndMessaging::{
+                BringWindowToTop, SetForegroundWindow, ShowWindow, SW_RESTORE,
+            };
             if let Ok(hwnd) = window.hwnd() {
                 unsafe {
                     let h = HWND(hwnd.0);
@@ -521,7 +542,10 @@ async fn replace_text(
     *state.preview_visible.lock() = false;
 
     // Get source window HWND before hiding preview
-    let source_hwnd = state.current_selection.lock().as_ref()
+    let source_hwnd = state
+        .current_selection
+        .lock()
+        .as_ref()
         .and_then(|s| s.source_hwnd);
     log::info!("[REPLACE CMD] source_hwnd={:?}", source_hwnd);
 
@@ -607,16 +631,15 @@ async fn dismiss_popup(
     *state.preview_visible.lock() = false;
     *state.current_selection.lock() = None;
     // Bump generation — monitor will clear its local state when it sees this
-    state.selection_generation.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    state
+        .selection_generation
+        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     Ok(())
 }
 
 /// Resize popup to fit actual rendered content height (called from frontend after render)
 #[tauri::command]
-async fn resize_popup_content(
-    app: tauri::AppHandle,
-    height: f64,
-) -> Result<(), String> {
+async fn resize_popup_content(app: tauri::AppHandle, height: f64) -> Result<(), String> {
     overlay::resize_popup_to_content(&app, height);
     Ok(())
 }
@@ -636,9 +659,17 @@ pub fn run() {
     {
         let today = chrono::Local::now().format("%Y-%m-%d").to_string();
         let log_path = log_dir.join(format!("{}.log", today));
-        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&log_path) {
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_path)
+        {
             use std::io::Write;
-            let _ = writeln!(f, "\n--- Session started: {} ---", chrono::Local::now().format("%Y-%m-%d %H:%M:%S"));
+            let _ = writeln!(
+                f,
+                "\n--- Session started: {} ---",
+                chrono::Local::now().format("%Y-%m-%d %H:%M:%S")
+            );
         }
     }
 
@@ -661,7 +692,11 @@ pub fn run() {
             if record.level() <= log::Level::Info {
                 let today = now.format("%Y-%m-%d").to_string();
                 let log_path = log_dir_for_closure.join(format!("{}.log", today));
-                if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&log_path) {
+                if let Ok(mut f) = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&log_path)
+                {
                     let _ = f.write_all(line.as_bytes());
                     let _ = f.flush();
                 }
@@ -673,6 +708,7 @@ pub fn run() {
     let app_state = Arc::new(AppState::new());
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(app_state.clone())
@@ -741,6 +777,31 @@ pub fn run() {
                     log::error!("Failed to register auto-start: {}", e);
                 }
             }
+
+            // Check for updates on startup (after 10s delay)
+            let update_handle = app_handle.clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+                info!("Checking for updates on startup...");
+                use tauri_plugin_updater::UpdaterExt;
+                match update_handle.updater().expect("updater").check().await {
+                    Ok(Some(update)) => {
+                        info!("Update available: v{}", update.version);
+                        use tauri_plugin_notification::NotificationExt;
+                        let _ = update_handle.notification()
+                            .builder()
+                            .title("Copilot Rewrite Update Available")
+                            .body(format!("A new version v{} is available. Open Settings to update.", update.version))
+                            .show();
+                    }
+                    Ok(None) => {
+                        info!("App is up to date");
+                    }
+                    Err(e) => {
+                        log::warn!("Failed to check for updates: {}", e);
+                    }
+                }
+            });
 
             Ok(())
         })

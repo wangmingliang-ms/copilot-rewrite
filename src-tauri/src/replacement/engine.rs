@@ -21,7 +21,10 @@ fn debug_log(msg: &str) {
     if let Some(dir) = dirs::config_dir() {
         let log_path = dir.join("copilot-rewrite").join("replace-debug.log");
         if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(&log_path) {
-            let secs = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis();
+            let secs = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis();
             let _ = writeln!(f, "[{}] {}", secs, msg);
         }
     }
@@ -29,7 +32,11 @@ fn debug_log(msg: &str) {
 
 /// Replace the currently selected text in the specified source application
 pub fn replace_selected_text(text: &str, source_hwnd: Option<isize>) -> Result<()> {
-    debug_log(&format!("=== REPLACE START === text_len={}, source_hwnd={:?}", text.len(), source_hwnd));
+    debug_log(&format!(
+        "=== REPLACE START === text_len={}, source_hwnd={:?}",
+        text.len(),
+        source_hwnd
+    ));
 
     // Step 1: Check current foreground window
     let current_fg = unsafe { GetForegroundWindow() };
@@ -46,10 +53,13 @@ pub fn replace_selected_text(text: &str, source_hwnd: Option<isize>) -> Result<(
         }
         // Wait for window activation
         thread::sleep(Duration::from_millis(300));
-        
+
         // Verify focus switched
         let new_fg = unsafe { GetForegroundWindow() };
-        debug_log(&format!("After activation, foreground HWND: {:?}", new_fg.0));
+        debug_log(&format!(
+            "After activation, foreground HWND: {:?}",
+            new_fg.0
+        ));
     } else {
         debug_log("WARNING: No source HWND provided!");
     }
@@ -58,7 +68,7 @@ pub fn replace_selected_text(text: &str, source_hwnd: Option<isize>) -> Result<(
     debug_log("Setting clipboard text...");
     clipboard::set_text(text).context("Failed to write to clipboard")?;
     debug_log("Clipboard set successfully");
-    
+
     thread::sleep(Duration::from_millis(100));
 
     // Step 4: Simulate Ctrl+V

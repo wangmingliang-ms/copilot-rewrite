@@ -15,11 +15,9 @@ use windows::Win32::Graphics::Gdi::MonitorFromPoint;
 use windows::Win32::Graphics::Gdi::MONITOR_DEFAULTTONEAREST;
 use windows::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetWindowLongW, SetWindowLongW, SetWindowPos,
-    GWL_EXSTYLE, GWL_STYLE,
-    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
-    WS_THICKFRAME, WS_CAPTION, WS_SYSMENU, WS_MINIMIZEBOX, WS_MAXIMIZEBOX,
-    SWP_NOMOVE, SWP_NOZORDER, SWP_FRAMECHANGED, SWP_NOSIZE, HWND_TOP,
+    GetWindowLongW, SetWindowLongW, SetWindowPos, GWL_EXSTYLE, GWL_STYLE, HWND_TOP,
+    SWP_FRAMECHANGED, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, WS_CAPTION, WS_EX_NOACTIVATE,
+    WS_EX_TOOLWINDOW, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_SYSMENU, WS_THICKFRAME,
 };
 
 /// Icon/spinner size (physical pixels)
@@ -63,27 +61,34 @@ pub fn setup_popup_window(app_handle: &AppHandle) {
 
                     // Extended style: no-activate + tool window
                     let ex_style = GetWindowLongW(hwnd_win, GWL_EXSTYLE);
-                    let new_ex = ex_style
-                        | WS_EX_NOACTIVATE.0 as i32
-                        | WS_EX_TOOLWINDOW.0 as i32;
+                    let new_ex = ex_style | WS_EX_NOACTIVATE.0 as i32 | WS_EX_TOOLWINDOW.0 as i32;
                     SetWindowLongW(hwnd_win, GWL_EXSTYLE, new_ex);
 
                     // Strip frame styles to allow 48×48
                     let style = GetWindowLongW(hwnd_win, GWL_STYLE);
-                    let strip = WS_THICKFRAME.0 | WS_CAPTION.0 | WS_SYSMENU.0
-                        | WS_MINIMIZEBOX.0 | WS_MAXIMIZEBOX.0;
+                    let strip = WS_THICKFRAME.0
+                        | WS_CAPTION.0
+                        | WS_SYSMENU.0
+                        | WS_MINIMIZEBOX.0
+                        | WS_MAXIMIZEBOX.0;
                     let new_style = style & !(strip as i32);
                     SetWindowLongW(hwnd_win, GWL_STYLE, new_style);
 
                     // Force 48×48
                     let _ = SetWindowPos(
-                        hwnd_win, HWND_TOP,
-                        0, 0,
-                        ICON_SIZE as i32, ICON_SIZE as i32,
+                        hwnd_win,
+                        HWND_TOP,
+                        0,
+                        0,
+                        ICON_SIZE as i32,
+                        ICON_SIZE as i32,
                         SWP_NOMOVE | SWP_NOZORDER | SWP_FRAMECHANGED,
                     );
                 }
-                info!("Popup window: {}x{} px, WS_EX_NOACTIVATE, no frame", ICON_SIZE, ICON_SIZE);
+                info!(
+                    "Popup window: {}x{} px, WS_EX_NOACTIVATE, no frame",
+                    ICON_SIZE, ICON_SIZE
+                );
             }
             Err(e) => warn!("Failed to get popup HWND: {}", e),
         }
@@ -92,7 +97,12 @@ pub fn setup_popup_window(app_handle: &AppHandle) {
 
 /// Show popup at icon size (48×48) near cursor.
 /// This is the ONLY place that calculates position — all other states reuse it.
-pub fn show_popup_icon(app_handle: &AppHandle, mouse_x: i32, mouse_y: i32, input_rect: Option<(i32, i32, i32, i32)>) {
+pub fn show_popup_icon(
+    app_handle: &AppHandle,
+    mouse_x: i32,
+    mouse_y: i32,
+    input_rect: Option<(i32, i32, i32, i32)>,
+) {
     if let Some(window) = app_handle.get_webview_window("popup") {
         let scale = get_scale_at(mouse_x, mouse_y);
         let (screen_w, screen_h, _) = get_primary_screen_info(app_handle);
@@ -110,10 +120,18 @@ pub fn show_popup_icon(app_handle: &AppHandle, mouse_x: i32, mouse_y: i32, input
             (logical_x + POPUP_OFFSET_X, logical_y + POPUP_OFFSET_Y)
         };
 
-        if x + icon_logical > screen_w { x = screen_w - icon_logical - 8.0; }
-        if y < 0.0 { y = 8.0; }
-        if x < 0.0 { x = 8.0; }
-        if y + icon_logical > screen_h { y = screen_h - icon_logical - 8.0; }
+        if x + icon_logical > screen_w {
+            x = screen_w - icon_logical - 8.0;
+        }
+        if y < 0.0 {
+            y = 8.0;
+        }
+        if x < 0.0 {
+            x = 8.0;
+        }
+        if y + icon_logical > screen_h {
+            y = screen_h - icon_logical - 8.0;
+        }
 
         // Store position and input rect for subsequent transitions
         *POPUP_POS.lock() = (x, y);
@@ -122,9 +140,16 @@ pub fn show_popup_icon(app_handle: &AppHandle, mouse_x: i32, mouse_y: i32, input
         // Ensure icon size (+ shadow margin) + WS_EX_NOACTIVATE
         set_noactivate(app_handle, true);
         let sm_physical = SHADOW_MARGIN * scale;
-        resize_popup_physical(app_handle, ICON_SIZE + sm_physical * 2.0, ICON_SIZE + sm_physical * 2.0);
+        resize_popup_physical(
+            app_handle,
+            ICON_SIZE + sm_physical * 2.0,
+            ICON_SIZE + sm_physical * 2.0,
+        );
 
-        let _ = window.set_position(Position::Logical(LogicalPosition::new(x - SHADOW_MARGIN, y - SHADOW_MARGIN)));
+        let _ = window.set_position(Position::Logical(LogicalPosition::new(
+            x - SHADOW_MARGIN,
+            y - SHADOW_MARGIN,
+        )));
         let _ = window.show();
 
         info!("Popup icon shown at ({:.0}, {:.0})", x, y);
@@ -161,8 +186,12 @@ pub fn expand_popup(app_handle: &AppHandle, text: &str) {
             }
 
             let mut px = input_x;
-            if px + input_w > screen_w { px = screen_w - input_w - 8.0; }
-            if px < 0.0 { px = 8.0; }
+            if px + input_w > screen_w {
+                px = screen_w - input_w - 8.0;
+            }
+            if px < 0.0 {
+                px = 8.0;
+            }
 
             (px, py, input_w)
         } else {
@@ -170,10 +199,18 @@ pub fn expand_popup(app_handle: &AppHandle, text: &str) {
             let (stored_x, stored_y) = *POPUP_POS.lock();
             let mut x = stored_x;
             let mut y = stored_y;
-            if x + EXPANDED_WIDTH > screen_w { x = screen_w - EXPANDED_WIDTH - 8.0; }
-            if y + height > screen_h { y = screen_h - height - 8.0; }
-            if x < 0.0 { x = 8.0; }
-            if y < 0.0 { y = 8.0; }
+            if x + EXPANDED_WIDTH > screen_w {
+                x = screen_w - EXPANDED_WIDTH - 8.0;
+            }
+            if y + height > screen_h {
+                y = screen_h - height - 8.0;
+            }
+            if x < 0.0 {
+                x = 8.0;
+            }
+            if y < 0.0 {
+                y = 8.0;
+            }
             (x, y, EXPANDED_WIDTH)
         };
 
@@ -193,7 +230,10 @@ pub fn expand_popup(app_handle: &AppHandle, text: &str) {
         let _ = window.set_size(LogicalSize::new(win_w, win_h));
         let _ = window.set_position(Position::Logical(LogicalPosition::new(win_x, win_y)));
 
-        info!("Popup expanded to {:.0}x{:.0} (content {:.0}x{:.0}) at ({:.0}, {:.0}), bottom={:.0}", win_w, win_h, w_logical, height, win_x, win_y, content_bottom);
+        info!(
+            "Popup expanded to {:.0}x{:.0} (content {:.0}x{:.0}) at ({:.0}, {:.0}), bottom={:.0}",
+            win_w, win_h, w_logical, height, win_x, win_y, content_bottom
+        );
     }
 }
 
@@ -206,7 +246,11 @@ pub fn shrink_popup(app_handle: &AppHandle) {
         get_scale_at((px * 1.5) as i32, (py * 1.5) as i32) // approximate
     };
     let sm_physical = SHADOW_MARGIN * scale;
-    resize_popup_physical(app_handle, ICON_SIZE + sm_physical * 2.0, ICON_SIZE + sm_physical * 2.0);
+    resize_popup_physical(
+        app_handle,
+        ICON_SIZE + sm_physical * 2.0,
+        ICON_SIZE + sm_physical * 2.0,
+    );
 }
 
 /// Hide the popup window
@@ -234,8 +278,12 @@ fn set_noactivate(app_handle: &AppHandle, enable: bool) {
                 SetWindowLongW(hwnd_win, GWL_EXSTYLE, new_style);
                 // Apply change without moving or resizing
                 let _ = SetWindowPos(
-                    hwnd_win, HWND_TOP,
-                    0, 0, 0, 0,
+                    hwnd_win,
+                    HWND_TOP,
+                    0,
+                    0,
+                    0,
+                    0,
                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED,
                 );
             }
@@ -251,9 +299,12 @@ fn resize_popup_physical(app_handle: &AppHandle, w: f64, h: f64) {
             unsafe {
                 let hwnd_win = HWND(hwnd.0 as *mut _);
                 let _ = SetWindowPos(
-                    hwnd_win, HWND_TOP,
-                    0, 0,
-                    w as i32, h as i32,
+                    hwnd_win,
+                    HWND_TOP,
+                    0,
+                    0,
+                    w as i32,
+                    h as i32,
                     SWP_NOMOVE | SWP_NOZORDER | SWP_FRAMECHANGED,
                 );
             }
@@ -303,7 +354,11 @@ fn extract_translated(text: &str) -> Option<&str> {
             break;
         }
     }
-    if end > 0 { Some(&rest[..end]) } else { None }
+    if end > 0 {
+        Some(&rest[..end])
+    } else {
+        None
+    }
 }
 
 /// Resize expanded popup to fit actual rendered content height (called from frontend)

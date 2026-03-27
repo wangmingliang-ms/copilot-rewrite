@@ -12,20 +12,19 @@ use tauri::{
 use crate::AppState;
 
 /// Set up the system tray icon with menu
-pub fn setup_tray(app_handle: &AppHandle, state: Arc<AppState>) -> Result<(), Box<dyn std::error::Error>> {
+pub fn setup_tray(
+    app_handle: &AppHandle,
+    state: Arc<AppState>,
+) -> Result<(), Box<dyn std::error::Error>> {
     info!("Setting up system tray...");
 
-    let settings_item = MenuItemBuilder::with_id("settings", "Settings...")
-        .build(app_handle)?;
+    let settings_item = MenuItemBuilder::with_id("settings", "Settings...").build(app_handle)?;
 
-    let toggle_item = MenuItemBuilder::with_id("toggle", "Disable")
-        .build(app_handle)?;
+    let toggle_item = MenuItemBuilder::with_id("toggle", "Disable").build(app_handle)?;
 
-    let restart_item = MenuItemBuilder::with_id("restart", "Restart")
-        .build(app_handle)?;
+    let restart_item = MenuItemBuilder::with_id("restart", "Restart").build(app_handle)?;
 
-    let quit_item = MenuItemBuilder::with_id("quit", "Quit")
-        .build(app_handle)?;
+    let quit_item = MenuItemBuilder::with_id("quit", "Quit").build(app_handle)?;
 
     let menu = MenuBuilder::new(app_handle)
         .item(&settings_item)
@@ -73,8 +72,7 @@ pub fn setup_tray(app_handle: &AppHandle, state: Arc<AppState>) -> Result<(), Bo
                     info!("Restart requested from tray");
                     // Spawn new instance after a short delay to allow lock file release
                     if let Ok(exe) = std::env::current_exe() {
-                        let _ = std::process::Command::new(exe)
-                            .spawn();
+                        let _ = std::process::Command::new(exe).spawn();
                     }
                     app.exit(0);
                 }

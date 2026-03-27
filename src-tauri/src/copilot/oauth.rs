@@ -102,10 +102,7 @@ pub async fn request_device_code(http: &Client) -> Result<DeviceCodeResponse> {
     let response = http
         .post(DEVICE_CODE_URL)
         .header("Accept", "application/json")
-        .form(&[
-            ("client_id", GITHUB_CLIENT_ID),
-            ("scope", "read:user"),
-        ])
+        .form(&[("client_id", GITHUB_CLIENT_ID), ("scope", "read:user")])
         .send()
         .await
         .context("Failed to request device code")?;
@@ -130,11 +127,7 @@ pub async fn request_device_code(http: &Client) -> Result<DeviceCodeResponse> {
 }
 
 /// Step 2: Poll for the access token after user authorizes
-pub async fn poll_for_token(
-    http: &Client,
-    device_code: &str,
-    interval: u64,
-) -> Result<String> {
+pub async fn poll_for_token(http: &Client, device_code: &str, interval: u64) -> Result<String> {
     let poll_interval = Duration::from_secs(interval.max(5)); // GitHub requires minimum 5s
 
     loop {

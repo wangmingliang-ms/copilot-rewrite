@@ -14,8 +14,7 @@ const APP_NAME: &str = "CopilotRewrite";
 
 /// Register the application to start on Windows login
 pub fn register_autostart() -> Result<()> {
-    let exe_path = std::env::current_exe()
-        .context("Failed to get current executable path")?;
+    let exe_path = std::env::current_exe().context("Failed to get current executable path")?;
 
     let exe_path_str = exe_path
         .to_str()
@@ -29,10 +28,7 @@ pub fn register_autostart() -> Result<()> {
     key.set_value(APP_NAME, &exe_path_str)
         .context("Failed to set registry value")?;
 
-    info!(
-        "Registered auto-start: {} -> {}",
-        APP_NAME, exe_path_str
-    );
+    info!("Registered auto-start: {} -> {}", APP_NAME, exe_path_str);
     Ok(())
 }
 
