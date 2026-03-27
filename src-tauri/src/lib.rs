@@ -117,10 +117,17 @@ pub struct Settings {
     /// Replace mode: "rendered" (rich text) or "markdown" (plain text)
     #[serde(default = "default_replace_mode")]
     pub replace_mode: String,
+    /// Theme: "system" (follow OS), "light", or "dark"
+    #[serde(default = "default_theme")]
+    pub theme: String,
 }
 
 fn default_replace_mode() -> String {
     "rendered".to_string()
+}
+
+fn default_theme() -> String {
+    "system".to_string()
 }
 
 impl Settings {
@@ -175,6 +182,7 @@ impl Default for Settings {
             beast_mode: true,
             model: "claude-sonnet-4".to_string(),
             replace_mode: "rendered".to_string(),
+            theme: "system".to_string(),
         }
     }
 }
@@ -630,6 +638,20 @@ fn get_settings(state: tauri::State<'_, Arc<AppState>>) -> Settings {
     state.settings.lock().clone()
 }
 
+/// Detect whether Windows is in dark mode by reading the registry
+#[tauri::command]
+fn get_system_theme() -> String {
+    use winreg::enums::HKEY_CURRENT_USER;
+    use winreg::RegKey;
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    if let Ok(key) = hkcu.open_subkey("Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize") {
+        if let Ok(val) = key.get_value::<u32, _>("AppsUseLightTheme") {
+            return if val == 0 { "dark".to_string() } else { "light".to_string() };
+        }
+    }
+    "light".to_string()
+}
+
 /// Update settings
 #[tauri::command]
 fn update_settings(
@@ -758,6 +780,7 @@ pub fn run() {
             copy_to_clipboard,
             copy_html_to_clipboard,
             get_settings,
+            get_system_theme,
             update_settings,
             toggle_enabled,
             is_enabled,

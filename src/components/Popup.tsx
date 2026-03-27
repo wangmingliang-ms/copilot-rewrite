@@ -28,6 +28,16 @@ const Popup: FC<PopupProps> = ({ selection }) => {
   const [replaceMode, setReplaceMode] = useState<"rendered" | "markdown">("rendered");
   const [showReplaceMenu, setShowReplaceMenu] = useState(false);
 
+  // Track dark mode from <html> class
+  const [isDark, setIsDark] = useState(() => document.documentElement.classList.contains("dark"));
+  useEffect(() => {
+    const observer = new MutationObserver(() => {
+      setIsDark(document.documentElement.classList.contains("dark"));
+    });
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+    return () => observer.disconnect();
+  }, []);
+
   // Refresh settings (model name + beast mode) from backend
   const refreshSettings = useCallback(async () => {
     try {
@@ -330,10 +340,16 @@ const Popup: FC<PopupProps> = ({ selection }) => {
       <div className="w-screen h-screen flex items-center justify-center" style={{ padding: "20px", background: "transparent" }}>
         <div className="w-full h-full flex items-center justify-center"
           style={{
-            background: "linear-gradient(135deg, #fff 0%, #f0f4ff 100%)",
+            background: isDark
+              ? "linear-gradient(135deg, #1e293b 0%, #0f172a 100%)"
+              : "linear-gradient(135deg, #fff 0%, #f0f4ff 100%)",
             borderRadius: "50%",
-            border: "1px solid rgba(0,120,212,0.15)",
-            boxShadow: "0 4px 16px rgba(0,120,212,0.12), 0 1px 3px rgba(0,0,0,0.08)",
+            border: isDark
+              ? "1px solid rgba(96,165,250,0.25)"
+              : "1px solid rgba(0,120,212,0.15)",
+            boxShadow: isDark
+              ? "0 4px 16px rgba(0,0,0,0.4), 0 1px 3px rgba(0,0,0,0.3)"
+              : "0 4px 16px rgba(0,120,212,0.12), 0 1px 3px rgba(0,0,0,0.08)",
           }}
         >
           <button
@@ -367,10 +383,16 @@ const Popup: FC<PopupProps> = ({ selection }) => {
           }}
           title="Click to cancel"
           style={{
-            background: "linear-gradient(135deg, #fff 0%, #f0f4ff 100%)",
+            background: isDark
+              ? "linear-gradient(135deg, #1e293b 0%, #0f172a 100%)"
+              : "linear-gradient(135deg, #fff 0%, #f0f4ff 100%)",
             borderRadius: "50%",
-            border: "1px solid rgba(0,120,212,0.15)",
-            boxShadow: "0 4px 16px rgba(0,120,212,0.12), 0 1px 3px rgba(0,0,0,0.08)",
+            border: isDark
+              ? "1px solid rgba(96,165,250,0.25)"
+              : "1px solid rgba(0,120,212,0.15)",
+            boxShadow: isDark
+              ? "0 4px 16px rgba(0,0,0,0.4), 0 1px 3px rgba(0,0,0,0.3)"
+              : "0 4px 16px rgba(0,120,212,0.12), 0 1px 3px rgba(0,0,0,0.08)",
             cursor: "pointer",
             transition: "all 0.15s ease",
           }}
@@ -400,25 +422,27 @@ const Popup: FC<PopupProps> = ({ selection }) => {
       <div className="w-screen h-screen" style={{ padding: "20px", background: "transparent" }}>
         <div className="flex flex-col rounded-lg h-full overflow-hidden"
           style={{
-            background: "#fff",
-            border: "1px solid rgba(0,0,0,0.08)",
-            boxShadow: "0 8px 32px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.06)",
+            background: isDark ? "#1e293b" : "#fff",
+            border: isDark ? "1px solid rgba(255,255,255,0.1)" : "1px solid rgba(0,0,0,0.08)",
+            boxShadow: isDark
+              ? "0 8px 32px rgba(0,0,0,0.4), 0 2px 8px rgba(0,0,0,0.3)"
+              : "0 8px 32px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.06)",
           }}
         >
           <div className="px-5 py-4 flex items-start gap-2.5">
-            <div className="flex-shrink-0 w-5 h-5 rounded-full bg-red-50 flex items-center justify-center mt-0.5">
+            <div className="flex-shrink-0 w-5 h-5 rounded-full bg-red-50 dark:bg-red-900/30 flex items-center justify-center mt-0.5">
               <svg className="w-3 h-3 text-red-500" viewBox="0 0 12 12" fill="currentColor">
                 <path d="M6 0a6 6 0 100 12A6 6 0 006 0zm.75 9h-1.5V7.5h1.5V9zm0-3h-1.5V3h1.5v3z"/>
               </svg>
             </div>
-            <p className="text-[13px] leading-[1.5] text-red-600">{error}</p>
+            <p className="text-[13px] leading-[1.5] text-red-600 dark:text-red-400">{error}</p>
           </div>
-          <div className="flex justify-end border-t border-gray-100 px-3 py-2"
-            style={{ background: "rgba(249,250,251,0.8)" }}
+          <div className="flex justify-end border-t border-gray-100 dark:border-gray-700 px-3 py-2"
+            style={{ background: isDark ? "rgba(15,23,42,0.8)" : "rgba(249,250,251,0.8)" }}
           >
             <button
               onClick={handleDismiss}
-              className="rounded-lg px-3 py-1.5 text-xs font-medium text-gray-500 hover:bg-gray-200/60 transition-colors"
+              className="rounded-lg px-3 py-1.5 text-xs font-medium text-gray-500 dark:text-gray-400 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 transition-colors"
             >
               Close
             </button>
@@ -433,16 +457,18 @@ const Popup: FC<PopupProps> = ({ selection }) => {
     <div className="w-screen h-screen" style={{ padding: "20px", background: "transparent" }}>
       <div ref={contentRef} className="flex flex-col rounded-lg overflow-hidden h-full"
         style={{
-          background: "#fff",
-          border: "1px solid rgba(0,0,0,0.08)",
-          boxShadow: "0 8px 32px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.06)",
+          background: isDark ? "#1e293b" : "#fff",
+          border: isDark ? "1px solid rgba(255,255,255,0.1)" : "1px solid rgba(0,0,0,0.08)",
+          boxShadow: isDark
+            ? "0 8px 32px rgba(0,0,0,0.4), 0 2px 8px rgba(0,0,0,0.3)"
+            : "0 8px 32px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.06)",
         }}
       >
         {/* Layer 1: Translation (visible when original is collapsed) */}
         {!showOriginal && (
           <div className="flex-1 min-h-0 overflow-auto px-5 pt-5 pb-3" style={{ userSelect: "text", WebkitUserSelect: "text" }}>
             {showRaw ? (
-              <pre className="text-[12px] leading-[1.6] text-gray-700 whitespace-pre-wrap break-words font-mono">{translated}</pre>
+              <pre className="text-[12px] leading-[1.6] text-gray-700 dark:text-gray-300 whitespace-pre-wrap break-words font-mono">{translated}</pre>
             ) : (
               <div
                 className="markdown-body text-[13.5px] leading-[1.7]"
@@ -457,9 +483,9 @@ const Popup: FC<PopupProps> = ({ selection }) => {
         {showOriginal && (
           <div className="flex-1 min-h-0 overflow-auto px-5 pt-5 pb-3" style={{ userSelect: "text", WebkitUserSelect: "text" }}>
             {showRaw ? (
-              <pre className="text-[12px] leading-[1.6] text-gray-500 whitespace-pre-wrap break-words font-mono">{reorganized}</pre>
+              <pre className="text-[12px] leading-[1.6] text-gray-500 dark:text-gray-400 whitespace-pre-wrap break-words font-mono">{reorganized}</pre>
             ) : (
-              <div className="markdown-body text-[12px] leading-[1.55] text-gray-400" style={{ background: "transparent" }}>
+              <div className="markdown-body text-[12px] leading-[1.55] text-gray-400 dark:text-gray-500" style={{ background: "transparent" }}>
                 <div dangerouslySetInnerHTML={{ __html: reorganizedHtml }} />
               </div>
             )}
@@ -468,14 +494,14 @@ const Popup: FC<PopupProps> = ({ selection }) => {
 
         {/* Toggle bar — always visible between content and action bar */}
         {reorganizedHtml && (
-          <div className="flex-shrink-0 px-5 border-t border-gray-100">
+          <div className="flex-shrink-0 px-5 border-t border-gray-100 dark:border-gray-700">
             <button
               onClick={() => {
                 const next = !showOriginal;
                 setShowOriginal(next);
                 invoke("log_action", { action: `Original section ${next ? "expanded" : "collapsed"}` }).catch(() => {});
               }}
-              className="flex items-center gap-1 text-[11px] text-gray-400 hover:text-gray-600 transition-colors py-2 w-full"
+              className="flex items-center gap-1 text-[11px] text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors py-2 w-full"
             >
               <svg
                 className={`w-3 h-3 transition-transform ${showOriginal ? "rotate-90" : ""}`}
@@ -489,13 +515,13 @@ const Popup: FC<PopupProps> = ({ selection }) => {
         )}
 
         {/* Action bar — always visible at bottom */}
-        <div className="flex-shrink-0 flex items-center justify-between border-t border-gray-100 px-3 py-2"
-          style={{ background: "rgba(249,250,251,0.8)" }}
+        <div className="flex-shrink-0 flex items-center justify-between border-t border-gray-100 dark:border-gray-700 px-3 py-2"
+          style={{ background: isDark ? "rgba(15,23,42,0.8)" : "rgba(249,250,251,0.8)" }}
         >
           <div className="flex items-center gap-1">
             <button
               onClick={handleDismiss}
-              className="flex items-center justify-center w-7 h-7 rounded-lg text-gray-400 hover:bg-gray-200/60 hover:text-gray-600 transition-colors"
+              className="flex items-center justify-center w-7 h-7 rounded-lg text-gray-400 dark:text-gray-500 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
               title="Dismiss"
             >
               <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
@@ -508,7 +534,7 @@ const Popup: FC<PopupProps> = ({ selection }) => {
                   invoke("log_action", { action: "Model name clicked — opening Settings" }).catch(() => {});
                   invoke("open_settings").catch(() => {});
                 }}
-                className="text-[10px] text-gray-400 font-mono truncate max-w-[120px] hover:text-copilot-blue transition-colors cursor-pointer"
+                className="text-[10px] text-gray-400 dark:text-gray-500 font-mono truncate max-w-[120px] hover:text-copilot-blue transition-colors cursor-pointer"
                 title={`${currentModel} — Click to change model`}
               >
                 {currentModel}
@@ -533,7 +559,7 @@ const Popup: FC<PopupProps> = ({ selection }) => {
                 invoke("log_action", { action: "Settings button clicked" }).catch(() => {});
                 invoke("open_settings").catch(() => {});
               }}
-              className="flex items-center justify-center w-7 h-7 rounded-lg text-gray-400 hover:bg-gray-200/60 hover:text-gray-600 transition-colors"
+              className="flex items-center justify-center w-7 h-7 rounded-lg text-gray-400 dark:text-gray-500 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
               title="Settings"
             >
               <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -550,7 +576,7 @@ const Popup: FC<PopupProps> = ({ selection }) => {
                 setShowRaw(next);
                 invoke("log_action", { action: `Markdown view ${next ? "ON" : "OFF"}` }).catch(() => {});
               }}
-              className={`flex items-center justify-center w-7 h-7 rounded-lg transition-colors ${showRaw ? "text-blue-500 bg-blue-50 hover:bg-blue-100" : "text-gray-400 hover:bg-gray-200/60 hover:text-gray-600"}`}
+              className={`flex items-center justify-center w-7 h-7 rounded-lg transition-colors ${showRaw ? "text-blue-500 bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 dark:hover:bg-blue-900/50" : "text-gray-400 dark:text-gray-500 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 hover:text-gray-600 dark:hover:text-gray-300"}`}
               title={showRaw ? "Show preview" : "Show markdown"}
             >
               <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="currentColor">
@@ -564,7 +590,7 @@ const Popup: FC<PopupProps> = ({ selection }) => {
                 setRefreshing(false);
                 refreshingRef.current = false;
               } : handleRefresh}
-              className={`group flex items-center justify-center w-7 h-7 rounded-lg transition-colors ${refreshing ? "bg-blue-50 text-copilot-blue hover:text-red-500 hover:bg-red-50 cursor-pointer" : "text-gray-500 hover:bg-gray-200/60 hover:text-gray-700"}`}
+              className={`group flex items-center justify-center w-7 h-7 rounded-lg transition-colors ${refreshing ? "bg-blue-50 dark:bg-blue-900/30 text-copilot-blue hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 cursor-pointer" : "text-gray-500 dark:text-gray-400 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 hover:text-gray-700 dark:hover:text-gray-300"}`}
               title={refreshing ? "Cancel" : "Regenerate"}
             >
               {refreshing ? (
@@ -587,7 +613,7 @@ const Popup: FC<PopupProps> = ({ selection }) => {
             </button>
             <button
               onClick={handleCopy}
-              className="flex items-center justify-center w-7 h-7 rounded-lg text-gray-500 hover:bg-gray-200/60 hover:text-gray-700 transition-colors"
+              className="flex items-center justify-center w-7 h-7 rounded-lg text-gray-500 dark:text-gray-400 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
               title="Copy"
             >
               <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -629,17 +655,17 @@ const Popup: FC<PopupProps> = ({ selection }) => {
                 </svg>
               </button>
               {showReplaceMenu && (
-                <div className="absolute bottom-full right-0 mb-1 bg-white rounded-lg shadow-lg border border-gray-200 py-1 min-w-[180px] z-50">
+                <div className="absolute bottom-full right-0 mb-1 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 py-1 min-w-[180px] z-50">
                   <button
                     onClick={(e) => { e.stopPropagation(); switchReplaceMode("rendered"); }}
-                    className={`w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 flex items-center gap-2 ${replaceMode === "rendered" ? "text-copilot-blue font-medium" : "text-gray-700"}`}
+                    className={`w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 ${replaceMode === "rendered" ? "text-copilot-blue font-medium" : "text-gray-700 dark:text-gray-300"}`}
                   >
                     {replaceMode === "rendered" && <span>✓</span>}
                     <span className={replaceMode !== "rendered" ? "ml-5" : ""}>Rendered text</span>
                   </button>
                   <button
                     onClick={(e) => { e.stopPropagation(); switchReplaceMode("markdown"); }}
-                    className={`w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 flex items-center gap-2 ${replaceMode === "markdown" ? "text-copilot-blue font-medium" : "text-gray-700"}`}
+                    className={`w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 ${replaceMode === "markdown" ? "text-copilot-blue font-medium" : "text-gray-700 dark:text-gray-300"}`}
                   >
                     {replaceMode === "markdown" && <span>✓</span>}
                     <span className={replaceMode !== "markdown" ? "ml-5" : ""}>Markdown</span>

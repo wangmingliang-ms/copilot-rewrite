@@ -4,6 +4,14 @@ import { open } from "@tauri-apps/plugin-shell";
 import { getVersion } from "@tauri-apps/api/app";
 import { useUpdater } from "../hooks/useUpdater";
 
+type Theme = "system" | "light" | "dark";
+
+interface ThemeCtx {
+  theme: Theme;
+  resolved: "light" | "dark";
+  changeTheme: (t: Theme) => Promise<void>;
+}
+
 interface AuthStatus {
   logged_in: boolean;
   username: string | null;
@@ -20,6 +28,7 @@ interface Settings {
   poll_interval_ms: number;
   beast_mode: boolean;
   model: string;
+  theme: string;
 }
 
 const LANGUAGES = [
@@ -37,7 +46,7 @@ interface CopilotModel {
   category: string;
 }
 
-const SettingsPanel: FC = () => {
+const SettingsPanel: FC<{ themeCtx: ThemeCtx }> = ({ themeCtx }) => {
   const [authStatus, setAuthStatus] = useState<AuthStatus>({ logged_in: false, username: null });
   const [settings, setSettings] = useState<Settings>({
     target_language: "English",
@@ -45,6 +54,7 @@ const SettingsPanel: FC = () => {
     poll_interval_ms: 100,
     beast_mode: false,
     model: "claude-sonnet-4",
+    theme: "system",
   });
   const [loginStep, setLoginStep] = useState<"idle" | "loading" | "code" | "waiting" | "error">("idle");
   const [deviceCode, setDeviceCode] = useState<DeviceCodeInfo | null>(null);
@@ -151,14 +161,14 @@ const SettingsPanel: FC = () => {
   }, []);
 
   return (
-    <div className="min-h-screen bg-gray-50 p-5">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-5">
       <div className="max-w-md mx-auto">
-        <h1 className="text-lg font-bold text-gray-900 mb-0.5">Copilot Rewrite</h1>
-        <p className="text-xs text-gray-500 mb-4">Settings</p>
+        <h1 className="text-lg font-bold text-gray-900 dark:text-gray-100 mb-0.5">Copilot Rewrite</h1>
+        <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">Settings</p>
 
         {/* Account Section */}
-        <section className="bg-white rounded-xl shadow-sm border border-gray-200 p-5 mb-4">
-          <h2 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+        <section className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-5 mb-4">
+          <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-2">
             <svg className="w-4 h-4" viewBox="0 0 16 16" fill="currentColor">
               <path fillRule="evenodd" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" />
             </svg>
@@ -175,8 +185,8 @@ const SettingsPanel: FC = () => {
                   onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
                 />
                 <div>
-                  <p className="text-sm font-medium text-gray-900">{authStatus.username || "Connected"}</p>
-                  <p className="text-xs text-green-600">● Copilot active</p>
+                  <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{authStatus.username || "Connected"}</p>
+                  <p className="text-xs text-green-600 dark:text-green-400">● Copilot active</p>
                 </div>
               </div>
               <button
@@ -189,7 +199,7 @@ const SettingsPanel: FC = () => {
           ) : loginStep === "idle" ? (
             <button
               onClick={handleLogin}
-              className="w-full rounded-lg bg-gray-900 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-gray-800 active:scale-[0.98] flex items-center justify-center gap-2"
+              className="w-full rounded-lg bg-gray-900 dark:bg-gray-100 px-4 py-2.5 text-sm font-medium text-white dark:text-gray-900 transition-colors hover:bg-gray-800 dark:hover:bg-gray-200 active:scale-[0.98] flex items-center justify-center gap-2"
             >
               <svg className="w-4 h-4" viewBox="0 0 16 16" fill="currentColor">
                 <path fillRule="evenodd" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" />
@@ -198,14 +208,14 @@ const SettingsPanel: FC = () => {
             </button>
           ) : loginStep === "loading" ? (
             <div className="flex items-center justify-center py-4">
-              <div className="h-5 w-5 animate-spin rounded-full border-2 border-gray-300 border-t-gray-900" />
-              <span className="ml-3 text-sm text-gray-500">Connecting...</span>
+              <div className="h-5 w-5 animate-spin rounded-full border-2 border-gray-300 dark:border-gray-600 border-t-gray-900 dark:border-t-gray-100" />
+              <span className="ml-3 text-sm text-gray-500 dark:text-gray-400">Connecting...</span>
             </div>
           ) : loginStep === "code" && deviceCode ? (
             <div>
-              <p className="text-sm text-gray-600 mb-2">Copy this code and enter it on GitHub:</p>
-              <div className="rounded-lg bg-gray-50 border-2 border-dashed border-gray-200 p-3 mb-3 text-center">
-                <span className="font-mono text-xl font-bold tracking-[0.3em] text-gray-900 select-all">
+              <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">Copy this code and enter it on GitHub:</p>
+              <div className="rounded-lg bg-gray-50 dark:bg-gray-700 border-2 border-dashed border-gray-200 dark:border-gray-600 p-3 mb-3 text-center">
+                <span className="font-mono text-xl font-bold tracking-[0.3em] text-gray-900 dark:text-gray-100 select-all">
                   {deviceCode.user_code}
                 </span>
               </div>
@@ -219,23 +229,23 @@ const SettingsPanel: FC = () => {
           ) : loginStep === "waiting" ? (
             <div className="text-center py-3">
               {deviceCode && (
-                <div className="rounded-lg bg-gray-50 border border-gray-200 p-2 mb-3">
-                  <span className="font-mono text-lg font-bold tracking-[0.2em] text-gray-400">{deviceCode.user_code}</span>
+                <div className="rounded-lg bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 p-2 mb-3">
+                  <span className="font-mono text-lg font-bold tracking-[0.2em] text-gray-400 dark:text-gray-500">{deviceCode.user_code}</span>
                 </div>
               )}
               <div className="flex items-center justify-center">
                 <div className="h-5 w-5 animate-spin rounded-full border-2 border-copilot-blue border-t-transparent" />
-                <span className="ml-3 text-sm text-gray-500">Waiting for authorization...</span>
+                <span className="ml-3 text-sm text-gray-500 dark:text-gray-400">Waiting for authorization...</span>
               </div>
             </div>
           ) : loginStep === "error" ? (
             <div>
-              <div className="rounded-lg bg-red-50 border border-red-200 p-3 mb-3">
-                <p className="text-sm text-red-700">{loginError}</p>
+              <div className="rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 p-3 mb-3">
+                <p className="text-sm text-red-700 dark:text-red-400">{loginError}</p>
               </div>
               <button
                 onClick={handleLogin}
-                className="w-full rounded-lg bg-gray-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-gray-800"
+                className="w-full rounded-lg bg-gray-900 dark:bg-gray-100 px-4 py-2.5 text-sm font-medium text-white dark:text-gray-900 hover:bg-gray-800 dark:hover:bg-gray-200"
               >
                 Try Again
               </button>
@@ -244,9 +254,9 @@ const SettingsPanel: FC = () => {
         </section>
 
         {/* Model Section */}
-        <section className="bg-white rounded-lg shadow-sm border border-gray-200 px-4 py-3 mb-3">
+        <section className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 px-4 py-3 mb-3">
           <div className="flex items-center justify-between mb-1.5">
-            <h2 className="text-xs font-semibold text-gray-500 uppercase">AI Model</h2>
+            <h2 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">AI Model</h2>
             <button onClick={() => { invoke("log_action", { action: "Refresh models clicked" }).catch(() => {}); fetchModels(); }} className="text-xs text-copilot-blue hover:underline" disabled={modelsLoading}>
               {modelsLoading ? "..." : "↻ Refresh"}
             </button>
@@ -257,10 +267,10 @@ const SettingsPanel: FC = () => {
               invoke("log_action", { action: `Model changed to: ${e.target.value}` }).catch(() => {});
               setSettings({ ...settings, model: e.target.value });
             }}
-            className={`w-full rounded border px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 ${
+            className={`w-full rounded border px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 ${
               !settings.model
                 ? "border-red-400 focus:ring-red-500"
-                : "border-gray-200 focus:border-copilot-blue focus:ring-copilot-blue"
+                : "border-gray-200 dark:border-gray-600 focus:border-copilot-blue focus:ring-copilot-blue"
             }`}
           >
             {!settings.model && <option value="" disabled>— Select a model —</option>}
@@ -287,30 +297,30 @@ const SettingsPanel: FC = () => {
             )}
           </select>
           {!settings.model && <p className="text-xs text-red-500 mt-0.5">⚠ Model is required</p>}
-          <p className="text-[10px] text-gray-400 mt-1">Only models that support chat completions are listed.</p>
+          <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-1">Only models that support chat completions are listed.</p>
         </section>
 
         {/* Language Section */}
-        <section className="bg-white rounded-lg shadow-sm border border-gray-200 px-4 py-3 mb-3">
-          <h2 className="text-xs font-semibold text-gray-500 uppercase mb-1.5">Target Language</h2>
+        <section className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 px-4 py-3 mb-3">
+          <h2 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase mb-1.5">Target Language</h2>
           <select
             value={settings.target_language}
             onChange={(e) => {
               invoke("log_action", { action: `Language changed to: ${e.target.value}` }).catch(() => {});
               setSettings({ ...settings, target_language: e.target.value });
             }}
-            className="w-full rounded border border-gray-200 px-2.5 py-1.5 text-sm focus:border-copilot-blue focus:outline-none focus:ring-1 focus:ring-copilot-blue"
+            className="w-full rounded border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 px-2.5 py-1.5 text-sm focus:border-copilot-blue focus:outline-none focus:ring-1 focus:ring-copilot-blue"
           >
             {LANGUAGES.map((lang) => <option key={lang} value={lang}>{lang}</option>)}
           </select>
         </section>
 
         {/* Beast Mode */}
-        <section className="bg-white rounded-lg shadow-sm border border-gray-200 px-4 py-3 mb-3">
+        <section className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 px-4 py-3 mb-3">
           <label className="flex items-center justify-between cursor-pointer">
             <div>
-              <span className="text-sm font-medium text-gray-700">🐺 Beast Mode</span>
-              <p className="text-xs text-gray-400 mt-0.5">Full creative rewrite — examples, restructuring, best version</p>
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-300">🐺 Beast Mode</span>
+              <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">Full creative rewrite — examples, restructuring, best version</p>
             </div>
             <input
               type="checkbox"
@@ -325,9 +335,9 @@ const SettingsPanel: FC = () => {
         </section>
 
         {/* General */}
-        <section className="bg-white rounded-lg shadow-sm border border-gray-200 px-4 py-3 mb-3">
+        <section className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 px-4 py-3 mb-3">
           <label className="flex items-center justify-between cursor-pointer">
-            <span className="text-sm text-gray-700">Start on Windows login</span>
+            <span className="text-sm text-gray-700 dark:text-gray-300">Start on Windows login</span>
             <input
               type="checkbox"
               checked={settings.auto_start}
@@ -340,14 +350,38 @@ const SettingsPanel: FC = () => {
           </label>
         </section>
 
-        {saved && <p className="text-center text-xs text-green-500 mt-1">✓ Saved</p>}
+        {/* Theme */}
+        <section className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 px-4 py-3 mb-3">
+          <h2 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase mb-1.5">Appearance</h2>
+          <div className="flex gap-2">
+            {(["system", "light", "dark"] as const).map((t) => (
+              <button
+                key={t}
+                onClick={() => {
+                  invoke("log_action", { action: `Theme changed to: ${t}` }).catch(() => {});
+                  themeCtx.changeTheme(t);
+                  setSettings({ ...settings, theme: t });
+                }}
+                className={`flex-1 rounded-lg px-3 py-2 text-xs font-medium transition-colors ${
+                  themeCtx.theme === t
+                    ? "bg-copilot-blue text-white"
+                    : "bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600"
+                }`}
+              >
+                {t === "system" ? "☀️🌙 System" : t === "light" ? "☀️ Light" : "🌙 Dark"}
+              </button>
+            ))}
+          </div>
+        </section>
+
+        {saved && <p className="text-center text-xs text-green-500 dark:text-green-400 mt-1">✓ Saved</p>}
 
         {/* Update Section */}
         {updater.status === "available" && (
-          <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 mt-3">
+          <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg px-4 py-3 mt-3">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-blue-900">
+                <p className="text-sm font-medium text-blue-900 dark:text-blue-300">
                   Update available:{" "}
                   <a
                     href="#"
@@ -371,8 +405,8 @@ const SettingsPanel: FC = () => {
           </div>
         )}
         {updater.status === "downloading" && (
-          <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 mt-3">
-            <p className="text-sm font-medium text-blue-900 mb-2">Downloading update... {updater.progress}%</p>
+          <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg px-4 py-3 mt-3">
+            <p className="text-sm font-medium text-blue-900 dark:text-blue-300 mb-2">Downloading update... {updater.progress}%</p>
             <div className="w-full bg-blue-200 rounded-full h-1.5">
               <div
                 className="bg-blue-600 h-1.5 rounded-full transition-all duration-300"
@@ -382,17 +416,17 @@ const SettingsPanel: FC = () => {
           </div>
         )}
         {updater.status === "ready" && (
-          <div className="bg-green-50 border border-green-200 rounded-lg px-4 py-3 mt-3">
-            <p className="text-sm font-medium text-green-800">✓ Update installed — restarting...</p>
+          <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg px-4 py-3 mt-3">
+            <p className="text-sm font-medium text-green-800 dark:text-green-400">✓ Update installed — restarting...</p>
           </div>
         )}
         {updater.status === "error" && (
-          <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-2 mt-3">
-            <p className="text-xs text-red-600">{updater.error}</p>
+          <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg px-4 py-2 mt-3">
+            <p className="text-xs text-red-600 dark:text-red-400">{updater.error}</p>
           </div>
         )}
 
-        <div className="flex items-center justify-between mt-3 text-xs text-gray-400">
+        <div className="flex items-center justify-between mt-3 text-xs text-gray-400 dark:text-gray-500">
           <div className="flex items-center gap-1.5">
             <button
               onClick={() => {
