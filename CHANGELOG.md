@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.2.2] - 2026-03-27
+
+### ✨ Enhancements
+
+- **Automatic update check on startup** — The app now checks for updates 10 seconds after launch and sends a Windows system notification if a new version is available. No need to manually open Settings to discover updates. (`542dc4c`)
+
 ## [0.2.1] - 2026-03-27
 
 ### 🐛 Bug Fixes

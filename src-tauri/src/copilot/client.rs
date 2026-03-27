@@ -283,7 +283,7 @@ impl CopilotClient {
             .http
             .get(COPILOT_TOKEN_URL)
             .header("Authorization", format!("token {}", github_token))
-            .header("User-Agent", "CopilotRewrite/0.2.1")
+            .header("User-Agent", "CopilotRewrite/0.2.2")
             .header("Accept", "application/json")
             .send()
             .await
@@ -413,7 +413,7 @@ impl CopilotClient {
             .header("Editor-Plugin-Version", "copilot-chat/0.24")
             .header("Copilot-Integration-Id", "vscode-chat")
             .header("Openai-Intent", "conversation-panel")
-            .header("User-Agent", "CopilotRewrite/0.2.1")
+            .header("User-Agent", "CopilotRewrite/0.2.2")
             .json(&request)
             .send()
             .await
@@ -500,7 +500,7 @@ impl CopilotClient {
             .http
             .get(COPILOT_MODELS_URL)
             .header("Authorization", format!("Bearer {}", copilot_token))
-            .header("User-Agent", "CopilotRewrite/0.2.1")
+            .header("User-Agent", "CopilotRewrite/0.2.2")
             .header("Accept", "application/json")
             .header("Editor-Version", "vscode/1.96.0")
             .header("Editor-Plugin-Version", "copilot-chat/0.24")
