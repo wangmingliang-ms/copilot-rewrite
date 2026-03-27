@@ -862,28 +862,6 @@ pub fn run() {
                                 new_version
                             ))
                             .show();
-
-                        // Also auto-open Settings so user sees the update banner
-                        if let Some(window) = update_handle.get_webview_window("settings") {
-                            let _ = window.show();
-                            let _ = window.unminimize();
-                            #[cfg(target_os = "windows")]
-                            {
-                                use windows::Win32::Foundation::HWND;
-                                use windows::Win32::UI::WindowsAndMessaging::{
-                                    BringWindowToTop, SetForegroundWindow, ShowWindow, SW_RESTORE,
-                                };
-                                if let Ok(hwnd) = window.hwnd() {
-                                    unsafe {
-                                        let h = HWND(hwnd.0);
-                                        let _ = ShowWindow(h, SW_RESTORE);
-                                        let _ = BringWindowToTop(h);
-                                        let _ = SetForegroundWindow(h);
-                                    }
-                                }
-                            }
-                            let _ = window.set_focus();
-                        }
                     }
                     Ok(None) => {
                         info!("App is up to date");
