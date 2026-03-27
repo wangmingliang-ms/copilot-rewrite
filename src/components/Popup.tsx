@@ -564,13 +564,13 @@ const Popup: FC<PopupProps> = ({ selection }) => {
                 setRefreshing(false);
                 refreshingRef.current = false;
               } : handleRefresh}
-              className={`group flex items-center justify-center w-7 h-7 rounded-lg transition-colors ${refreshing ? "text-gray-400 hover:text-red-500 hover:bg-red-50 cursor-pointer" : "text-gray-500 hover:bg-gray-200/60 hover:text-gray-700"}`}
+              className={`group flex items-center justify-center w-7 h-7 rounded-lg transition-colors ${refreshing ? "bg-blue-50 text-copilot-blue hover:text-red-500 hover:bg-red-50 cursor-pointer" : "text-gray-500 hover:bg-gray-200/60 hover:text-gray-700"}`}
               title={refreshing ? "Cancel" : "Regenerate"}
             >
               {refreshing ? (
                 <>
                   {/* Spinner — visible by default, hidden on hover */}
-                  <div className="h-3.5 w-3.5 animate-spin rounded-full border-[1.5px] border-gray-400 border-t-transparent group-hover:hidden" />
+                  <div className="h-3.5 w-3.5 animate-spin rounded-full border-[1.5px] border-copilot-blue border-t-transparent group-hover:hidden" />
                   {/* Stop square — hidden by default, visible on hover */}
                   <svg className="w-3.5 h-3.5 hidden group-hover:block" viewBox="0 0 16 16" fill="currentColor">
                     <rect x="3" y="3" width="10" height="10" rx="1" />
