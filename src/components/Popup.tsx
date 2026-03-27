@@ -231,7 +231,10 @@ const Popup: FC<PopupProps> = ({ selection }) => {
         request: { text: selection.text, action: "TranslateAndPolish" },
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      const msg = err instanceof Error ? err.message : String(err);
+      // Ignore cancellation — already handled by cancel button
+      if (msg.includes("cancelled")) return;
+      setError(msg);
       setState("error");
     }
   }, [selection, refreshSettings]);
@@ -250,7 +253,14 @@ const Popup: FC<PopupProps> = ({ selection }) => {
         request: { text: selection.text, action: "TranslateAndPolish", is_refresh: true },
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      const msg = err instanceof Error ? err.message : String(err);
+      // Ignore cancellation — already handled by cancel button
+      if (msg.includes("cancelled")) {
+        setRefreshing(false);
+        refreshingRef.current = false;
+        return;
+      }
+      setError(msg);
       setState("error");
       setRefreshing(false);
       refreshingRef.current = false;
