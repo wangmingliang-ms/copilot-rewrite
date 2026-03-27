@@ -228,6 +228,8 @@ struct ModelEntry {
     preview: Option<bool>,
     #[serde(default)]
     capabilities: Option<ModelCapabilities>,
+    #[serde(default)]
+    supported_endpoints: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -526,6 +528,13 @@ impl CopilotClient {
                 if let Some(ref caps) = m.capabilities {
                     if let Some(ref t) = caps.model_type {
                         if t != "chat" { return false; }
+                    }
+                }
+                // Skip models that don't support /chat/completions endpoint
+                if let Some(ref endpoints) = m.supported_endpoints {
+                    if !endpoints.iter().any(|e| e == "/chat/completions") {
+                        debug!("Skipping model {} — no /chat/completions support (endpoints: {:?})", m.id, endpoints);
+                        return false;
                     }
                 }
                 // Skip internal-only models
