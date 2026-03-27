@@ -429,7 +429,7 @@ const SettingsPanel: FC = () => {
                 {updater.status === "upToDate" ? "✓ Up to date" : "Check updates"}
               </button>
             ) : null}
-            <span>v{appVersion}</span>
+            <a href="#" onClick={(e) => { e.preventDefault(); open(`https://github.com/wangmingliang-ms/copilot-rewrite/releases/tag/v${appVersion}`); }} className="hover:underline">v{appVersion}</a>
           </div>
         </div>
       </div>
