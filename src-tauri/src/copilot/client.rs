@@ -205,6 +205,8 @@ pub struct CopilotModel {
     pub vendor: String,
     #[serde(default)]
     pub preview: bool,
+    #[serde(default)]
+    pub category: String,
 }
 
 /// Response from /models endpoint
@@ -230,6 +232,8 @@ struct ModelEntry {
     capabilities: Option<ModelCapabilities>,
     #[serde(default)]
     supported_endpoints: Option<Vec<String>>,
+    #[serde(default)]
+    model_picker_category: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -507,7 +511,8 @@ impl CopilotClient {
             return Ok(Self::default_models());
         }
 
-        let models_resp: ModelsResponse = match response.json().await {
+        let body_text = response.text().await.context("Failed to read models body")?;
+        let models_resp: ModelsResponse = match serde_json::from_str(&body_text) {
             Ok(m) => m,
             Err(e) => {
                 warn!("Failed to parse models response: {}", e);
@@ -548,6 +553,7 @@ impl CopilotClient {
                 version: m.version.unwrap_or_default(),
                 vendor: m.vendor.unwrap_or_default(),
                 preview: m.preview.unwrap_or(false),
+                category: m.model_picker_category.unwrap_or_default(),
             })
             .collect();
 
@@ -562,12 +568,12 @@ impl CopilotClient {
     /// Fallback model list when API is unavailable
     fn default_models() -> Vec<CopilotModel> {
         vec![
-            CopilotModel { id: "claude-sonnet-4".into(), name: "Claude Sonnet 4".into(), version: String::new(), vendor: "Anthropic".into(), preview: false },
-            CopilotModel { id: "gpt-4o".into(), name: "GPT-4o".into(), version: String::new(), vendor: "OpenAI".into(), preview: false },
-            CopilotModel { id: "gpt-5-mini".into(), name: "GPT-5 Mini".into(), version: String::new(), vendor: "OpenAI".into(), preview: false },
-            CopilotModel { id: "claude-sonnet-4.5".into(), name: "Claude Sonnet 4.5".into(), version: String::new(), vendor: "Anthropic".into(), preview: false },
-            CopilotModel { id: "claude-haiku-4.5".into(), name: "Claude Haiku 4.5".into(), version: String::new(), vendor: "Anthropic".into(), preview: false },
-            CopilotModel { id: "gemini-2.5-pro".into(), name: "Gemini 2.5 Pro".into(), version: String::new(), vendor: "Google".into(), preview: false },
+            CopilotModel { id: "claude-sonnet-4".into(), name: "Claude Sonnet 4".into(), version: String::new(), vendor: "Anthropic".into(), preview: false, category: "versatile".into() },
+            CopilotModel { id: "gpt-4o".into(), name: "GPT-4o".into(), version: String::new(), vendor: "OpenAI".into(), preview: false, category: "versatile".into() },
+            CopilotModel { id: "gpt-5-mini".into(), name: "GPT-5 Mini".into(), version: String::new(), vendor: "OpenAI".into(), preview: false, category: "versatile".into() },
+            CopilotModel { id: "claude-sonnet-4.5".into(), name: "Claude Sonnet 4.5".into(), version: String::new(), vendor: "Anthropic".into(), preview: false, category: "versatile".into() },
+            CopilotModel { id: "claude-haiku-4.5".into(), name: "Claude Haiku 4.5".into(), version: String::new(), vendor: "Anthropic".into(), preview: false, category: "versatile".into() },
+            CopilotModel { id: "gemini-2.5-pro".into(), name: "Gemini 2.5 Pro".into(), version: String::new(), vendor: "Google".into(), preview: false, category: "versatile".into() },
         ]
     }
 }

@@ -33,6 +33,7 @@ interface CopilotModel {
   version: string;
   vendor: string;
   preview: boolean;
+  category: string;
 }
 
 const SettingsPanel: FC = () => {
@@ -272,7 +273,7 @@ const SettingsPanel: FC = () => {
                 <optgroup key={vendor} label={vendor}>
                   {grouped[vendor].sort((a, b) => a.name.localeCompare(b.name)).map((model) => (
                     <option key={model.id} value={model.id}>
-                      {model.name}{model.preview ? " (Preview)" : ""}
+                      {model.name}{model.preview ? " (Preview)" : ""}{model.category === "powerful" ? " ⚡" : ""}
                     </option>
                   ))}
                 </optgroup>
