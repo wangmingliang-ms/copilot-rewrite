@@ -162,7 +162,7 @@ impl Default for Settings {
             blacklisted_apps: vec![],
             api_token: String::new(),
             poll_interval_ms: 100,
-            beast_mode: false,
+            beast_mode: true,
             model: "claude-sonnet-4".to_string(),
         }
     }

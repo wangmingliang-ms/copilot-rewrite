@@ -423,17 +423,30 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
               </svg>
             </button>
             {currentModel && (
-              <span className="text-[10px] text-gray-400 font-mono truncate max-w-[120px]" title={currentModel}>{currentModel}</span>
+              <button
+                onClick={() => {
+                  invoke("log_action", { action: "Model name clicked — opening Settings" }).catch(() => {});
+                  invoke("open_settings").catch(() => {});
+                }}
+                className="text-[10px] text-gray-400 font-mono truncate max-w-[120px] hover:text-copilot-blue transition-colors cursor-pointer"
+                title={`${currentModel} — Click to change model`}
+              >
+                {currentModel}
+              </button>
             )}
             {beastMode && (
-              <span
-                className="flex items-center justify-center w-7 h-7 rounded-lg text-blue-500 bg-blue-50"
-                title="Beast Mode: ON — LLM will fully rewrite with creative freedom. Change in Settings."
+              <button
+                onClick={() => {
+                  invoke("log_action", { action: "Beast icon clicked — opening Settings" }).catch(() => {});
+                  invoke("open_settings").catch(() => {});
+                }}
+                className="flex items-center justify-center w-7 h-7 rounded-lg text-blue-500 bg-blue-50 hover:bg-blue-100 transition-colors cursor-pointer"
+                title="Beast Mode: ON — Click to change in Settings"
               >
                 <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="currentColor">
                   <path d="M1 2.5L3.5 8l-1 2.5C2.5 10.5 4 13 8 14c4-1 5.5-3.5 5.5-3.5L12.5 8 15 2.5 11.5 5 8 1 4.5 5z" />
                 </svg>
-              </span>
+              </button>
             )}
             <button
               onClick={() => {
