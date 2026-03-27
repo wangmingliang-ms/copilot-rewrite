@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.5.0] - 2026-03-27
+
+### ✨ Enhancements
+
+- **Cancel in-flight LLM requests** — Click the spinning icon to cancel an ongoing request. Initial spinning state shows a red ✕ on hover; refresh button shows a red ■ stop square on hover. Backend uses `tokio::select!` with `CancellationToken` for immediate abort. (`0ece5da`, `845eee2`, `46115db`)
+- **GitHub-flavored Markdown rendering** — Replaced Tailwind `prose` with `github-markdown-css` for consistent rendering of inline code, code blocks, tables, and all GFM features — matching GitHub's look and feel. (`382c628`)
+- **Refresh spinner styling** — Spinner uses Copilot blue color with light blue background instead of plain gray. Hover transitions to red stop square on red background. (`8793124`)
+
+### 📝 Prompt Improvements
+
+- **No-answer rule enforced in all modes** — All 6 prompts now explicitly declare role boundaries (TRANSLATOR / POLISHER / REWRITER) and refuse to answer questions, provide solutions, or add opinions. (`c5e6201`)
+- **Adaptive structure scaling** — Output structure scales with input length: short text stays simple, longer text gets headings, lists, and paragraph breaks. (`a06df77`)
+- **Hierarchical structure with symmetry** — Prompts now instruct the LLM to use nested lists for parent-child relationships and tables for symmetric/parallel content (pros/cons, comparisons). (`ca2dbb8`)
+
 ## [0.4.0] - 2026-03-27
 
 ### ✨ Enhancements
