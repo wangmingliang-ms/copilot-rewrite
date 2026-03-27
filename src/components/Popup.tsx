@@ -14,10 +14,9 @@ interface CopilotModel {
 
 interface PopupProps {
   selection: SelectionInfo | null;
-  authStatus: { logged_in: boolean; username: string | null };
 }
 
-const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
+const Popup: FC<PopupProps> = ({ selection }) => {
   const [state, setState] = useState<PopupState>("icon");
   const [result, setResult] = useState<ProcessResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -181,16 +180,20 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
   }, [state, translatedHtml, reorganizedHtml]); // Only resize on content change, NOT on toggle/showRaw
 
   const handleIconClick = useCallback(async () => {
-    if (!authStatus.logged_in) {
-      invoke("log_action", { action: "Icon clicked — not logged in, opening Settings" }).catch(() => {});
-      try {
+    // Check auth status fresh on every click — picks up login done in Settings
+    try {
+      const auth = await invoke<{ logged_in: boolean }>("get_auth_status");
+      if (!auth.logged_in) {
+        invoke("log_action", { action: "Icon clicked — not logged in, opening Settings" }).catch(() => {});
         await invoke("open_settings");
-      } catch {
-        setError("Please login via tray → Settings");
-        setState("error");
+        return;
       }
+    } catch {
+      setError("Please login via tray → Settings");
+      setState("error");
       return;
     }
+
     if (!selection) return;
 
     invoke("log_action", { action: `Icon clicked — starting translation (${selection.text.length} chars)` }).catch(() => {});
@@ -206,7 +209,7 @@ const Popup: FC<PopupProps> = ({ selection, authStatus }) => {
       setError(err instanceof Error ? err.message : String(err));
       setState("error");
     }
-  }, [authStatus, selection, refreshSettings]);
+  }, [selection, refreshSettings]);
 
   const [refreshing, setRefreshing] = useState(false);
   const refreshingRef = useRef(false);
