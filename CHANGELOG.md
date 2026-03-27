@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.0] - 2026-03-27
+
+### ✨ Enhancements
+
+- **Split Replace button — rendered text vs markdown mode** — Replace button now has a dropdown to switch between two modes: *Rendered text* (default) pastes rich HTML via `CF_HTML` clipboard format for Teams/Outlook; *Markdown* pastes plain text for GitHub editors. The choice is persisted across sessions. (`a1f03a7`)
+- **Mode indicator icon on Replace button** — Replace button shows a contextual icon: formatted-lines icon for rendered mode, "MD" badge for markdown mode. Icons use the same stroke-based line art style as Copy and Refresh. (`3c6f405`)
+- **Copy follows Replace mode** — Copy now respects the replace mode setting: in rendered mode it copies rich HTML (`CF_HTML` + plain text fallback); in markdown mode it copies plain Markdown text. (`66643b9`)
+
 ## [0.2.2] - 2026-03-27
 
 ### ✨ Enhancements

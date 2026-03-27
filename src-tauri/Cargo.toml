@@ -1,6 +1,6 @@
 [package]
 name = "copilot-rewrite"
-version = "0.2.2"
+version = "0.3.0"
 description = "System-level text translation and polishing tool for Windows"
 authors = ["Miller Wang"]
 license = "MIT"
