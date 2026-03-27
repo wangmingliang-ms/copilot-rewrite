@@ -436,6 +436,24 @@ fn open_url(url: String) -> Result<(), String> {
 fn open_settings(app: tauri::AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("settings") {
         let _ = window.show();
+        let _ = window.unminimize();
+        // Force bring to front using Win32 API — Tauri's set_focus() may fail
+        // when called from a background or WS_EX_NOACTIVATE window
+        #[cfg(target_os = "windows")]
+        {
+            use windows::Win32::UI::WindowsAndMessaging::{
+                SetForegroundWindow, BringWindowToTop, ShowWindow, SW_RESTORE,
+            };
+            use windows::Win32::Foundation::HWND;
+            if let Ok(hwnd) = window.hwnd() {
+                unsafe {
+                    let h = HWND(hwnd.0);
+                    let _ = ShowWindow(h, SW_RESTORE);
+                    let _ = BringWindowToTop(h);
+                    let _ = SetForegroundWindow(h);
+                }
+            }
+        }
         let _ = window.set_focus();
         Ok(())
     } else {
