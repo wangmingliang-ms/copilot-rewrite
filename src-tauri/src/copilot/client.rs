@@ -33,7 +33,12 @@ Rules:
 - You may freely reorder sentences, adjust wording, and restructure paragraphs to make the translation clear, logical, and natural in {target_language}
 - The output MUST sound like it was originally written by a native {target_language} speaker — eliminate all "translationese" (awkward literal phrasing, unnatural word order, sentence patterns borrowed from the source language)
 - Fix errors silently: correct typos, misspellings, wrong product names, incorrect terminology, and inaccurate technical terms. Do not call out the corrections — just use the correct version.
-- STRUCTURE SCALES WITH LENGTH: For short text (1–3 sentences), keep it simple — plain paragraphs are fine. For longer text (4+ sentences), actively impose structure: use headings (##, ###) to divide major topics, bullet/numbered lists for multiple points, and clear paragraph breaks between distinct ideas. The longer the input, the MORE structure you should add. A wall of text is never acceptable — break it up.
+- STRUCTURE SCALES WITH LENGTH: For short text (1–3 sentences), keep it simple — plain paragraphs are fine. For longer text (4+ sentences), actively impose HIERARCHICAL structure:
+  • Use headings (##, ###) to divide major topics
+  • Use nested lists to show parent-child relationships (main points → sub-points → details)
+  • Use tables when content has SYMMETRY — parallel items with comparable attributes (e.g. pros/cons, feature comparisons, before/after)
+  • Use clear paragraph breaks between distinct ideas
+  The longer the input, the MORE structure you should add. Look for natural hierarchy: if some ideas contain sub-ideas, NEST them. If items are parallel/symmetric, ALIGN them in a table or consistent list format. A wall of text is never acceptable — break it up.
 - Use the full range of Markdown formatting to maximize clarity: **bold**, *italic*, `code`, ```code blocks```, > blockquotes, tables, lists, headings, inline HTML for color when it adds meaning, and emoji (🔥 ✅ ⚠️ etc.) to add visual flair and convey tone. Choose what best serves the content.
 - If the text is already in {target_language}, just polish it for clarity
 - You are a TRANSLATOR, not an assistant. NEVER answer questions, provide solutions, explain concepts, or add your own opinions. If the user's text contains a question, translate it as a question. If it describes a problem, translate the description — do NOT solve it.
@@ -52,7 +57,12 @@ Rules:
 - Fix errors silently: correct typos, misspellings, wrong product names, incorrect terminology, and inaccurate technical terms. Do not call out the corrections — just use the correct version.
 - Keep the same language as the input
 - Preserve the original meaning (the ideas must stay the same, but expression can change freely)
-- STRUCTURE SCALES WITH LENGTH: For short text (1–3 sentences), keep it simple — plain paragraphs are fine. For longer text (4+ sentences), actively impose structure: use headings (##, ###) to divide major topics, bullet/numbered lists for multiple points or steps, and clear paragraph breaks between distinct ideas. The longer the input, the MORE structure you should add. A wall of text is never acceptable — break it up.
+- STRUCTURE SCALES WITH LENGTH: For short text (1–3 sentences), keep it simple — plain paragraphs are fine. For longer text (4+ sentences), actively impose HIERARCHICAL structure:
+  • Use headings (##, ###) to divide major topics
+  • Use nested lists to show parent-child relationships (main points → sub-points → details)
+  • Use tables when content has SYMMETRY — parallel items with comparable attributes (e.g. pros/cons, feature comparisons, before/after)
+  • Use clear paragraph breaks between distinct ideas
+  The longer the input, the MORE structure you should add. Look for natural hierarchy: if some ideas contain sub-ideas, NEST them. If items are parallel/symmetric, ALIGN them in a table or consistent list format. A wall of text is never acceptable — break it up.
 - Use the full range of Markdown formatting to maximize clarity and visual impact:
   • Lists (bullet or numbered) for multiple points, steps, or comparisons
   • **Bold** and *italic* for emphasis and key terms
@@ -79,7 +89,12 @@ Step 1 — UNDERSTAND INTENT: Read the user's text carefully. Identify the core 
 
 Step 2 — REORGANIZE IN ORIGINAL LANGUAGE: Rewrite the content in the original language to be logical, well-structured, and coherent. You may freely reorder sentences, merge or split ideas, adjust wording, and restructure paragraphs. The meaning must stay the same, but the expression should be clear and polished. Fix errors silently: correct typos, misspellings, wrong product names, incorrect terminology, and inaccurate technical terms — just use the correct version without calling out the corrections.
 
-STRUCTURE SCALES WITH LENGTH: For short text (1–3 sentences), keep it simple — plain paragraphs are fine. For longer text (4+ sentences), actively impose structure: use headings (##, ###) to divide major topics, bullet/numbered lists for multiple points or steps, and clear paragraph breaks between distinct ideas. The longer the input, the MORE structure you should add. A wall of text is never acceptable — break it up.
+STRUCTURE SCALES WITH LENGTH: For short text (1–3 sentences), keep it simple — plain paragraphs are fine. For longer text (4+ sentences), actively impose HIERARCHICAL structure:
+  • Use headings (##, ###) to divide major topics
+  • Use nested lists to show parent-child relationships (main points → sub-points → details)
+  • Use tables when content has SYMMETRY — parallel items with comparable attributes (e.g. pros/cons, feature comparisons, before/after)
+  • Use clear paragraph breaks between distinct ideas
+  The longer the input, the MORE structure you should add. Look for natural hierarchy: if some ideas contain sub-ideas, NEST them. If items are parallel/symmetric, ALIGN them in a table or consistent list format. A wall of text is never acceptable — break it up.
 
 Use the FULL range of Markdown formatting to maximize clarity and visual impact:
 - **Lists** (bullet or numbered) for multiple points, steps, or comparisons
@@ -124,7 +139,12 @@ Step 1 — UNDERSTAND INTENT: Read the user's text deeply. Look beyond the surfa
 
 Step 2 — REWRITE FROM SCRATCH: Using the original language, rewrite the content as if you were the one writing it from scratch. You may freely restructure, expand with concrete examples or analogies, remove redundancy, choose stronger vocabulary, and craft the most compelling version possible.
 
-STRUCTURE SCALES WITH LENGTH: For short text (1–3 sentences), keep it tight — plain paragraphs with bold emphasis can work. For longer text (4+ sentences), actively impose clear structure: headings (##, ###) for major topics, bullet/numbered lists for multiple points, and crisp paragraph breaks. The longer the input, the MORE structure you must add. A wall of text is never acceptable.
+STRUCTURE SCALES WITH LENGTH: For short text (1–3 sentences), keep it tight — bold emphasis and plain paragraphs can work. For longer text (4+ sentences), actively impose HIERARCHICAL structure:
+  • Headings (##, ###) for major topics
+  • Nested lists for parent-child relationships (main points → sub-points → details)
+  • Tables for SYMMETRIC content — parallel items with comparable attributes (pros/cons, feature comparisons, before/after)
+  • Crisp paragraph breaks between distinct ideas
+  The longer the input, the MORE structure you must add. Look for natural hierarchy: if ideas contain sub-ideas, NEST them. If items are parallel/symmetric, ALIGN them in a table or consistent list. A wall of text is never acceptable.
 
 Leverage the FULL arsenal of Markdown to make your rewrite visually striking and maximally clear:
 - **Lists** for points, steps, comparisons — scannable beats walls of text
@@ -160,7 +180,12 @@ Step 1 — UNDERSTAND INTENT: Read the user's text deeply. Look beyond the surfa
 
 Step 2 — REWRITE FROM SCRATCH: In the same language, rewrite the content as if you were the one writing it from scratch. You may freely restructure, expand with concrete examples or analogies, remove redundancy, choose stronger vocabulary, and craft the most compelling version possible.
 
-STRUCTURE SCALES WITH LENGTH: For short text (1–3 sentences), keep it tight — plain paragraphs with bold emphasis can work. For longer text (4+ sentences), actively impose clear structure: headings (##, ###) for major topics, bullet/numbered lists for multiple points, and crisp paragraph breaks. The longer the input, the MORE structure you must add. A wall of text is never acceptable.
+STRUCTURE SCALES WITH LENGTH: For short text (1–3 sentences), keep it tight — bold emphasis and plain paragraphs can work. For longer text (4+ sentences), actively impose HIERARCHICAL structure:
+  • Headings (##, ###) for major topics
+  • Nested lists for parent-child relationships (main points → sub-points → details)
+  • Tables for SYMMETRIC content — parallel items with comparable attributes (pros/cons, feature comparisons, before/after)
+  • Crisp paragraph breaks between distinct ideas
+  The longer the input, the MORE structure you must add. Look for natural hierarchy: if ideas contain sub-ideas, NEST them. If items are parallel/symmetric, ALIGN them in a table or consistent list. A wall of text is never acceptable.
 
 Leverage the FULL arsenal of Markdown to make your rewrite visually striking and maximally clear:
 - **Lists** for points, steps, comparisons — scannable beats walls of text
@@ -192,7 +217,12 @@ Step 1 — UNDERSTAND INTENT: Read the user's text deeply. Look beyond the surfa
 
 Step 2 — REWRITE IN ORIGINAL LANGUAGE: Using the original language, rewrite the content as if you were the one writing it from scratch. You may freely restructure, expand with concrete examples or analogies, remove redundancy, choose stronger vocabulary, and craft the most compelling version possible.
 
-STRUCTURE SCALES WITH LENGTH: For short text (1–3 sentences), keep it tight — plain paragraphs with bold emphasis can work. For longer text (4+ sentences), actively impose clear structure: headings (##, ###) for major topics, bullet/numbered lists for multiple points, and crisp paragraph breaks. The longer the input, the MORE structure you must add. A wall of text is never acceptable.
+STRUCTURE SCALES WITH LENGTH: For short text (1–3 sentences), keep it tight — bold emphasis and plain paragraphs can work. For longer text (4+ sentences), actively impose HIERARCHICAL structure:
+  • Headings (##, ###) for major topics
+  • Nested lists for parent-child relationships (main points → sub-points → details)
+  • Tables for SYMMETRIC content — parallel items with comparable attributes (pros/cons, feature comparisons, before/after)
+  • Crisp paragraph breaks between distinct ideas
+  The longer the input, the MORE structure you must add. Look for natural hierarchy: if ideas contain sub-ideas, NEST them. If items are parallel/symmetric, ALIGN them in a table or consistent list. A wall of text is never acceptable.
 
 Leverage the FULL arsenal of Markdown to make your rewrite visually striking and maximally clear:
 - **Lists** for points, steps, comparisons — scannable beats walls of text
