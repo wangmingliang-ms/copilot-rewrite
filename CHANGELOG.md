@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.6.0] - 2026-03-27
+
+### ✨ Enhancements
+
+- **Dark mode support** — Full dark mode across Popup and Settings windows. Follows system preference by default, or manually set to Light/Dark in Settings → Appearance. Covers all UI states: icon, spinning, expanded, error, markdown preview, action bar, scrollbars, and code blocks. (`74dd903`)
+
+### 🐛 Bug Fixes
+
+- **Popup dark mode not syncing with Settings** — Popup and Settings are separate Tauri windows with independent DOMs. Changing theme in Settings now correctly propagates to the Popup on next appearance. Beast mode icon dark background and spinning state hover colors also fixed. (`d96d395`)
+- **Markdown bullet points and headings not rendering** — Tailwind Preflight was stripping browser default styles (`list-style`, `font-size`, `font-weight`, link colors, table borders, spacing). Added comprehensive `!important` overrides to restore all defaults inside `.markdown-body`. (`5f12690`, `e0b90f2`)
+- **Update notification too intrusive** — Removed auto-open Settings on update detection. Now only shows a system notification; user opens Settings manually when ready. (`304263a`)
+
+### 📝 Prompt Improvements
+
+- **Chain of Thought restructuring** — All 6 prompts (normal + beast × 3 modes) restructured with explicit thinking chains: ANALYZE → ERROR CORRECTION → REORGANIZE → OUTPUT. Organized into clear sections (`# ROLE`, `# THINKING CHAIN`, `# STRUCTURE`, `# FORMATTING`, `# CONSTRAINTS`). ~33% token reduction through deduplication. (`35704e1`)
+
 ## [0.5.0] - 2026-03-27
 
 ### ✨ Enhancements
