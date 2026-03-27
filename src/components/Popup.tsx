@@ -564,13 +564,18 @@ const Popup: FC<PopupProps> = ({ selection }) => {
                 setRefreshing(false);
                 refreshingRef.current = false;
               } : handleRefresh}
-              className={`flex items-center justify-center w-7 h-7 rounded-lg transition-colors ${refreshing ? "text-red-400 hover:bg-red-50 hover:text-red-500 cursor-pointer" : "text-gray-500 hover:bg-gray-200/60 hover:text-gray-700"}`}
+              className={`group flex items-center justify-center w-7 h-7 rounded-lg transition-colors ${refreshing ? "text-gray-400 hover:text-red-500 hover:bg-red-50 cursor-pointer" : "text-gray-500 hover:bg-gray-200/60 hover:text-gray-700"}`}
               title={refreshing ? "Cancel" : "Regenerate"}
             >
               {refreshing ? (
-                <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                  <rect x="3" y="3" width="10" height="10" rx="1" fill="currentColor" stroke="none" />
-                </svg>
+                <>
+                  {/* Spinner — visible by default, hidden on hover */}
+                  <div className="h-3.5 w-3.5 animate-spin rounded-full border-[1.5px] border-gray-400 border-t-transparent group-hover:hidden" />
+                  {/* Stop square — hidden by default, visible on hover */}
+                  <svg className="w-3.5 h-3.5 hidden group-hover:block" viewBox="0 0 16 16" fill="currentColor">
+                    <rect x="3" y="3" width="10" height="10" rx="1" />
+                  </svg>
+                </>
               ) : (
                 <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M2.5 8a5.5 5.5 0 0 1 9.3-4" />
