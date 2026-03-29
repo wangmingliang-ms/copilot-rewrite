@@ -159,13 +159,45 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
             }
         };
 
-        // If popup icon is showing (not preview) and user switched to a different window,
-        // hide the popup. The text selection is likely gone.
-        if popup_icon_visible && !preview_is_visible && !is_own_window
-            && selection_source_hwnd != 0 && current_fg != selection_source_hwnd
+        // Also check Settings window
+        let is_own_window = is_own_window || {
+            if let Some(settings) = app_handle.get_webview_window("settings") {
+                settings.hwnd().map(|h| h.0 as isize == current_fg).unwrap_or(false)
+            } else {
+                false
+            }
+        };
+
+        // If popup is showing and user switched to a different window, hide popup.
+        // Compare by both HWND and PID to handle cases where HWND comparison alone fails.
+        let fg_pid = unsafe {
+            let mut pid: u32 = 0;
+            GetWindowThreadProcessId(
+                windows::Win32::Foundation::HWND(current_fg as *mut _),
+                Some(&mut pid),
+            );
+            pid
+        };
+        let source_pid = if selection_source_hwnd != 0 {
+            unsafe {
+                let mut pid: u32 = 0;
+                GetWindowThreadProcessId(
+                    windows::Win32::Foundation::HWND(selection_source_hwnd as *mut _),
+                    Some(&mut pid),
+                );
+                pid
+            }
+        } else {
+            0
+        };
+        let fg_changed = selection_source_hwnd != 0
+            && (current_fg != selection_source_hwnd || (source_pid != 0 && fg_pid != source_pid));
+
+        if (popup_icon_visible || preview_is_visible) && !is_own_window && fg_changed
         {
             info!(
-                "Foreground window changed from source — hiding popup icon"
+                "Foreground changed: source_hwnd=0x{:X}(pid={}) current=0x{:X}(pid={}) — hiding popup (icon={}, preview={})",
+                selection_source_hwnd, source_pid, current_fg, fg_pid, popup_icon_visible, preview_is_visible
             );
             last_selection = None;
             debounce_text = None;
@@ -173,6 +205,11 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
             selection_source_hwnd = 0;
             overlay::hide_popup(&app_handle);
             *state.current_selection.lock() = None;
+            *state.preview_visible.lock() = false;
+            // Clear cached UIA element so stale selection doesn't re-trigger
+            if let Some(ref uia_engine) = uia {
+                uia_engine.clear_cache();
+            }
             std::thread::sleep(Duration::from_millis(poll_interval));
             continue;
         }

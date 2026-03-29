@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.2] - 2026-03-29
+
+### 🐛 Bug Fixes
+
+- **Popup now hides when switching windows** — Previously, the popup icon would stay visible when switching from one app to another (e.g. Teams → Browser). Now uses process ID comparison to reliably detect window switches across all apps, including Electron-based apps like Teams.
+- **Seamless cross-app popup experience** — When switching between apps that both have selected text, the popup smoothly transitions: the old app's popup hides and the new app's popup appears at the correct position.
+
 ## [0.8.1] - 2026-03-29
 
 ### 🔧 Improvements

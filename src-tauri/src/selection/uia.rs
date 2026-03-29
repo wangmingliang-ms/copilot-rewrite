@@ -328,6 +328,11 @@ impl UiaEngine {
         }
     }
 
+    /// Clear the cached UIA element (e.g., when foreground window changes).
+    pub fn clear_cache(&self) {
+        *self.cached_element.borrow_mut() = None;
+    }
+
     /// Get the bounding rectangle of the currently selected text range.
     /// Returns the union of all bounding rectangles (multi-line selections produce multiple rects).
     /// Coordinates are in physical pixels.
