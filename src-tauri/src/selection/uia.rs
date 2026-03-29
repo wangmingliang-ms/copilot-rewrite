@@ -1,16 +1,32 @@
 // UI Automation integration for detecting text selection
 // Uses IUIAutomation COM interfaces via the `windows` crate
+//
+// Detection strategies (in priority order):
+// 1. GetFocusedElement — fastest, works for most apps (browser input, Write Mode)
+// 2. Cached element — re-check a previously found element (avoids flicker)
+// 3. Event element — from TextSelectionChanged event (covers Teams, touch, etc.)
+// 4. ElementFromPoint — mouse cursor fallback (works during active selection)
+// 5. TreeWalker — traverse foreground window's UIA subtree (last resort)
+//
+// The TextSelectionChanged event handler is implemented via manual COM vtable
+// (not #[implement] macro) to avoid windows-core version conflicts with Tauri.
 
 use anyhow::{Context, Result};
-use log::{debug, trace};
-use windows::core::{Interface, BSTR};
+use log::{debug, info, trace};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::Arc;
+use windows::core::{Interface, BSTR, GUID};
+use windows::Win32::Foundation::{HWND, POINT, S_OK};
 use windows::Win32::System::Com::{
     CoCreateInstance, CoInitializeEx, CLSCTX_ALL, COINIT_MULTITHREADED,
 };
+use windows::Win32::System::Threading::GetCurrentProcessId;
 use windows::Win32::UI::Accessibility::{
-    CUIAutomation, IUIAutomation, IUIAutomationElement, IUIAutomationTextPattern,
-    UIA_EditControlTypeId, UIA_TextPatternId, UIA_ValuePatternId,
+    CUIAutomation, IUIAutomation, IUIAutomationElement, IUIAutomationEventHandler,
+    IUIAutomationTextPattern, IUIAutomationTreeWalker, TreeScope_Subtree, UIA_EditControlTypeId,
+    UIA_Text_TextSelectionChangedEventId, UIA_TextPatternId, UIA_ValuePatternId,
 };
+use windows::Win32::UI::WindowsAndMessaging::{GetCursorPos, GetForegroundWindow};
 
 /// Bounding rectangle of the focused element (physical pixels)
 #[derive(Debug, Clone, Copy, Default)]
@@ -21,13 +37,195 @@ pub struct ElementRect {
     pub height: i32,
 }
 
+/// Maximum depth for TreeWalker traversal to limit performance impact
+const TREE_WALKER_MAX_DEPTH: u32 = 15;
+
+// ═══════════════════════════════════════════════════════════════════════
+// Manual COM implementation for IUIAutomationEventHandler
+// We can't use #[implement] because Tauri pulls in a different windows-core
+// version, causing trait mismatch. Manual vtable avoids the macro entirely.
+// ═══════════════════════════════════════════════════════════════════════
+
+/// IUnknown GUID
+const IID_IUNKNOWN: GUID = GUID::from_values(
+    0x00000000,
+    0x0000,
+    0x0000,
+    [0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46],
+);
+
+/// IUIAutomationEventHandler GUID
+/// {146C3C17-F12E-4E22-8C27-F894B9B79C69}
+const IID_IUIAUTOMATION_EVENT_HANDLER: GUID = GUID::from_values(
+    0x146C3C17,
+    0xF12E,
+    0x4E22,
+    [0x8C, 0x27, 0xF8, 0x94, 0xB9, 0xB7, 0x9C, 0x69],
+);
+
+/// Shared state between the event handler and the polling thread.
+/// The event handler sets `has_event=true` and stores the element,
+/// and the polling loop reads + clears it.
+pub struct EventState {
+    pub has_event: AtomicBool,
+    pub event_element: parking_lot::Mutex<Option<IUIAutomationElement>>,
+    /// Set to true when a TextSelectionChanged event fires but the element
+    /// has no selection. This signals the polling thread to clear cached state
+    /// and hide the popup.
+    pub selection_cleared: AtomicBool,
+}
+
+// Safety: IUIAutomationElement is a COM pointer (ref-counted, safe to send).
+// parking_lot::Mutex provides Sync.
+unsafe impl Send for EventState {}
+unsafe impl Sync for EventState {}
+
+/// The raw COM object layout for our event handler.
+/// Must start with a vtable pointer (COM convention).
+#[repr(C)]
+struct RawEventHandler {
+    vtable: *const EventHandlerVtbl,
+    ref_count: AtomicU32,
+    shared: Arc<EventState>,
+    our_pid: u32,
+}
+
+/// COM vtable for IUIAutomationEventHandler (inherits from IUnknown)
+#[repr(C)]
+struct EventHandlerVtbl {
+    // IUnknown methods
+    query_interface: unsafe extern "system" fn(
+        this: *mut RawEventHandler,
+        riid: *const GUID,
+        ppv: *mut *mut std::ffi::c_void,
+    ) -> i32,
+    add_ref: unsafe extern "system" fn(this: *mut RawEventHandler) -> u32,
+    release: unsafe extern "system" fn(this: *mut RawEventHandler) -> u32,
+    // IUIAutomationEventHandler method
+    handle_automation_event: unsafe extern "system" fn(
+        this: *mut RawEventHandler,
+        sender: *mut std::ffi::c_void, // IUIAutomationElement
+        event_id: i32,                 // UIA_EVENT_ID
+    ) -> i32,
+}
+
+// Static vtable — one instance shared by all handler objects
+static EVENT_HANDLER_VTBL: EventHandlerVtbl = EventHandlerVtbl {
+    query_interface: raw_query_interface,
+    add_ref: raw_add_ref,
+    release: raw_release,
+    handle_automation_event: raw_handle_automation_event,
+};
+
+unsafe extern "system" fn raw_query_interface(
+    this: *mut RawEventHandler,
+    riid: *const GUID,
+    ppv: *mut *mut std::ffi::c_void,
+) -> i32 {
+    let riid = &*riid;
+    if *riid == IID_IUNKNOWN || *riid == IID_IUIAUTOMATION_EVENT_HANDLER {
+        raw_add_ref(this);
+        *ppv = this as *mut std::ffi::c_void;
+        S_OK.0
+    } else {
+        *ppv = std::ptr::null_mut();
+        // E_NOINTERFACE
+        0x80004002_u32 as i32
+    }
+}
+
+unsafe extern "system" fn raw_add_ref(this: *mut RawEventHandler) -> u32 {
+    let handler = &*this;
+    handler.ref_count.fetch_add(1, Ordering::Relaxed) + 1
+}
+
+unsafe extern "system" fn raw_release(this: *mut RawEventHandler) -> u32 {
+    let handler = &*this;
+    let prev = handler.ref_count.fetch_sub(1, Ordering::Release);
+    if prev == 1 {
+        std::sync::atomic::fence(Ordering::Acquire);
+        // Drop the Box — ref count reached zero
+        drop(Box::from_raw(this));
+    }
+    prev - 1
+}
+
+unsafe extern "system" fn raw_handle_automation_event(
+    this: *mut RawEventHandler,
+    sender: *mut std::ffi::c_void,
+    event_id: i32,
+) -> i32 {
+    let handler = &*this;
+
+    if event_id == UIA_Text_TextSelectionChangedEventId.0 {
+        // Reconstruct IUIAutomationElement from raw pointer
+        if !sender.is_null() {
+            // Get process ID of the sender element to filter our own process
+            let sender_element: IUIAutomationElement =
+                IUIAutomationElement::from_raw(sender);
+            // AddRef because from_raw takes ownership, but COM still holds a reference
+            // Actually, we need to be careful: the sender pointer is borrowed from COM,
+            // we must AddRef before using it. from_raw doesn't AddRef.
+            // We need to manually AddRef the sender.
+            std::mem::forget(sender_element.clone()); // clone does AddRef; forget the original (no Release)
+            // Now sender_element holds our own AddRef'd reference
+
+            let sender_pid = sender_element.CurrentProcessId().unwrap_or(0) as u32;
+            if sender_pid == handler.our_pid {
+                trace!("TextSelectionChanged from own process — ignoring");
+                return S_OK.0;
+            }
+
+            debug!(
+                "TextSelectionChanged event from pid={}",
+                sender_pid
+            );
+
+            *handler.shared.event_element.lock() = Some(sender_element);
+            handler.shared.has_event.store(true, Ordering::Release);
+        }
+    }
+
+    S_OK.0
+}
+
+/// Create a manual COM event handler and return it as IUIAutomationEventHandler.
+fn create_event_handler(shared: Arc<EventState>, our_pid: u32) -> IUIAutomationEventHandler {
+    let handler = Box::new(RawEventHandler {
+        vtable: &EVENT_HANDLER_VTBL,
+        ref_count: AtomicU32::new(1), // start with ref_count = 1
+        shared,
+        our_pid,
+    });
+    let raw_ptr = Box::into_raw(handler);
+    // Safety: our vtable layout matches IUIAutomationEventHandler's COM interface.
+    // The first field is the vtable pointer, which is what COM expects.
+    unsafe { IUIAutomationEventHandler::from_raw(raw_ptr as *mut std::ffi::c_void) }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// UiaEngine — main API
+// ═══════════════════════════════════════════════════════════════════════
+
 /// Wrapper around UI Automation COM interfaces
 pub struct UiaEngine {
     automation: IUIAutomation,
+    /// TreeWalker for traversing the UIA element tree
+    tree_walker: IUIAutomationTreeWalker,
+    /// Cached element that previously had a text selection.
+    /// Re-checked on subsequent polls to avoid flickering when mouse moves away.
+    cached_element: std::cell::RefCell<Option<IUIAutomationElement>>,
+    /// Our process ID — used to skip our own popup overlay
+    our_pid: u32,
+    /// Shared state with the TextSelectionChanged event handler
+    event_state: Arc<EventState>,
+    /// Whether the event handler was successfully registered
+    event_handler_active: bool,
 }
 
 impl UiaEngine {
-    /// Initialize COM and create the UIAutomation object
+    /// Initialize COM and create the UIAutomation object + TreeWalker.
+    /// Also registers a TextSelectionChanged event handler on the desktop root.
     pub fn new() -> Result<Self> {
         unsafe {
             CoInitializeEx(None, COINIT_MULTITHREADED)
@@ -37,8 +235,69 @@ impl UiaEngine {
             let automation: IUIAutomation = CoCreateInstance(&CUIAutomation, None, CLSCTX_ALL)
                 .context("Failed to create IUIAutomation instance")?;
 
-            Ok(Self { automation })
+            let tree_walker = automation
+                .ControlViewWalker()
+                .context("Failed to get ControlViewWalker")?;
+
+            let our_pid = GetCurrentProcessId();
+
+            let event_state = Arc::new(EventState {
+                has_event: AtomicBool::new(false),
+                event_element: parking_lot::Mutex::new(None),
+                selection_cleared: AtomicBool::new(false),
+            });
+
+            // Register TextSelectionChanged event handler on the desktop root element
+            let event_handler_active =
+                match Self::register_event_handler(&automation, &event_state, our_pid) {
+                    Ok(()) => {
+                        info!("TextSelectionChanged event handler registered successfully");
+                        true
+                    }
+                    Err(e) => {
+                        info!(
+                            "TextSelectionChanged event handler registration failed: {}. \
+                             Relying on polling strategies only.",
+                            e
+                        );
+                        false
+                    }
+                };
+
+            Ok(Self {
+                automation,
+                tree_walker,
+                cached_element: std::cell::RefCell::new(None),
+                our_pid,
+                event_state,
+                event_handler_active,
+            })
         }
+    }
+
+    /// Register the TextSelectionChanged event handler on the desktop root element
+    unsafe fn register_event_handler(
+        automation: &IUIAutomation,
+        event_state: &Arc<EventState>,
+        our_pid: u32,
+    ) -> Result<()> {
+        let root = automation
+            .GetRootElement()
+            .context("Failed to get root element")?;
+
+        let handler = create_event_handler(Arc::clone(event_state), our_pid);
+
+        automation
+            .AddAutomationEventHandler(
+                UIA_Text_TextSelectionChangedEventId,
+                &root,
+                TreeScope_Subtree,
+                None, // no cache request
+                &handler,
+            )
+            .context("AddAutomationEventHandler failed")?;
+
+        Ok(())
     }
 
     /// Get the currently focused element in the UI
@@ -61,7 +320,6 @@ impl UiaEngine {
                 width: rect.right - rect.left,
                 height: rect.bottom - rect.top,
             };
-            // Sanity check — ignore degenerate rects
             if r.width > 10 && r.height > 10 {
                 Some(r)
             } else {
@@ -71,7 +329,7 @@ impl UiaEngine {
     }
 
     /// Try to get selected text from the focused element using TextPattern
-    /// Only returns text if the focused element is an editable control (input/textarea/contenteditable)
+    /// Only returns text if the focused element is an editable control
     pub fn get_selected_text(&self) -> Result<Option<String>> {
         let element = match self.get_focused_element() {
             Ok(el) => el,
@@ -81,7 +339,6 @@ impl UiaEngine {
             }
         };
 
-        // Only trigger popup for editable elements (input fields, text areas, contenteditable)
         if !self.is_editable_element(&element) {
             trace!("Focused element is not editable — skipping");
             return Ok(None);
@@ -90,23 +347,203 @@ impl UiaEngine {
         self.get_text_from_element(&element)
     }
 
+    /// Try to get selected text from ANY element (input or non-input).
+    /// Returns (Option<text>, is_input_element).
+    ///
+    /// Strategy:
+    /// 0. Check TextSelectionChanged event — ONLY used to detect "selection cleared".
+    ///    The event sender element may be a child node (e.g. Text inside CK Editor)
+    ///    which doesn't know if it's inside an input area. So we don't use it for
+    ///    positive detection — only for the negative signal (no selection → clear caches).
+    /// 1. GetFocusedElement — fast, covers most apps, correctly identifies input vs non-input
+    /// 2. Cached element — re-check previously found element
+    /// 3. ElementFromPoint — mouse cursor fallback
+    /// 4. TreeWalker — traverse foreground window subtree (last resort)
+    pub fn get_selected_text_any(&self) -> Result<(Option<String>, bool)> {
+        // Strategy 0: Check TextSelectionChanged event — clear signal only.
+        // The event is authoritative for "selection was cleared" (e.g. user clicked elsewhere
+        // in the same window). But for positive selection detection, we defer to
+        // GetFocusedElement which correctly identifies the input container.
+        if self.event_handler_active
+            && self.event_state.has_event.swap(false, Ordering::AcqRel)
+        {
+            let element = self.event_state.event_element.lock().take();
+            if let Some(element) = element {
+                match self.get_text_from_element(&element) {
+                    Ok(Some(_text)) => {
+                        // Event element has selection — good, but DON'T return it directly.
+                        // Cache the element for Strategy 2, but let Strategy 1 (GetFocusedElement)
+                        // handle the actual detection so is_input is determined correctly.
+                        debug!("TextSelectionChanged event: element has selection, caching for fallback");
+                        *self.cached_element.borrow_mut() = Some(element);
+                        // Fall through to Strategy 1
+                    }
+                    _ => {
+                        // Event fired but element has no selection — selection was cleared.
+                        // Clear all caches so we don't report stale selection data.
+                        debug!("TextSelectionChanged event: selection cleared");
+                        *self.cached_element.borrow_mut() = None;
+                        return Ok((None, false));
+                    }
+                }
+            }
+        }
+
+        // Strategy 1: GetFocusedElement — correctly identifies input vs non-input
+        if let Ok(element) = self.get_focused_element() {
+            let is_input = self.is_editable_element(&element);
+            if let Ok(Some(text)) = self.get_text_from_element(&element) {
+                self.log_element_info(&element, is_input, "focused");
+                *self.cached_element.borrow_mut() = None;
+                return Ok((Some(text), is_input));
+            }
+        }
+
+        // Strategy 2: Re-check cached element
+        {
+            let cached = self.cached_element.borrow();
+            if let Some(ref element) = *cached {
+                let is_input = self.is_editable_element(element);
+                match self.get_text_from_element(element) {
+                    Ok(Some(text)) => {
+                        self.log_element_info(element, is_input, "cached");
+                        return Ok((Some(text), is_input));
+                    }
+                    _ => {}
+                }
+            }
+        }
+        *self.cached_element.borrow_mut() = None;
+
+        // Strategy 3: ElementFromPoint at mouse cursor
+        if let Some(element) = self.get_element_at_cursor() {
+            let is_input = self.is_editable_element(&element);
+            if let Ok(Some(text)) = self.get_text_from_element(&element) {
+                self.log_element_info(&element, is_input, "point");
+                *self.cached_element.borrow_mut() = Some(element);
+                return Ok((Some(text), is_input));
+            }
+        }
+
+        // Strategy 4: TreeWalker — traverse foreground window's UIA subtree
+        if let Some((element, text)) = self.find_selection_in_foreground_window() {
+            let is_input = self.is_editable_element(&element);
+            self.log_element_info(&element, is_input, "tree");
+            *self.cached_element.borrow_mut() = Some(element);
+            return Ok((Some(text), is_input));
+        }
+
+        Ok((None, false))
+    }
+
+    /// Traverse the foreground window's UIA subtree to find an element with
+    /// a TextPattern that has an active text selection.
+    fn find_selection_in_foreground_window(&self) -> Option<(IUIAutomationElement, String)> {
+        unsafe {
+            let hwnd: HWND = GetForegroundWindow();
+            if hwnd.0.is_null() {
+                return None;
+            }
+
+            let root = self.automation.ElementFromHandle(hwnd).ok()?;
+
+            let root_pid = root.CurrentProcessId().unwrap_or(0) as u32;
+            if root_pid == self.our_pid {
+                return None;
+            }
+
+            self.walk_tree_for_selection(&root, 0)
+        }
+    }
+
+    /// Recursively walk the UIA tree looking for an element with TextPattern + selection.
+    fn walk_tree_for_selection(
+        &self,
+        element: &IUIAutomationElement,
+        depth: u32,
+    ) -> Option<(IUIAutomationElement, String)> {
+        if depth > TREE_WALKER_MAX_DEPTH {
+            return None;
+        }
+
+        if let Ok(Some(text)) = self.get_text_from_element(element) {
+            return Some((element.clone(), text));
+        }
+
+        unsafe {
+            let child = match self.tree_walker.GetFirstChildElement(element) {
+                Ok(c) => c,
+                Err(_) => return None,
+            };
+
+            let mut current = child;
+            loop {
+                if let Some(result) = self.walk_tree_for_selection(&current, depth + 1) {
+                    return Some(result);
+                }
+
+                match self.tree_walker.GetNextSiblingElement(&current) {
+                    Ok(next) => current = next,
+                    Err(_) => break,
+                }
+            }
+        }
+
+        None
+    }
+
+    /// Get UIA element at the current mouse cursor position.
+    fn get_element_at_cursor(&self) -> Option<IUIAutomationElement> {
+        unsafe {
+            let mut point = POINT::default();
+            if GetCursorPos(&mut point).is_err() {
+                return None;
+            }
+            let element = self.automation.ElementFromPoint(point).ok()?;
+
+            let element_pid = element.CurrentProcessId().unwrap_or(0) as u32;
+            if element_pid == self.our_pid {
+                trace!("ElementFromPoint hit our own process — skipping");
+                return None;
+            }
+
+            Some(element)
+        }
+    }
+
+    /// Log element info (only called when text selection is found)
+    fn log_element_info(&self, element: &IUIAutomationElement, is_input: bool, source: &str) {
+        unsafe {
+            let control_type = element.CurrentControlType().unwrap_or_default();
+            let class_name = element.CurrentClassName().unwrap_or_default();
+            debug!(
+                "UIA selection [{}]: type={}, class='{}', is_input={}",
+                source, control_type.0, class_name, is_input
+            );
+        }
+    }
+
     /// Check if a UIA element is an editable control
-    /// Returns true for: Edit controls (input/textarea),
-    /// Document controls that support ValuePattern (contenteditable),
-    /// and other elements that support ValuePattern
     fn is_editable_element(&self, element: &IUIAutomationElement) -> bool {
         unsafe {
             let control_type = element.CurrentControlType().unwrap_or_default();
 
-            // Edit controls are always editable (input fields, textareas)
-            if control_type == UIA_EditControlTypeId {
-                return true;
+            // Check ValuePattern's IsReadOnly for any element that supports it
+            if let Ok(pattern_obj) = element.GetCurrentPattern(UIA_ValuePatternId) {
+                if let Ok(value_pattern) = pattern_obj
+                    .cast::<windows::Win32::UI::Accessibility::IUIAutomationValuePattern>()
+                {
+                    if let Ok(is_readonly) = value_pattern.CurrentIsReadOnly() {
+                        if is_readonly.as_bool() {
+                            return false;
+                        }
+                        return true;
+                    }
+                }
             }
 
-            // Document controls: only editable if they support ValuePattern
-            // (plain webpage = Document without ValuePattern, contenteditable = Document with ValuePattern)
-            // Also catch any other control type that supports ValuePattern
-            if element.GetCurrentPattern(UIA_ValuePatternId).is_ok() {
+            // No ValuePattern: Edit controls are assumed editable
+            if control_type == UIA_EditControlTypeId {
                 return true;
             }
 
@@ -119,26 +556,17 @@ impl UiaEngine {
         unsafe {
             let pattern_obj = match element.GetCurrentPattern(UIA_TextPatternId) {
                 Ok(p) => p,
-                Err(_) => {
-                    trace!("Element does not support TextPattern");
-                    return Ok(None);
-                }
+                Err(_) => return Ok(None),
             };
 
             let text_pattern: IUIAutomationTextPattern = match pattern_obj.cast() {
                 Ok(tp) => tp,
-                Err(_) => {
-                    trace!("Failed to cast to IUIAutomationTextPattern");
-                    return Ok(None);
-                }
+                Err(_) => return Ok(None),
             };
 
             let selection = match text_pattern.GetSelection() {
                 Ok(s) => s,
-                Err(e) => {
-                    trace!("GetSelection failed: {}", e);
-                    return Ok(None);
-                }
+                Err(_) => return Ok(None),
             };
 
             let length = selection.Length().unwrap_or(0);
@@ -149,7 +577,7 @@ impl UiaEngine {
             let range = match selection.GetElement(0) {
                 Ok(r) => r,
                 Err(e) => {
-                    debug!("Failed to get selection range element: {}", e);
+                    debug!("Failed to get selection range: {}", e);
                     return Ok(None);
                 }
             };
@@ -163,7 +591,6 @@ impl UiaEngine {
             };
 
             let text_str = text.to_string();
-
             if text_str.is_empty() {
                 Ok(None)
             } else {

@@ -7,10 +7,13 @@ export interface SelectionInfo {
   mouse_x: number;
   mouse_y: number;
   source: "UIA" | "Clipboard";
+  /** Whether the selection is from an input/editable element (Write Mode).
+   *  false = non-input element (Read Mode) */
+  is_input_element: boolean;
 }
 
 /** Matches the Rust RewriteAction enum */
-export type RewriteAction = "Translate" | "Polish" | "TranslateAndPolish";
+export type RewriteAction = "Translate" | "Polish" | "TranslateAndPolish" | "ReadModeTranslate";
 
 /** Matches the Rust ProcessResponse struct */
 export interface ProcessResponse {

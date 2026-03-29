@@ -71,17 +71,22 @@ Use Markdown's full range to maximize clarity: **bold**, *italic*, `code`, ```co
 - Return ONLY the polished text — no explanations, notes, or extra text."#;
 
 /// System prompt for translate + polish mode (default action)
-fn translate_and_polish_system_prompt(target_language: &str) -> String {
+/// Takes both native and target language so outputs are always in fixed languages.
+fn translate_and_polish_system_prompt(native_language: &str, target_language: &str) -> String {
     format!(
         r#"# ROLE
 Professional writing assistant and translator. Auto-detect source language.
 
+# USER'S LANGUAGES
+- Native language: {native_language}
+- Target language: {target_language}
+
 # THINKING CHAIN
 Step 1 — ANALYZE: Read carefully. Identify the core message, key points, tone, and the intent behind what the user is communicating.
 Step 2 — ERROR CORRECTION: Silently fix typos, misspellings, wrong product names, incorrect terminology, and inaccurate technical terms. Use the correct version without comment.
-Step 3 — REORGANIZE (original language): Rewrite in the original language to be logical, well-structured, and coherent. Freely reorder sentences, merge or split ideas, adjust wording, and restructure paragraphs. Meaning stays the same; expression should be clear and polished. This becomes the "reorganized" output.
+Step 3 — REORGANIZE IN {native_language}: Rewrite in {native_language} to be logical, well-structured, and coherent. If the original is already in {native_language}, polish it. If the original is in another language, rewrite it in {native_language}. Freely reorder sentences, merge or split ideas, adjust wording, and restructure paragraphs. Meaning stays the same; expression should be clear and polished. This becomes the "reorganized" output.
 Step 4 — THINK IN {target_language}: Re-think the content using {target_language} thought patterns and conventions. Restructure for natural {target_language} sentence order, emphasis, and logical flow — do not translate word-by-word.
-Step 5 — TRANSLATE: Write the final version in clear, natural, idiomatic {target_language}. It MUST read as if originally written by a native {target_language} speaker — zero "translationese." Preserve all Markdown formatting from Step 3. This becomes the "translated" output.
+Step 5 — TRANSLATE TO {target_language}: Write the final version in clear, natural, idiomatic {target_language}. It MUST read as if originally written by a native {target_language} speaker — zero "translationese." Preserve all Markdown formatting from Step 3. This becomes the "translated" output.
 
 # STRUCTURE
 Scale structure with length (apply to BOTH outputs):
@@ -93,7 +98,7 @@ Use Markdown's full range in both outputs: **bold**, *italic*, `code`, ```code b
 
 # OUTPUT FORMAT
 Respond with ONLY a JSON object — no markdown code fences, no explanation, no other text:
-{{"reorganized": "polished text in original language (Step 3)", "translated": "{target_language} output (Step 5)"}}
+{{"reorganized": "{native_language} version (Step 3)", "translated": "{target_language} output (Step 5)"}}
 Use \n for newlines within JSON string values.
 
 # CONSTRAINTS
@@ -155,17 +160,21 @@ Leverage Markdown's full arsenal for visual impact: **bold**, *italic*, `code`, 
 - You are a REWRITER, not an assistant. NEVER answer questions, provide solutions, or add opinions. Rewrite questions as better-phrased questions, problems as clearer descriptions.
 - Return ONLY the rewritten text — no explanations, notes, or meta-commentary."#;
 
-fn beast_translate_and_polish_system_prompt(target_language: &str) -> String {
+fn beast_translate_and_polish_system_prompt(native_language: &str, target_language: &str) -> String {
     format!(
         r#"# ROLE
 World-class writer and translator with FULL CREATIVE FREEDOM. Auto-detect source language.
 
+# USER'S LANGUAGES
+- Native language: {native_language}
+- Target language: {target_language}
+
 # THINKING CHAIN
 Step 1 — DEEP ANALYSIS: Look beyond surface words — understand what the user truly wants to communicate, their underlying purpose, and the effect they want to achieve.
 Step 2 — ERROR CORRECTION: Silently fix factual errors, wrong product names, incorrect terminology, inaccurate technical terms, AND weak/inappropriate examples. Replace wrong terms with correct ones. Swap weak examples with stronger, more illustrative ones that better convey the user's intent. You know more than the user — use that knowledge.
-Step 3 — REWRITE (original language): Rewrite from scratch as if you were the author. Freely restructure, expand with concrete examples or analogies, remove redundancy, choose stronger vocabulary, and craft the most compelling version possible. This becomes the "reorganized" output.
+Step 3 — REWRITE IN {native_language}: Rewrite from scratch in {native_language} as if you were the author. If the original is already in {native_language}, polish it. If in another language, rewrite it in {native_language}. Freely restructure, expand with concrete examples or analogies, remove redundancy, choose stronger vocabulary, and craft the most compelling version possible. This becomes the "reorganized" output.
 Step 4 — THINK IN {target_language}: Re-think the entire content using {target_language} thought patterns. Restructure for native {target_language} argument flow, emphasis, and logic — not just word-for-word conversion.
-Step 5 — TRANSLATE: Write the final version as if you were the best native {target_language} writer crafting this from scratch. Zero translationese, zero borrowed sentence patterns. Every phrase must sound completely natural to a native reader. Preserve all Markdown formatting from Step 3. This becomes the "translated" output.
+Step 5 — TRANSLATE TO {target_language}: Write the final version as if you were the best native {target_language} writer crafting this from scratch. Zero translationese, zero borrowed sentence patterns. Every phrase must sound completely natural to a native reader. Preserve all Markdown formatting from Step 3. This becomes the "translated" output.
 
 # STRUCTURE
 Scale structure with length (apply to BOTH outputs):
@@ -177,13 +186,96 @@ Leverage Markdown's full arsenal for visual impact in both outputs: **bold**, *i
 
 # OUTPUT FORMAT
 Respond with ONLY a JSON object — no markdown code fences, no explanation, no other text:
-{{"reorganized": "your rewrite in original language (Step 3)", "translated": "your {target_language} output (Step 5)"}}
+{{"reorganized": "{native_language} version (Step 3)", "translated": "{target_language} output (Step 5)"}}
 Use \n for newlines within JSON string values.
 
 # CONSTRAINTS
 - Freedom is in HOW to express ideas, NOT in WHAT. Never change the substance — only improve the delivery.
 - You are a REWRITER, not an assistant. NEVER answer questions, provide solutions, or add opinions. Rewrite questions as better-phrased questions, problems as clearer descriptions.
 - Both outputs must be compelling, well-organized, and easy to understand."#,
+    )
+}
+
+// =====================================================================
+// Read Mode Prompt — Unified smart translation with Chain of Thought
+// =====================================================================
+
+/// Unified Read Mode prompt: auto-detects content type and adapts behavior.
+/// Uses Chain of Thought for analysis before producing output.
+/// Always returns JSON with "mode" + appropriate fields.
+/// Takes both languages so the AI can auto-detect direction.
+fn read_mode_smart_prompt(native_language: &str, target_language: &str) -> String {
+    format!(
+        r#"# ROLE
+You are an expert translator, language tutor, and content analyst.
+
+# USER'S LANGUAGES
+- Native language: {native_language}
+- Target language: {target_language}
+
+# TRANSLATION DIRECTION
+Auto-detect the source language, then decide the output language:
+- If the text is in {target_language} (or any non-{native_language} language) → translate into **{native_language}** (help the user understand foreign content)
+- If the text is in {native_language} → translate into **{target_language}** (help the user see how it reads in their target language)
+- All explanations, summaries, and vocabulary notes should be in **{native_language}** (the user's native language) regardless of translation direction.
+
+# CHAIN OF THOUGHT — THINK FIRST
+Before producing output, silently analyze:
+1. **Source language**: What language is this text in?
+2. **Output language**: Based on the rules above, which language should the translation be in?
+3. **Length**: Is this a single word/phrase, a short sentence, a complex sentence, or a long passage (multiple sentences/paragraphs)?
+4. **Complexity**: Does it contain specialized vocabulary, idioms, technical terms, or unclear/ambiguous expressions?
+5. **Errors**: Does the original contain grammar mistakes, typos, factual errors, or contradictions?
+6. **Mode selection**: Based on analysis, choose one of 4 modes.
+
+# 4 MODES (choose automatically)
+
+## Mode "word" — Single word or very short phrase (≤ 3 words)
+- Translate the word/phrase into the output language
+- Explain its meaning, common usage, and nuance (in {native_language})
+- Provide 2-3 example sentences (with translations)
+
+## Mode "simple" — Short, straightforward sentence (≤ ~30 words, no complex vocab)
+- Provide a clean translation into the output language
+- If errors exist, silently correct them
+
+## Mode "complex" — Sentence with difficult/specialized vocabulary
+- Provide a clean translation into the output language
+- Highlight and explain the complex words/phrases: meaning, usage, nuance (in {native_language})
+- Silently correct any errors
+
+## Mode "long" — Long passage (multiple sentences, paragraphs, or > ~50 words)
+- Provide a **concise summary** in {native_language} (key points, conclusions, action items)
+- Provide the **full translation** into the output language with corrections applied
+- If the original has errors or contradictions, note them with [⚠️ Note: ...]
+
+# OUTPUT FORMAT
+Respond with ONLY a JSON object — no markdown code fences, no explanation, no preamble:
+
+For "word" mode:
+{{"mode": "word", "translation": "translated word/phrase", "explanation": "meaning, usage, nuance in {native_language}", "examples": ["example sentence 1 (translation)", "example sentence 2 (translation)"]}}
+
+For "simple" mode:
+{{"mode": "simple", "translation": "translated sentence"}}
+
+For "complex" mode:
+{{"mode": "complex", "translation": "full translated sentence", "vocabulary": [{{"term": "original word", "meaning": "explanation in {native_language}", "usage": "how it's typically used"}}]}}
+
+For "long" mode:
+{{"mode": "long", "summary": "concise summary in {native_language}", "translation": "full translation in output language"}}
+
+Use \n for newlines within JSON string values.
+
+# FORMATTING
+Leverage Markdown's full arsenal to maximize clarity and comprehension: **bold**, *italic*, `code`, ```code blocks```, > blockquotes, tables, lists (nested when helpful), headings (##, ###), ASCII diagrams, inline HTML for color/emphasis, emoji (📌 🔑 ⚠️ ✅ 💡 📊 🔥 🎯 ⚡) for visual structure and intent clarity. Pick what best serves the content — don't force formatting where plain text is clearer.
+- In summaries and long translations: impose structure — headings for topics, tables for comparisons/parallel items, nested lists for hierarchies. The longer the content, the more structure. Never leave a wall of text.
+- In vocabulary/word explanations: be concise but informative
+- Example sentences should feel natural, not textbook-like
+
+# CONSTRAINTS
+- You are a TRANSLATOR and LANGUAGE EXPERT, not an assistant. NEVER answer questions in the text, provide solutions to problems described, or add your own opinions.
+- Translate questions as questions, problems as problem descriptions.
+- Silently correct grammar, spelling, and clarity issues — don't call them out unless they change meaning."#,
     )
 }
 
@@ -369,6 +461,7 @@ impl CopilotClient {
         &self,
         text: &str,
         action: &RewriteAction,
+        native_language: &str,
         target_language: &str,
         github_token: &str,
         model: &str,
@@ -388,7 +481,10 @@ impl CopilotClient {
                 RewriteAction::Translate => beast_translate_system_prompt(target_language),
                 RewriteAction::Polish => BEAST_POLISH_SYSTEM_PROMPT.to_string(),
                 RewriteAction::TranslateAndPolish => {
-                    beast_translate_and_polish_system_prompt(target_language)
+                    beast_translate_and_polish_system_prompt(native_language, target_language)
+                }
+                RewriteAction::ReadModeTranslate => {
+                    anyhow::bail!("ReadModeTranslate should use process_read_mode(), not process()")
                 }
             }
         } else {
@@ -396,7 +492,10 @@ impl CopilotClient {
                 RewriteAction::Translate => translate_system_prompt(target_language),
                 RewriteAction::Polish => POLISH_SYSTEM_PROMPT.to_string(),
                 RewriteAction::TranslateAndPolish => {
-                    translate_and_polish_system_prompt(target_language)
+                    translate_and_polish_system_prompt(native_language, target_language)
+                }
+                RewriteAction::ReadModeTranslate => {
+                    anyhow::bail!("ReadModeTranslate should use process_read_mode(), not process()")
                 }
             }
         };
@@ -516,6 +615,110 @@ impl CopilotClient {
         }
 
         info!("Copilot API returned {} chars", result.len());
+
+        Ok(result.trim().to_string())
+    }
+
+    /// Process text in Read Mode — unified smart prompt that auto-detects content type
+    /// Always returns JSON with "mode" field (word/simple/complex/long)
+    pub async fn process_read_mode(
+        &self,
+        text: &str,
+        native_language: &str,
+        target_language: &str,
+        github_token: &str,
+        model: &str,
+    ) -> Result<String> {
+        if github_token.is_empty() {
+            anyhow::bail!("GitHub token is not configured.");
+        }
+
+        let copilot_token = self.get_copilot_token(github_token).await?;
+
+        let system_prompt = read_mode_smart_prompt(native_language, target_language);
+
+        info!(
+            "Read Mode: processing {} chars, native={}, target={}, model={}",
+            text.len(),
+            native_language,
+            target_language,
+            model
+        );
+
+        let request = ChatCompletionRequest {
+            model: model.to_string(),
+            messages: vec![
+                ChatMessage {
+                    role: "system".to_string(),
+                    content: system_prompt,
+                },
+                ChatMessage {
+                    role: "user".to_string(),
+                    content: text.to_string(),
+                },
+            ],
+            temperature: 0.3,
+            stream: true,
+        };
+
+        let response = self
+            .http
+            .post(COPILOT_CHAT_URL)
+            .header("Authorization", format!("Bearer {}", copilot_token))
+            .header("Content-Type", "application/json")
+            .header("Editor-Version", "vscode/1.96.0")
+            .header("Editor-Plugin-Version", "copilot-chat/0.24")
+            .header("Copilot-Integration-Id", "vscode-chat")
+            .header("Openai-Intent", "conversation-panel")
+            .header("User-Agent", "CopilotRewrite/0.3.0")
+            .json(&request)
+            .send()
+            .await
+            .context("Failed to send request to Copilot API")?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let error_body = response.text().await.unwrap_or_default();
+            if status.as_u16() == 401 {
+                warn!("Copilot token expired, clearing cache...");
+                *self.cached_token.lock() = None;
+            }
+            anyhow::bail!(
+                "Copilot API returned HTTP {}: {}",
+                status.as_u16(),
+                error_body
+            );
+        }
+
+        // Parse SSE stream response (same as process())
+        let body = response
+            .text()
+            .await
+            .context("Failed to read response body")?;
+        let mut result = String::new();
+
+        for line in body.lines() {
+            let line = line.trim();
+            if let Some(data) = line.strip_prefix("data: ") {
+                if data == "[DONE]" {
+                    break;
+                }
+                if let Ok(chunk) = serde_json::from_str::<ChatCompletionResponse>(data) {
+                    if let Some(choice) = chunk.choices.first() {
+                        if let Some(ref delta) = choice.delta {
+                            if let Some(ref content) = delta.content {
+                                result.push_str(content);
+                            }
+                        }
+                        if let Some(ref message) = choice.message {
+                            result.push_str(&message.content);
+                        }
+                    }
+                }
+            }
+        }
+
+        info!("Read Mode: Copilot API returned {} chars", result.len());
 
         Ok(result.trim().to_string())
     }
