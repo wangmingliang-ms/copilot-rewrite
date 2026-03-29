@@ -7,7 +7,7 @@ use log::info;
 use std::sync::Arc;
 use tauri::{
     image::Image as TauriImage,
-    menu::{IconMenuItemBuilder, MenuBuilder, MenuItemBuilder},
+    menu::{IconMenuItemBuilder, MenuBuilder},
     tray::TrayIconBuilder,
     AppHandle, Manager,
 };

@@ -241,19 +241,12 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
                                 let source_hwnd = unsafe { GetForegroundWindow().0 as isize };
                                 let (app_name, window_title) = get_window_context(source_hwnd);
 
-                                // Get bounding rect of the focused input element
-                                // Only use input_rect for Write Mode (is_input=true)
-                                // For Read Mode, we use mouse position instead
-                                let input_rect = if last_is_input {
-                                    if let Some(ref uia_engine) = uia {
-                                        uia_engine
-                                            .get_focused_element_rect()
-                                            .map(|r| (r.x, r.y, r.width, r.height))
-                                    } else {
-                                        None
-                                    }
+                                // Get bounding rect of selected text for popup width sizing
+                                let input_rect = if let Some(ref uia_engine) = uia {
+                                    uia_engine
+                                        .get_selection_rect()
+                                        .map(|r| (r.x, r.y, r.width, r.height))
                                 } else {
-                                    // Read Mode: no input_rect → popup will use mouse position
                                     None
                                 };
 
@@ -322,8 +315,11 @@ fn show_popup(app_handle: AppHandle, state: &Arc<AppState>, info: SelectionInfo)
     // Store the current selection in state
     *state.current_selection.lock() = Some(info.clone());
 
-    // Show popup icon at cursor position (with input rect for smart positioning)
-    overlay::show_popup_icon(&app_handle, info.mouse_x, info.mouse_y, info.input_rect);
+    // Read popup icon position preference from settings
+    let icon_position = state.settings.lock().popup_icon_position.clone();
+
+    // Show popup icon at selection position (with input rect for smart positioning)
+    overlay::show_popup_icon(&app_handle, info.mouse_x, info.mouse_y, info.input_rect, &icon_position);
 
     // Emit event to frontend with the selection info
     if let Err(e) = app_handle.emit("selection-detected", &info) {

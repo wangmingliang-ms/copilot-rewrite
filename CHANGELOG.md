@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.8.0] - 2026-03-29
+
+### ✨ Features
+
+- **Splash screen** — A branded launch screen now appears when the app starts, confirming it's loading. Auto-dismisses with a smooth fade-out after 1.5 seconds.
+- **Popup icon position setting** — Choose where the popup icon appears relative to selected text: Top Left, Top Center (default), Top Right, Bottom Left, Bottom Center, or Bottom Right. Visual position picker in Settings.
+- **Copy toast notification** — A "✓ Copied" toast briefly appears after copying text, confirming the action.
+
+### 🔧 Improvements
+
+- **Settings redesigned as Read/Write Assistants** — Settings now organized into 📖 Read Assistant and ✍️ Write Assistant, each with their own Target Language. Read Assistant translates to your mother tongue; Write Assistant translates to your output language. Beast Mode is now a sub-setting under Write Assistant.
+- **Smart popup sizing** — Popup width now matches the width of your selected text (minimum 400px), instead of a fixed width.
+- **Smart popup positioning** — Expanded popup appears directly above or below your selected text (based on available screen space), aligned with the selection — not at the mouse cursor.
+- **Smarter vocabulary display** — Vocabulary highlights only appear when reading foreign language text. Selecting text in your native language skips vocabulary (you already know those words).
+- **Update notification** — Update detection now auto-opens the Settings window so you can see the update banner immediately.
+
 ## [0.7.0] - 2026-03-29
 
 ### ✨ Features

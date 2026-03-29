@@ -379,6 +379,7 @@ const Popup: FC<PopupProps> = ({ selection }) => {
   }, [selection, refreshSettings, readModeSettings]);
 
   const [refreshing, setRefreshing] = useState(false);
+  const [copyToast, setCopyToast] = useState(false);
   const refreshingRef = useRef(false);
 
   const handleRefresh = useCallback(async () => {
@@ -453,6 +454,8 @@ const Popup: FC<PopupProps> = ({ selection }) => {
         await invoke("log_action", { action: `Copy clicked — mode=markdown, text_len=${outputText.length}` }).catch(() => {});
         await invoke("copy_to_clipboard", { text: outputText });
       }
+      setCopyToast(true);
+      setTimeout(() => setCopyToast(false), 1500);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -980,6 +983,12 @@ const Popup: FC<PopupProps> = ({ selection }) => {
           </div>
         </div>
       </div>
+      {/* Copy success toast */}
+      {copyToast && (
+        <div className="absolute top-3 left-1/2 -translate-x-1/2 px-3 py-1.5 bg-gray-800 dark:bg-gray-200 text-white dark:text-gray-800 text-xs font-medium rounded-lg shadow-lg animate-fade-in-out z-50">
+          ✓ Copied
+        </div>
+      )}
     </div>
   );
 };

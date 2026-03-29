@@ -328,6 +328,66 @@ impl UiaEngine {
         }
     }
 
+    /// Get the bounding rectangle of the currently selected text range.
+    /// Returns the union of all bounding rectangles (multi-line selections produce multiple rects).
+    /// Coordinates are in physical pixels.
+    pub fn get_selection_rect(&self) -> Option<ElementRect> {
+        // Try cached element first, then focused element
+        let element = self.cached_element.borrow().clone()
+            .or_else(|| self.get_focused_element().ok());
+        let element = element?;
+        unsafe {
+            let pattern_obj = element.GetCurrentPattern(UIA_TextPatternId).ok()?;
+            let text_pattern: IUIAutomationTextPattern = pattern_obj.cast().ok()?;
+            let selection = text_pattern.GetSelection().ok()?;
+            if selection.Length().unwrap_or(0) == 0 {
+                return None;
+            }
+            let range = selection.GetElement(0).ok()?;
+            let rects_sa = range.GetBoundingRectangles().ok()?;
+
+            // SAFEARRAY of doubles: each rect is [x, y, width, height] (4 doubles per rect)
+            let mut data_ptr: *mut core::ffi::c_void = core::ptr::null_mut();
+            windows::Win32::System::Ole::SafeArrayAccessData(rects_sa, &mut data_ptr).ok()?;
+            let num_elements = {
+                let lower = windows::Win32::System::Ole::SafeArrayGetLBound(rects_sa, 1).unwrap_or(0);
+                let upper = windows::Win32::System::Ole::SafeArrayGetUBound(rects_sa, 1).unwrap_or(-1);
+                (upper - lower + 1) as usize
+            };
+            let doubles = core::slice::from_raw_parts(data_ptr as *const f64, num_elements);
+
+            // Compute the union bounding box of all rectangles
+            let mut min_x = f64::MAX;
+            let mut min_y = f64::MAX;
+            let mut max_x = f64::MIN;
+            let mut max_y = f64::MIN;
+            for chunk in doubles.chunks(4) {
+                if chunk.len() == 4 {
+                    let (rx, ry, rw, rh): (f64, f64, f64, f64) = (chunk[0], chunk[1], chunk[2], chunk[3]);
+                    if rw > 0.0 && rh > 0.0 {
+                        min_x = min_x.min(rx);
+                        min_y = min_y.min(ry);
+                        max_x = max_x.max(rx + rw);
+                        max_y = max_y.max(ry + rh);
+                    }
+                }
+            }
+
+            let _ = windows::Win32::System::Ole::SafeArrayUnaccessData(rects_sa);
+
+            if max_x > min_x && max_y > min_y {
+                Some(ElementRect {
+                    x: min_x as i32,
+                    y: min_y as i32,
+                    width: (max_x - min_x) as i32,
+                    height: (max_y - min_y) as i32,
+                })
+            } else {
+                None
+            }
+        }
+    }
+
     /// Try to get selected text from the focused element using TextPattern
     /// Only returns text if the focused element is an editable control
     pub fn get_selected_text(&self) -> Result<Option<String>> {

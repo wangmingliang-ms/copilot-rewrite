@@ -95,25 +95,38 @@ pub fn setup_popup_window(app_handle: &AppHandle) {
     }
 }
 
-/// Show popup at icon size (48×48) near cursor.
+/// Show popup at icon size (48×48) near selected text (or mouse cursor fallback).
 /// This is the ONLY place that calculates position — all other states reuse it.
+/// input_rect contains the selected text bounding rect (physical pixels) for positioning and sizing.
+/// icon_position: "top-center", "top-left", "top-right", "bottom-center", "bottom-left", "bottom-right"
 pub fn show_popup_icon(
     app_handle: &AppHandle,
     mouse_x: i32,
     mouse_y: i32,
     input_rect: Option<(i32, i32, i32, i32)>,
+    icon_position: &str,
 ) {
     if let Some(window) = app_handle.get_webview_window("popup") {
         let scale = get_scale_at(mouse_x, mouse_y);
         let (screen_w, screen_h, _) = get_primary_screen_info(app_handle);
         let icon_logical = ICON_SIZE / scale;
 
-        // If we have the input element rect, position icon at top-right of input
-        // Otherwise fall back to mouse position
-        let (mut x, mut y) = if let Some((rx, ry, rw, _rh)) = input_rect {
-            let lx = (rx + rw) as f64 / scale - icon_logical - 4.0;
-            let ly = ry as f64 / scale - icon_logical - 4.0;
-            (lx, ly)
+        // Position icon relative to selection bounding rect, or fallback to mouse
+        let (mut x, mut y) = if let Some((sx, sy, sw, sh)) = input_rect {
+            let sel_x = sx as f64 / scale;
+            let sel_y = sy as f64 / scale;
+            let sel_w = sw as f64 / scale;
+            let sel_h = sh as f64 / scale;
+            let gap = 4.0; // pixels gap between selection and icon
+
+            match icon_position {
+                "top-left" => (sel_x, sel_y - icon_logical - gap),
+                "top-right" => (sel_x + sel_w - icon_logical, sel_y - icon_logical - gap),
+                "bottom-left" => (sel_x, sel_y + sel_h + gap),
+                "bottom-right" => (sel_x + sel_w - icon_logical, sel_y + sel_h + gap),
+                "bottom-center" => (sel_x + sel_w / 2.0 - icon_logical / 2.0, sel_y + sel_h + gap),
+                _ /* top-center */ => (sel_x + sel_w / 2.0 - icon_logical / 2.0, sel_y - icon_logical - gap),
+            }
         } else {
             let logical_x = mouse_x as f64 / scale;
             let logical_y = mouse_y as f64 / scale;
@@ -164,54 +177,68 @@ pub fn expand_popup(app_handle: &AppHandle, text: &str) {
         let est_text = extract_translated(text).unwrap_or(text);
         let height = estimate_height(est_text);
         let (screen_w, screen_h, _) = get_primary_screen_info(app_handle);
-        let stored_input = *INPUT_RECT.lock();
 
-        let (x, y, w_logical) = if let Some((rx, ry, rw, rh)) = stored_input {
-            // We have the input element rect — align popup to input width
-            let scale = get_scale_at(rx, ry);
-            let input_x = rx as f64 / scale;
-            let input_y = ry as f64 / scale;
-            let input_w = (rw as f64 / scale).max(200.0);
-            let input_h = rh as f64 / scale;
+        let (x, y, w_logical) = {
+            let stored_input = *INPUT_RECT.lock();
 
-            // Position popup above input with 12px gap (shadow clearance)
-            let mut py = input_y - height - 12.0;
-            if py < 0.0 {
-                // Not enough room above — go below the input (with gap)
-                py = input_y + input_h + 12.0;
-            }
-            // If still overflows bottom, clamp
-            if py + height > screen_h {
-                py = screen_h - height - 8.0;
-            }
+            // Determine width: use selection width if available (clamped), otherwise default
+            let w = if let Some((_rx, ry, rw, _rh)) = stored_input {
+                let scale = get_scale_at(0, ry);
+                let elem_w = rw as f64 / scale;
+                elem_w.max(EXPANDED_WIDTH).min(screen_w - 16.0)
+            } else {
+                EXPANDED_WIDTH
+            };
 
-            let mut px = input_x;
-            if px + input_w > screen_w {
-                px = screen_w - input_w - 8.0;
-            }
-            if px < 0.0 {
-                px = 8.0;
-            }
+            // Position: prefer placing relative to selection rect, fallback to stored popup pos
+            if let Some((sx, sy, _sw, sh)) = stored_input {
+                let scale = get_scale_at(sx, sy);
+                let sel_x = sx as f64 / scale;
+                let sel_y = sy as f64 / scale;
+                let sel_h = sh as f64 / scale;
 
-            (px, py, input_w)
-        } else {
-            // No input rect — use stored popup position and default width
-            let (stored_x, stored_y) = *POPUP_POS.lock();
-            let mut x = stored_x;
-            let mut y = stored_y;
-            if x + EXPANDED_WIDTH > screen_w {
-                x = screen_w - EXPANDED_WIDTH - 8.0;
+                // Try above selection first (12px gap)
+                let mut py = sel_y - height - 12.0;
+                let mut px = sel_x;
+
+                if py < 0.0 {
+                    // Not enough room above — place below selection
+                    py = sel_y + sel_h + 12.0;
+                }
+                // If below also overflows, clamp to screen bottom
+                if py + height > screen_h {
+                    py = screen_h - height - 8.0;
+                }
+                if px + w > screen_w {
+                    px = screen_w - w - 8.0;
+                }
+                if px < 0.0 {
+                    px = 8.0;
+                }
+                if py < 0.0 {
+                    py = 8.0;
+                }
+
+                (px, py, w)
+            } else {
+                // No selection rect — use stored popup position
+                let (stored_x, stored_y) = *POPUP_POS.lock();
+                let mut x = stored_x;
+                let mut y = stored_y;
+                if x + w > screen_w {
+                    x = screen_w - w - 8.0;
+                }
+                if y + height > screen_h {
+                    y = screen_h - height - 8.0;
+                }
+                if x < 0.0 {
+                    x = 8.0;
+                }
+                if y < 0.0 {
+                    y = 8.0;
+                }
+                (x, y, w)
             }
-            if y + height > screen_h {
-                y = screen_h - height - 8.0;
-            }
-            if x < 0.0 {
-                x = 8.0;
-            }
-            if y < 0.0 {
-                y = 8.0;
-            }
-            (x, y, EXPANDED_WIDTH)
         };
 
         // Remove WS_EX_NOACTIVATE so buttons are clickable
@@ -370,10 +397,11 @@ pub fn resize_popup_to_content(app_handle: &AppHandle, content_height: f64) {
         let stored_input = *INPUT_RECT.lock();
         let bottom = *POPUP_BOTTOM.lock();
 
-        // Determine width (same logic as expand_popup)
-        let w_logical = if let Some((rx, ry, rw, _)) = stored_input {
-            let scale = get_scale_at(rx, ry);
-            (rw as f64 / scale).max(200.0)
+        // Determine width: use element width if available (clamped), otherwise default
+        let w_logical = if let Some((_rx, ry, rw, _)) = stored_input {
+            let scale = get_scale_at(0, ry);
+            let elem_w = rw as f64 / scale;
+            elem_w.max(EXPANDED_WIDTH).min(1920.0)
         } else {
             EXPANDED_WIDTH
         };

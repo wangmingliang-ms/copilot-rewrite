@@ -241,7 +241,8 @@ Before producing output, silently analyze:
 
 ## Mode "complex" — Sentence with difficult/specialized vocabulary
 - Provide a clean translation into the output language
-- Highlight and explain the complex words/phrases: meaning, usage, nuance (in {native_language})
+- **ONLY if the source text is NOT in {native_language}**: Highlight and explain the complex words/phrases: meaning, usage, nuance (in {native_language}). This helps the user learn foreign vocabulary.
+- **If the source text IS in {native_language}**: Do NOT include vocabulary — the user already knows these words. Just translate.
 - Silently correct any errors
 
 ## Mode "long" — Long passage (multiple sentences, paragraphs, or > ~50 words)
@@ -258,8 +259,11 @@ For "word" mode:
 For "simple" mode:
 {{"mode": "simple", "translation": "translated sentence"}}
 
-For "complex" mode:
+For "complex" mode (source is foreign language — include vocabulary):
 {{"mode": "complex", "translation": "full translated sentence", "vocabulary": [{{"term": "original word", "meaning": "explanation in {native_language}", "usage": "how it's typically used"}}]}}
+
+For "complex" mode (source is {native_language} — NO vocabulary):
+{{"mode": "complex", "translation": "full translated sentence"}}
 
 For "long" mode:
 {{"mode": "long", "summary": "concise summary in {native_language}", "translation": "full translation in output language"}}

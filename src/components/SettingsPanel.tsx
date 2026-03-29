@@ -32,6 +32,7 @@ interface Settings {
   native_language: string;
   read_mode_enabled: boolean;
   read_mode_sub: string;
+  popup_icon_position: string;
 }
 
 const LANGUAGES = [
@@ -306,106 +307,136 @@ const SettingsPanel: FC<{ themeCtx: ThemeCtx }> = ({ themeCtx }) => {
           <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-1">Only models that support chat completions are listed.</p>
         </section>
 
-        {/* Language Section */}
+        {/* ── Read Assistant ── */}
         <section className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 px-4 py-3 mb-3">
-          <h2 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase mb-1.5">Target Language</h2>
-          <select
-            value={settings.target_language}
-            onChange={(e) => {
-              invoke("log_action", { action: `Language changed to: ${e.target.value}` }).catch(() => {});
-              setSettings({ ...settings, target_language: e.target.value });
-            }}
-            className="w-full rounded border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 px-2.5 py-1.5 text-sm focus:border-copilot-blue focus:outline-none focus:ring-1 focus:ring-copilot-blue"
-          >
-            {LANGUAGES.map((lang) => <option key={lang} value={lang}>{lang}</option>)}
-          </select>
-        </section>
-
-        {/* Native Language Section */}
-        <section className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 px-4 py-3 mb-3">
-          <h2 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase mb-1.5">Native Language</h2>
-          <select
-            value={settings.native_language}
-            onChange={(e) => {
-              invoke("log_action", { action: `Native language changed to: ${e.target.value}` }).catch(() => {});
-              setSettings({ ...settings, native_language: e.target.value });
-            }}
-            className="w-full rounded border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 px-2.5 py-1.5 text-sm focus:border-copilot-blue focus:outline-none focus:ring-1 focus:ring-copilot-blue"
-          >
-            {LANGUAGES.map((lang) => <option key={lang} value={lang}>{lang}</option>)}
-          </select>
-          <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-1">Your mother tongue. Read Mode translates foreign text to this language.</p>
-        </section>
-
-        {/* Read Mode Section */}
-        <section className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 px-4 py-3 mb-3">
-          <label className="flex items-center justify-between cursor-pointer mb-2">
-            <div>
-              <span className="text-sm font-medium text-gray-700 dark:text-gray-300">📖 Read Mode</span>
-              <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">Translate text selected in non-input areas (webpages, PDFs, etc.)</p>
-            </div>
+          <label className="flex items-center justify-between cursor-pointer">
+            <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">📖 Read Assistant</span>
             <input
               type="checkbox"
               checked={settings.read_mode_enabled}
               onChange={(e) => {
-                invoke("log_action", { action: `Read mode ${e.target.checked ? "enabled" : "disabled"}` }).catch(() => {});
+                invoke("log_action", { action: `Read assistant ${e.target.checked ? "enabled" : "disabled"}` }).catch(() => {});
                 setSettings({ ...settings, read_mode_enabled: e.target.checked });
               }}
               className="w-4 h-4 rounded border-gray-300 text-copilot-blue focus:ring-copilot-blue ml-3 flex-shrink-0"
             />
           </label>
-          {settings.read_mode_enabled && (
-            <div className="mt-2 pt-2 border-t border-gray-100 dark:border-gray-700">
-              <p className="text-xs text-gray-500 dark:text-gray-400 mb-1.5">Sub-mode</p>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => {
-                    invoke("log_action", { action: "Read mode sub changed to: translate_summarize" }).catch(() => {});
-                    setSettings({ ...settings, read_mode_sub: "translate_summarize" });
-                  }}
-                  className={`flex-1 rounded-lg px-3 py-2 text-xs font-medium transition-colors ${
-                    settings.read_mode_sub === "translate_summarize"
-                      ? "bg-copilot-blue text-white"
-                      : "bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600"
-                  }`}
-                >
-                  Translate + Summarize
-                </button>
-                <button
-                  onClick={() => {
-                    invoke("log_action", { action: "Read mode sub changed to: simple_translate" }).catch(() => {});
-                    setSettings({ ...settings, read_mode_sub: "simple_translate" });
-                  }}
-                  className={`flex-1 rounded-lg px-3 py-2 text-xs font-medium transition-colors ${
-                    settings.read_mode_sub === "simple_translate"
-                      ? "bg-copilot-blue text-white"
-                      : "bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600"
-                  }`}
-                >
-                  Simple Translate
-                </button>
-              </div>
+          <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-1 mb-3">Select text on webpages, PDFs, or messages to translate and understand. AI auto-selects the best mode.</p>
+
+          <div className="space-y-2.5">
+            <div>
+              <label className="text-[11px] font-medium text-gray-500 dark:text-gray-400">Target Language</label>
+              <select
+                value={settings.native_language}
+                onChange={(e) => {
+                  invoke("log_action", { action: `Read assistant target language changed to: ${e.target.value}` }).catch(() => {});
+                  setSettings({ ...settings, native_language: e.target.value });
+                }}
+                className="w-full mt-0.5 rounded border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-gray-100 px-2.5 py-1.5 text-sm focus:border-copilot-blue focus:outline-none focus:ring-1 focus:ring-copilot-blue"
+              >
+                {LANGUAGES.map((lang) => <option key={lang} value={lang}>{lang}</option>)}
+              </select>
+              <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5">Your mother tongue. Translations, explanations, and vocabulary notes appear in this language.</p>
             </div>
-          )}
+          </div>
         </section>
 
-        {/* Beast Mode */}
+        {/* ── Write Assistant ── */}
         <section className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 px-4 py-3 mb-3">
-          <label className="flex items-center justify-between cursor-pointer">
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">✍️ Write Assistant</span>
+          </div>
+          <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5 mb-3">Select text in input fields to translate, polish, and rewrite. Always on.</p>
+
+          <div className="space-y-2.5">
             <div>
-              <span className="text-sm font-medium text-gray-700 dark:text-gray-300">🐺 Beast Mode</span>
-              <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">Full creative rewrite — examples, restructuring, best version</p>
+              <label className="text-[11px] font-medium text-gray-500 dark:text-gray-400">Target Language</label>
+              <select
+                value={settings.target_language}
+                onChange={(e) => {
+                  invoke("log_action", { action: `Write assistant target language changed to: ${e.target.value}` }).catch(() => {});
+                  setSettings({ ...settings, target_language: e.target.value });
+                }}
+                className="w-full mt-0.5 rounded border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-gray-100 px-2.5 py-1.5 text-sm focus:border-copilot-blue focus:outline-none focus:ring-1 focus:ring-copilot-blue"
+              >
+                {LANGUAGES.map((lang) => <option key={lang} value={lang}>{lang}</option>)}
+              </select>
+              <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5">Your translated output language. Final polished text will be in this language.</p>
             </div>
-            <input
-              type="checkbox"
-              checked={settings.beast_mode}
-              onChange={(e) => {
-              invoke("log_action", { action: `Beast mode ${e.target.checked ? "enabled" : "disabled"}` }).catch(() => {});
-              setSettings({ ...settings, beast_mode: e.target.checked });
-            }}
-              className="w-4 h-4 rounded border-gray-300 text-copilot-blue focus:ring-copilot-blue ml-3 flex-shrink-0"
-            />
-          </label>
+
+            <label className="flex items-center justify-between cursor-pointer pt-1 border-t border-gray-100 dark:border-gray-700">
+              <div>
+                <span className="text-xs font-medium text-gray-600 dark:text-gray-400">🐺 Beast Mode</span>
+                <p className="text-[10px] text-gray-400 dark:text-gray-500">Full creative rewrite — restructure, add examples, best version</p>
+              </div>
+              <input
+                type="checkbox"
+                checked={settings.beast_mode}
+                onChange={(e) => {
+                  invoke("log_action", { action: `Beast mode ${e.target.checked ? "enabled" : "disabled"}` }).catch(() => {});
+                  setSettings({ ...settings, beast_mode: e.target.checked });
+                }}
+                className="w-4 h-4 rounded border-gray-300 text-copilot-blue focus:ring-copilot-blue ml-3 flex-shrink-0"
+              />
+            </label>
+          </div>
+        </section>
+
+        {/* ── Popup Icon Position ── */}
+        <section className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 px-4 py-3 mb-3">
+          <h2 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase mb-2">Popup Icon Position</h2>
+          <p className="text-[10px] text-gray-400 dark:text-gray-500 mb-2">Where the icon appears relative to selected text.</p>
+          <div className="flex items-center gap-4">
+            {/* Visual position picker */}
+            <div className="relative w-[120px] h-[80px] flex-shrink-0">
+              {/* Selected text representation */}
+              <div className="absolute inset-x-3 top-1/2 -translate-y-1/2 h-[20px] rounded bg-blue-100 dark:bg-blue-900/40 border border-blue-200 dark:border-blue-800 flex items-center justify-center">
+                <span className="text-[8px] text-blue-400 dark:text-blue-500 font-medium tracking-wider">SELECTED TEXT</span>
+              </div>
+              {/* Position dots */}
+              {([
+                { value: "top-left", style: "top-[6px] left-3" },
+                { value: "top-center", style: "top-[6px] left-1/2 -translate-x-1/2" },
+                { value: "top-right", style: "top-[6px] right-3" },
+                { value: "bottom-left", style: "bottom-[6px] left-3" },
+                { value: "bottom-center", style: "bottom-[6px] left-1/2 -translate-x-1/2" },
+                { value: "bottom-right", style: "bottom-[6px] right-3" },
+              ] as const).map((pos) => (
+                <button
+                  key={pos.value}
+                  onClick={() => {
+                    invoke("log_action", { action: `Popup icon position changed to: ${pos.value}` }).catch(() => {});
+                    setSettings({ ...settings, popup_icon_position: pos.value });
+                  }}
+                  className={`absolute ${pos.style} w-4 h-4 rounded-full border-2 transition-all duration-200 ${
+                    settings.popup_icon_position === pos.value
+                      ? "bg-copilot-blue border-copilot-blue scale-110 shadow-md shadow-blue-300/50 dark:shadow-blue-500/30"
+                      : "bg-white dark:bg-gray-600 border-gray-300 dark:border-gray-500 hover:border-copilot-blue hover:scale-105"
+                  }`}
+                  title={pos.value.replace("-", " ")}
+                />
+              ))}
+            </div>
+            {/* Current selection label */}
+            <div className="flex items-center gap-1.5 text-xs">
+              <svg className="w-4 h-4 text-copilot-blue" viewBox="0 0 16 16" fill="currentColor">
+                {settings.popup_icon_position === "top-left" && <path d="M2 2h5v1.5H4.06l4.72 4.72-1.06 1.06L3 4.56V7H1.5V2z" />}
+                {settings.popup_icon_position === "top-center" && <path d="M8 2L4 6h3v6h2V6h3z" />}
+                {settings.popup_icon_position === "top-right" && <path d="M9 2h5v5h-1.5V4.06l-4.72 4.72-1.06-1.06L11.44 3H9V2z" />}
+                {settings.popup_icon_position === "bottom-left" && <path d="M2 14h5v-1.5H4.06l4.72-4.72-1.06-1.06L3 11.44V9H1.5v5z" />}
+                {settings.popup_icon_position === "bottom-center" && <path d="M8 14l4-4h-3V4H7v6H4z" />}
+                {settings.popup_icon_position === "bottom-right" && <path d="M9 14h5V9h-1.5v2.44l-4.72-4.72-1.06 1.06L11.44 12.5H9V14z" />}
+              </svg>
+              <span className="font-medium text-gray-700 dark:text-gray-300">{
+                settings.popup_icon_position === "top-left" ? "Top Left" :
+                settings.popup_icon_position === "top-center" ? "Top Center" :
+                settings.popup_icon_position === "top-right" ? "Top Right" :
+                settings.popup_icon_position === "bottom-left" ? "Bottom Left" :
+                settings.popup_icon_position === "bottom-center" ? "Bottom Center" :
+                "Bottom Right"
+              }</span>
+            </div>
+          </div>
         </section>
 
         {/* General */}

@@ -137,6 +137,10 @@ pub struct Settings {
     /// Read Mode sub-mode: "translate_summarize" or "simple_translate"
     #[serde(default = "default_read_mode_sub")]
     pub read_mode_sub: String,
+    /// Popup icon position relative to selected text bounding rect
+    /// Values: "top-center", "top-left", "top-right", "bottom-center", "bottom-left", "bottom-right"
+    #[serde(default = "default_popup_icon_position")]
+    pub popup_icon_position: String,
 }
 
 fn default_replace_mode() -> String {
@@ -153,6 +157,10 @@ fn default_native_language() -> String {
 
 fn default_read_mode_sub() -> String {
     "translate_summarize".to_string()
+}
+
+fn default_popup_icon_position() -> String {
+    "top-center".to_string()
 }
 
 impl Settings {
@@ -211,6 +219,7 @@ impl Default for Settings {
             native_language: "Chinese (Simplified)".to_string(),
             read_mode_enabled: true,
             read_mode_sub: "translate_summarize".to_string(),
+            popup_icon_position: "top-center".to_string(),
         }
     }
 }
@@ -904,6 +913,31 @@ pub fn run() {
 
             info!("Selection engine started");
 
+            // Inject version into splash screen
+            if let Some(splash) = app_handle.get_webview_window("splashscreen") {
+                let version = app.package_info().version.to_string();
+                let _ = splash.eval(&format!(
+                    "document.getElementById('version').textContent = 'v{}'",
+                    version
+                ));
+            }
+
+            // Close splash screen after a brief display (min 1.5s for branding)
+            let splash_handle = app_handle.clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+                if let Some(splash) = splash_handle.get_webview_window("splashscreen") {
+                    // Trigger CSS fade-out animation
+                    let _ = splash.eval(
+                        "document.getElementById('splash').classList.add('fade-out');"
+                    );
+                    // Wait for animation to complete, then close
+                    tokio::time::sleep(std::time::Duration::from_millis(350)).await;
+                    let _ = splash.close();
+                    info!("Splash screen closed");
+                }
+            });
+
             // Set up auto-start if configured
             let settings = state.settings.lock().clone();
             if settings.auto_start {
@@ -933,6 +967,13 @@ pub fn run() {
                                 new_version
                             ))
                             .show();
+
+                        // Auto-open Settings window so user can update immediately
+                        // (Windows toast notifications don't support reliable click callbacks)
+                        if let Some(settings_win) = update_handle.get_webview_window("settings") {
+                            let _ = settings_win.show();
+                            let _ = settings_win.set_focus();
+                        }
                     }
                     Ok(None) => {
                         info!("App is up to date");
