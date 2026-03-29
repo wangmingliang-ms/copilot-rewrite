@@ -4,30 +4,18 @@
 
 ### ✨ Features
 
-- **Read Mode** — Select non-input text (messages, articles, docs) for instant translation and explanation. AI auto-detects content type and applies one of four smart modes: 📖 Word (dictionary-style), 💬 Simple (short phrases), 📚 Complex (paragraphs), 📋 Summary (long text). (`3de86fe`)
-- **UIA TextSelectionChanged event handler** — Zero-polling text selection detection via manual COM vtable implementation (bypasses `#[implement]` macro version conflict with Tauri). Fires when any app reports a selection change, enabling touch and remote desktop support. (`3de86fe`)
-- **Smart language direction** — AI auto-detects source language and translates to the appropriate target. No manual language toggle needed in Read Mode. (`3de86fe`)
-- **Read Mode settings** — Toggle Read Mode on/off, configure native and target languages in Settings panel. (`3de86fe`)
-
-### 🐛 Bug Fixes
-
-- **Teams native-edit-context misdetected as Write Mode** — All elements (including Edit type 50004) now check `ValuePattern.CurrentIsReadOnly()` first. ReadOnly elements correctly trigger Read Mode. (`3de86fe`)
-- **Browser Document false positive** — Non-Teams Document elements (control_type=50030) checked via `CurrentIsReadOnly()` to prevent false Write Mode detection. (`3de86fe`)
-- **Popup icon position in Read Mode** — Popup follows mouse position instead of anchoring to input element's top-right corner. (`3de86fe`)
-- **Spinner delay on icon click** — `setState("spinning")` moved to execute immediately before async auth/settings checks, eliminating visible delay. (`3de86fe`)
-- **Popup not dismissing on click elsewhere** — Event-driven selection clear signal (`TextSelectionChanged` with no selection) now immediately clears cached state and hides popup. Also detects foreground window changes. (`3de86fe`)
-- **Write Mode regression from event handler** — Event strategy demoted to clear-signal-only role; `is_input` determination delegated to `GetFocusedElement` which correctly identifies input containers. (`3de86fe`)
+- **Read Mode** — Select any non-input text (messages, articles, docs) for instant translation and explanation. AI auto-detects content type and applies one of four smart modes: 📖 Word (dictionary-style definition + examples), 💬 Simple (clean translation), 📚 Complex (translation + vocabulary highlights), 📋 Summary (key points + collapsible full translation).
+- **Smart language direction** — AI auto-detects source language and translates to the appropriate target. Select English → get Chinese translation; select Chinese → get English translation. No manual toggle needed.
+- **Read Mode settings** — New Settings section to toggle Read Mode on/off and configure native/target languages.
 
 ### ⚡ Performance
 
-- **Detection strategy priority optimization** — Cached element check promoted to highest priority (zero-cost re-check), reducing redundant cross-process COM calls during continuous polling. Strategy order: Event clear → Cached → GetFocusedElement → ElementFromPoint → TreeWalker. (`3de86fe`)
-- **Focused element caching** — `GetFocusedElement` results now cached for subsequent poll cycles, avoiding repeated COM calls for the same active selection. (`3de86fe`)
+- **Event-driven text selection detection** — Selection changes are now detected via UIA `TextSelectionChanged` events instead of pure polling, resulting in faster response times and lower CPU usage.
 
-### 🔧 Write Mode Improvements
+### 🔧 Improvements
 
-- **Language direction fixed** — `reorganized` output always uses native language (Chinese), `translated` output always uses target language (English). Previously inconsistent. (`3de86fe`)
-- **Dynamic fold tab labels** — Collapse labels now show `{native_language} (Polished)` dynamically instead of hardcoded text. (`3de86fe`)
-- **Read Mode Markdown formatting** — Full Markdown arsenal (bold, code, tables, blockquotes, emoji) and correction annotations (`[⚠️ Note: ...]`) aligned with Beast Mode capabilities. (`3de86fe`)
+- **Write Mode language direction** — `Polished` output now consistently uses your native language, `Translated` output consistently uses your target language. Previously the direction could be inconsistent depending on input.
+- **Dynamic fold tab labels** — Collapse labels now show your configured native language (e.g. "Chinese (Polished)") instead of hardcoded text.
 
 ## [0.6.0] - 2026-03-27
 
