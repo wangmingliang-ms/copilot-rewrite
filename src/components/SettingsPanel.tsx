@@ -29,6 +29,9 @@ interface Settings {
   beast_mode: boolean;
   model: string;
   theme: string;
+  native_language: string;
+  read_mode_enabled: boolean;
+  read_mode_sub: string;
 }
 
 const LANGUAGES = [
@@ -55,6 +58,9 @@ const SettingsPanel: FC<{ themeCtx: ThemeCtx }> = ({ themeCtx }) => {
     beast_mode: false,
     model: "claude-sonnet-4",
     theme: "system",
+    native_language: "Chinese (Simplified)",
+    read_mode_enabled: true,
+    read_mode_sub: "translate_summarize",
   });
   const [loginStep, setLoginStep] = useState<"idle" | "loading" | "code" | "waiting" | "error">("idle");
   const [deviceCode, setDeviceCode] = useState<DeviceCodeInfo | null>(null);
@@ -313,6 +319,74 @@ const SettingsPanel: FC<{ themeCtx: ThemeCtx }> = ({ themeCtx }) => {
           >
             {LANGUAGES.map((lang) => <option key={lang} value={lang}>{lang}</option>)}
           </select>
+        </section>
+
+        {/* Native Language Section */}
+        <section className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 px-4 py-3 mb-3">
+          <h2 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase mb-1.5">Native Language</h2>
+          <select
+            value={settings.native_language}
+            onChange={(e) => {
+              invoke("log_action", { action: `Native language changed to: ${e.target.value}` }).catch(() => {});
+              setSettings({ ...settings, native_language: e.target.value });
+            }}
+            className="w-full rounded border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 px-2.5 py-1.5 text-sm focus:border-copilot-blue focus:outline-none focus:ring-1 focus:ring-copilot-blue"
+          >
+            {LANGUAGES.map((lang) => <option key={lang} value={lang}>{lang}</option>)}
+          </select>
+          <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-1">Your mother tongue. Read Mode translates foreign text to this language.</p>
+        </section>
+
+        {/* Read Mode Section */}
+        <section className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 px-4 py-3 mb-3">
+          <label className="flex items-center justify-between cursor-pointer mb-2">
+            <div>
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-300">📖 Read Mode</span>
+              <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">Translate text selected in non-input areas (webpages, PDFs, etc.)</p>
+            </div>
+            <input
+              type="checkbox"
+              checked={settings.read_mode_enabled}
+              onChange={(e) => {
+                invoke("log_action", { action: `Read mode ${e.target.checked ? "enabled" : "disabled"}` }).catch(() => {});
+                setSettings({ ...settings, read_mode_enabled: e.target.checked });
+              }}
+              className="w-4 h-4 rounded border-gray-300 text-copilot-blue focus:ring-copilot-blue ml-3 flex-shrink-0"
+            />
+          </label>
+          {settings.read_mode_enabled && (
+            <div className="mt-2 pt-2 border-t border-gray-100 dark:border-gray-700">
+              <p className="text-xs text-gray-500 dark:text-gray-400 mb-1.5">Sub-mode</p>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    invoke("log_action", { action: "Read mode sub changed to: translate_summarize" }).catch(() => {});
+                    setSettings({ ...settings, read_mode_sub: "translate_summarize" });
+                  }}
+                  className={`flex-1 rounded-lg px-3 py-2 text-xs font-medium transition-colors ${
+                    settings.read_mode_sub === "translate_summarize"
+                      ? "bg-copilot-blue text-white"
+                      : "bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600"
+                  }`}
+                >
+                  Translate + Summarize
+                </button>
+                <button
+                  onClick={() => {
+                    invoke("log_action", { action: "Read mode sub changed to: simple_translate" }).catch(() => {});
+                    setSettings({ ...settings, read_mode_sub: "simple_translate" });
+                  }}
+                  className={`flex-1 rounded-lg px-3 py-2 text-xs font-medium transition-colors ${
+                    settings.read_mode_sub === "simple_translate"
+                      ? "bg-copilot-blue text-white"
+                      : "bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600"
+                  }`}
+                >
+                  Simple Translate
+                </button>
+              </div>
+            </div>
+          )}
         </section>
 
         {/* Beast Mode */}

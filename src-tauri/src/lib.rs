@@ -86,6 +86,14 @@ pub struct SelectionInfo {
     /// Window title of the source application
     #[serde(default)]
     pub window_title: String,
+    /// Whether the selection is from an input/editable element (Write Mode)
+    /// false = non-input element (Read Mode)
+    #[serde(default = "default_true")]
+    pub is_input_element: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -120,6 +128,15 @@ pub struct Settings {
     /// Theme: "system" (follow OS), "light", or "dark"
     #[serde(default = "default_theme")]
     pub theme: String,
+    /// Native language (user's mother tongue, for Read Mode translation direction)
+    #[serde(default = "default_native_language")]
+    pub native_language: String,
+    /// Whether Read Mode is enabled (triggers on non-input element selections)
+    #[serde(default = "default_true")]
+    pub read_mode_enabled: bool,
+    /// Read Mode sub-mode: "translate_summarize" or "simple_translate"
+    #[serde(default = "default_read_mode_sub")]
+    pub read_mode_sub: String,
 }
 
 fn default_replace_mode() -> String {
@@ -128,6 +145,14 @@ fn default_replace_mode() -> String {
 
 fn default_theme() -> String {
     "system".to_string()
+}
+
+fn default_native_language() -> String {
+    "Chinese (Simplified)".to_string()
+}
+
+fn default_read_mode_sub() -> String {
+    "translate_summarize".to_string()
 }
 
 impl Settings {
@@ -183,6 +208,9 @@ impl Default for Settings {
             model: "claude-sonnet-4".to_string(),
             replace_mode: "rendered".to_string(),
             theme: "system".to_string(),
+            native_language: "Chinese (Simplified)".to_string(),
+            read_mode_enabled: true,
+            read_mode_sub: "translate_summarize".to_string(),
         }
     }
 }
@@ -193,6 +221,8 @@ pub enum RewriteAction {
     Translate,
     Polish,
     TranslateAndPolish,
+    /// Read Mode: translate (and optionally summarize) non-input text
+    ReadModeTranslate,
 }
 
 /// Request from frontend to process text
@@ -202,6 +232,12 @@ pub struct ProcessRequest {
     pub action: RewriteAction,
     #[serde(default)]
     pub is_refresh: bool,
+    /// For ReadModeTranslate: the target language to translate into
+    #[serde(default)]
+    pub read_target_language: String,
+    /// For ReadModeTranslate: whether to include a summary
+    #[serde(default)]
+    pub read_summarize: bool,
 }
 
 /// Response from the Copilot API processing
@@ -233,19 +269,37 @@ async fn process_text(
         return Err("Not logged in. Please click the ⚙ button to log in with GitHub.".to_string());
     }
 
-    let result = state
-        .copilot_client
-        .process(
-            &request.text,
-            &request.action,
-            &settings.target_language,
-            &settings.api_token,
-            &settings.model,
-            settings.beast_mode,
-            "",
-        )
-        .await
-        .map_err(|e| format!("Copilot API error: {}", e))?;
+    let result = match &request.action {
+        RewriteAction::ReadModeTranslate => {
+            state
+                .copilot_client
+                .process_read_mode(
+                    &request.text,
+                    &settings.native_language,
+                    &settings.target_language,
+                    &settings.api_token,
+                    &settings.model,
+                )
+                .await
+                .map_err(|e| format!("Copilot API error: {}", e))?
+        }
+        _ => {
+            state
+                .copilot_client
+                .process(
+                    &request.text,
+                    &request.action,
+                    &settings.native_language,
+                    &settings.target_language,
+                    &settings.api_token,
+                    &settings.model,
+                    settings.beast_mode,
+                    "",
+                )
+                .await
+                .map_err(|e| format!("Copilot API error: {}", e))?
+        }
+    };
 
     Ok(ProcessResponse {
         original: request.text,
@@ -291,15 +345,32 @@ async fn process_and_show_preview(
         .map_err(|e| e.to_string())?;
 
     // Call Copilot API with cancellation support
-    let process_fut = state.copilot_client.process(
-        &request.text,
-        &request.action,
-        &settings.target_language,
-        &settings.api_token,
-        &settings.model,
-        settings.beast_mode,
-        &app_context,
-    );
+    let native_lang = settings.native_language.clone();
+    let target_lang = settings.target_language.clone();
+
+    let process_fut: std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<String>> + Send>> = match &request.action {
+        RewriteAction::ReadModeTranslate => {
+            Box::pin(state.copilot_client.process_read_mode(
+                &request.text,
+                &native_lang,
+                &target_lang,
+                &settings.api_token,
+                &settings.model,
+            ))
+        }
+        _ => {
+            Box::pin(state.copilot_client.process(
+                &request.text,
+                &request.action,
+                &native_lang,
+                &target_lang,
+                &settings.api_token,
+                &settings.model,
+                settings.beast_mode,
+                &app_context,
+            ))
+        }
+    };
 
     tokio::select! {
         result = process_fut => {

@@ -101,6 +101,9 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
     let mut last_selection: Option<String> = None;
     let mut last_change_time = Instant::now();
     let mut debounce_text: Option<String> = None;
+    let mut last_is_input = true;
+    let mut selection_source_hwnd: isize = 0; // HWND that had the selection
+    let mut popup_icon_visible = false; // Track if popup icon (not preview) is shown
     let mut seen_generation = state
         .selection_generation
         .load(std::sync::atomic::Ordering::Relaxed);
@@ -147,23 +150,56 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
 
         // Try to get selected text via UIA
         // Skip if the foreground window is our own popup (e.g., user selecting text in preview)
+        let current_fg = unsafe { GetForegroundWindow().0 as isize };
         let is_own_window = {
-            let fg = unsafe { GetForegroundWindow().0 as isize };
             if let Some(popup) = app_handle.get_webview_window("popup") {
-                popup.hwnd().map(|h| h.0 as isize == fg).unwrap_or(false)
+                popup.hwnd().map(|h| h.0 as isize == current_fg).unwrap_or(false)
             } else {
                 false
             }
         };
 
+        // If popup icon is showing (not preview) and user switched to a different window,
+        // hide the popup. The text selection is likely gone.
+        if popup_icon_visible && !preview_is_visible && !is_own_window
+            && selection_source_hwnd != 0 && current_fg != selection_source_hwnd
+        {
+            info!(
+                "Foreground window changed from source — hiding popup icon"
+            );
+            last_selection = None;
+            debounce_text = None;
+            popup_icon_visible = false;
+            selection_source_hwnd = 0;
+            overlay::hide_popup(&app_handle);
+            *state.current_selection.lock() = None;
+            std::thread::sleep(Duration::from_millis(poll_interval));
+            continue;
+        }
+
         let selected_text = if is_own_window {
-            // Don't poll UIA when our own popup is focused — preserve current state
-            trace!("Skipping UIA poll — own popup is foreground");
+            // Our popup is foreground — don't actively poll UIA.
+            // Instead, re-use the last known selection so the popup stays visible
+            // while the user interacts with it.
+            trace!("Own popup is foreground — preserving current state");
             std::thread::sleep(Duration::from_millis(poll_interval));
             continue;
         } else if let Some(ref uia_engine) = uia {
-            match uia_engine.get_selected_text() {
-                Ok(text) => text,
+            // Use get_selected_text_any to detect text from both input and non-input elements
+            let read_mode_enabled = state.settings.lock().read_mode_enabled;
+            match uia_engine.get_selected_text_any() {
+                Ok((Some(text), is_input)) => {
+                    if is_input {
+                        // Write Mode — always enabled
+                        Some((text, true))
+                    } else if read_mode_enabled {
+                        // Read Mode — only if enabled in settings
+                        Some((text, false))
+                    } else {
+                        None
+                    }
+                }
+                Ok((None, _)) => None,
                 Err(e) => {
                     debug!("UIA selection check error: {}", e);
                     None
@@ -174,7 +210,7 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
         };
 
         // Process the selection
-        if let Some(text) = selected_text {
+        if let Some((text, is_input)) = selected_text {
             // Validate text
             if text.len() >= MIN_TEXT_LENGTH && text.len() <= MAX_TEXT_LENGTH {
                 let text_trimmed = text.trim().to_string();
@@ -189,13 +225,15 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
 
                         if text_changed {
                             info!(
-                                "Selection changed: {} chars (was {} chars)",
+                                "Selection changed: {} chars (was {} chars), is_input={}",
                                 text_trimmed.len(),
-                                last_selection.as_ref().map(|s| s.len()).unwrap_or(0)
+                                last_selection.as_ref().map(|s| s.len()).unwrap_or(0),
+                                is_input
                             );
                             debounce_text = Some(text_trimmed.clone());
                             last_change_time = Instant::now();
                             last_selection = Some(text_trimmed);
+                            last_is_input = is_input;
                         } else if let Some(ref debounced) = debounce_text {
                             if last_change_time.elapsed() >= Duration::from_millis(DEBOUNCE_MS) {
                                 // Debounce complete — show popup icon
@@ -204,11 +242,18 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
                                 let (app_name, window_title) = get_window_context(source_hwnd);
 
                                 // Get bounding rect of the focused input element
-                                let input_rect = if let Some(ref uia_engine) = uia {
-                                    uia_engine
-                                        .get_focused_element_rect()
-                                        .map(|r| (r.x, r.y, r.width, r.height))
+                                // Only use input_rect for Write Mode (is_input=true)
+                                // For Read Mode, we use mouse position instead
+                                let input_rect = if last_is_input {
+                                    if let Some(ref uia_engine) = uia {
+                                        uia_engine
+                                            .get_focused_element_rect()
+                                            .map(|r| (r.x, r.y, r.width, r.height))
+                                    } else {
+                                        None
+                                    }
                                 } else {
+                                    // Read Mode: no input_rect → popup will use mouse position
                                     None
                                 };
 
@@ -221,9 +266,12 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
                                     input_rect,
                                     app_name,
                                     window_title,
+                                    is_input_element: last_is_input,
                                 };
 
                                 show_popup(app_handle.clone(), &state, selection_info);
+                                selection_source_hwnd = source_hwnd;
+                                popup_icon_visible = true;
                                 debounce_text = None;
                             }
                         }
@@ -239,6 +287,8 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
                 );
                 last_selection = None;
                 debounce_text = None;
+                popup_icon_visible = false;
+                selection_source_hwnd = 0;
                 overlay::hide_popup(&app_handle);
                 *state.current_selection.lock() = None;
             }

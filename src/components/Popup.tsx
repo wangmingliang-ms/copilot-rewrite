@@ -28,6 +28,14 @@ const Popup: FC<PopupProps> = ({ selection }) => {
   const [replaceMode, setReplaceMode] = useState<"rendered" | "markdown">("rendered");
   const [showReplaceMenu, setShowReplaceMenu] = useState(false);
 
+  // Read Mode state
+  const [isReadMode, setIsReadMode] = useState(false);
+  const [readModeSettings, setReadModeSettings] = useState<{
+    native_language: string;
+    target_language: string;
+    read_mode_sub: string;
+  }>({ native_language: "Chinese (Simplified)", target_language: "English", read_mode_sub: "translate_summarize" });
+
   // Apply theme to this window's <html> based on settings
   const applyTheme = useCallback(async (themeValue?: string) => {
     let resolved: "light" | "dark" = "light";
@@ -62,13 +70,21 @@ const Popup: FC<PopupProps> = ({ selection }) => {
     return () => observer.disconnect();
   }, []);
 
-  // Refresh settings (model name + beast mode + theme) from backend
+  // Refresh settings (model name + beast mode + theme + read mode) from backend
   const refreshSettings = useCallback(async () => {
     try {
-      const s = await invoke<{ model: string; beast_mode: boolean; replace_mode: string; theme?: string }>("get_settings");
+      const s = await invoke<{
+        model: string; beast_mode: boolean; replace_mode: string; theme?: string;
+        native_language?: string; target_language?: string; read_mode_enabled?: boolean; read_mode_sub?: string;
+      }>("get_settings");
       setBeastMode(s.beast_mode || false);
       applyTheme(s.theme);
       setReplaceMode((s.replace_mode === "markdown" ? "markdown" : "rendered") as "rendered" | "markdown");
+      setReadModeSettings({
+        native_language: s.native_language || "Chinese (Simplified)",
+        target_language: s.target_language || "English",
+        read_mode_sub: s.read_mode_sub || "translate_summarize",
+      });
       if (!s.model) { setCurrentModel(""); return; }
       try {
         const models = await invoke<CopilotModel[]>("list_models");
@@ -133,33 +149,70 @@ const Popup: FC<PopupProps> = ({ selection }) => {
     refreshSettings();
   }, [refreshSettings]);
 
-  // Parse result — LLM returns JSON {"reorganized": "...", "translated": "..."}
-  const { reorganized, translated } = useMemo(() => {
-    if (!result?.result) return { reorganized: "", translated: "" };
+  // Parse result — handles both Write Mode and Read Mode JSON formats
+  // Write Mode: {"reorganized": "...", "translated": "..."}
+  // Read Mode (smart): {"mode": "word|simple|complex|long", ...}
+  const { reorganized, translated, readModeType, readTranslation, readSummary, readExplanation, readExamples, readVocabulary } = useMemo(() => {
+    const empty = { reorganized: "", translated: "", readModeType: "" as string, readTranslation: "", readSummary: "", readExplanation: "", readExamples: [] as string[], readVocabulary: [] as { term: string; meaning: string; usage: string }[] };
+    if (!result?.result) return empty;
     const text = result.result.trim();
     try {
       // Strip markdown code fences if LLM wraps in ```json ... ```
       const cleaned = text.replace(/^```(?:json)?\s*\n?/i, "").replace(/\n?```\s*$/, "");
       const parsed = JSON.parse(cleaned);
+
+      // Read Mode smart format (new unified format)
+      if (parsed.mode) {
+        const mode = String(parsed.mode);
+        return {
+          reorganized: "",
+          translated: "",
+          readModeType: mode,
+          readTranslation: String(parsed.translation || ""),
+          readSummary: String(parsed.summary || ""),
+          readExplanation: String(parsed.explanation || ""),
+          readExamples: Array.isArray(parsed.examples) ? parsed.examples.map(String) : [],
+          readVocabulary: Array.isArray(parsed.vocabulary) ? parsed.vocabulary : [],
+        };
+      }
+
+      // Legacy Read Mode format (summary + translation)
+      if (parsed.summary && parsed.translation) {
+        return {
+          ...empty,
+          readModeType: "long",
+          readSummary: String(parsed.summary),
+          readTranslation: String(parsed.translation),
+        };
+      }
+
+      // Write Mode format
       if (parsed.reorganized && parsed.translated) {
         return {
+          ...empty,
           reorganized: String(parsed.reorganized),
           translated: String(parsed.translated),
         };
       }
     } catch {
-      // JSON parse failed — fallback: try "---" divider
-      const dividerMatch = text.match(/\n---\n/);
-      if (dividerMatch && dividerMatch.index !== undefined) {
-        return {
-          reorganized: text.slice(0, dividerMatch.index).trim(),
-          translated: text.slice(dividerMatch.index + dividerMatch[0].length).trim(),
-        };
+      // JSON parse failed — fallback: try "---" divider (Write Mode only)
+      if (!isReadMode) {
+        const dividerMatch = text.match(/\n---\n/);
+        if (dividerMatch && dividerMatch.index !== undefined) {
+          return {
+            ...empty,
+            reorganized: text.slice(0, dividerMatch.index).trim(),
+            translated: text.slice(dividerMatch.index + dividerMatch[0].length).trim(),
+          };
+        }
       }
     }
-    // No structure found — treat entire text as translated
-    return { reorganized: "", translated: text };
-  }, [result?.result]);
+    // No structure found — treat entire text as the main result
+    if (isReadMode) {
+      return { ...empty, readModeType: "simple", readTranslation: text };
+    }
+    return { ...empty, translated: text };
+  }, [result?.result, isReadMode]);
 
   // Render markdown
   const reorganizedHtml = useMemo(() => {
@@ -174,8 +227,33 @@ const Popup: FC<PopupProps> = ({ selection }) => {
     return marked.parse(translated) as string;
   }, [translated]);
 
-  // The text to use for Replace/Copy — always the translated version
-  const outputText = translated || result?.result || "";
+  // Read Mode markdown
+  const readSummaryHtml = useMemo(() => {
+    if (!readSummary) return "";
+    marked.setOptions({ breaks: true, gfm: true });
+    return marked.parse(readSummary) as string;
+  }, [readSummary]);
+
+  const readTranslationHtml = useMemo(() => {
+    if (!readTranslation) return "";
+    marked.setOptions({ breaks: true, gfm: true });
+    return marked.parse(readTranslation) as string;
+  }, [readTranslation]);
+
+  const readExplanationHtml = useMemo(() => {
+    if (!readExplanation) return "";
+    marked.setOptions({ breaks: true, gfm: true });
+    return marked.parse(readExplanation) as string;
+  }, [readExplanation]);
+
+  // The text to use for Replace/Copy
+  // Write Mode: translated text; Read Mode: all relevant content
+  const outputText = isReadMode
+    ? (readSummary || readTranslation || readExplanation || result?.result || "")
+    : (translated || result?.result || "");
+  const outputHtml = isReadMode
+    ? (readSummaryHtml || readTranslationHtml || readExplanationHtml)
+    : translatedHtml;
 
   // Dismiss on Escape; close replace menu on outside click
   const replaceMenuRef = useRef<HTMLDivElement>(null);
@@ -237,14 +315,18 @@ const Popup: FC<PopupProps> = ({ selection }) => {
       }
     }, 50);
     return () => clearTimeout(timer);
-  }, [state, translatedHtml, reorganizedHtml]); // Only resize on content change, NOT on toggle/showRaw
+  }, [state, translatedHtml, reorganizedHtml, readSummaryHtml, readTranslationHtml, readExplanationHtml, readModeType]); // Only resize on content change, NOT on toggle/showRaw
 
   const handleIconClick = useCallback(async () => {
+    // Show spinner immediately — don't wait for auth/settings checks
+    setState("spinning");
+
     // Check auth status fresh on every click — picks up login done in Settings
     try {
       const auth = await invoke<{ logged_in: boolean }>("get_auth_status");
       if (!auth.logged_in) {
         invoke("log_action", { action: "Icon clicked — not logged in, opening Settings" }).catch(() => {});
+        setState("icon"); // revert spinner
         await invoke("open_settings");
         return;
       }
@@ -254,17 +336,39 @@ const Popup: FC<PopupProps> = ({ selection }) => {
       return;
     }
 
-    if (!selection) return;
+    if (!selection) {
+      setState("icon"); // revert spinner
+      return;
+    }
 
-    invoke("log_action", { action: `Icon clicked — starting translation (${selection.text.length} chars)` }).catch(() => {});
-    // Refresh settings display (model name + beast mode) before sending request
-    refreshSettings();
+    // Detect Read Mode vs Write Mode based on selection source
+    const readMode = selection.is_input_element === false;
+    setIsReadMode(readMode);
 
-    setState("spinning");
+    invoke("log_action", { action: `Icon clicked — ${readMode ? "Read" : "Write"} Mode (${selection.text.length} chars)` }).catch(() => {});
+    // Refresh settings display (model name + beast mode + read mode settings) before sending request
+    await refreshSettings();
+
     try {
-      await invoke("process_and_show_preview", {
-        request: { text: selection.text, action: "TranslateAndPolish" },
-      });
+      if (readMode) {
+        // Read Mode: determine translation direction
+        // If selected text != native language → translate to native; if == native → translate to target
+        // We send both options and let the frontend pass the resolved language
+        const summarize = readModeSettings.read_mode_sub === "translate_summarize";
+        await invoke("process_and_show_preview", {
+          request: {
+            text: selection.text,
+            action: "ReadModeTranslate",
+            read_target_language: readModeSettings.native_language,
+            read_summarize: summarize,
+          },
+        });
+      } else {
+        // Write Mode: existing behavior
+        await invoke("process_and_show_preview", {
+          request: { text: selection.text, action: "TranslateAndPolish" },
+        });
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       // Ignore cancellation — already handled by cancel button
@@ -272,7 +376,7 @@ const Popup: FC<PopupProps> = ({ selection }) => {
       setError(msg);
       setState("error");
     }
-  }, [selection, refreshSettings]);
+  }, [selection, refreshSettings, readModeSettings]);
 
   const [refreshing, setRefreshing] = useState(false);
   const refreshingRef = useRef(false);
@@ -284,9 +388,22 @@ const Popup: FC<PopupProps> = ({ selection }) => {
     refreshingRef.current = true;
     setError(null);
     try {
-      await invoke("process_and_show_preview", {
-        request: { text: selection.text, action: "TranslateAndPolish", is_refresh: true },
-      });
+      if (isReadMode) {
+        const summarize = readModeSettings.read_mode_sub === "translate_summarize";
+        await invoke("process_and_show_preview", {
+          request: {
+            text: selection.text,
+            action: "ReadModeTranslate",
+            is_refresh: true,
+            read_target_language: readModeSettings.native_language,
+            read_summarize: summarize,
+          },
+        });
+      } else {
+        await invoke("process_and_show_preview", {
+          request: { text: selection.text, action: "TranslateAndPolish", is_refresh: true },
+        });
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       // Ignore cancellation — already handled by cancel button
@@ -300,12 +417,12 @@ const Popup: FC<PopupProps> = ({ selection }) => {
       setRefreshing(false);
       refreshingRef.current = false;
     }
-  }, [selection, refreshing]);
+  }, [selection, refreshing, isReadMode, readModeSettings]);
 
   const handleReplace = useCallback(async () => {
     if (!outputText) return;
     try {
-      const html = replaceMode === "rendered" && translatedHtml ? translatedHtml : null;
+      const html = replaceMode === "rendered" && outputHtml ? outputHtml : null;
       await invoke("log_action", { action: `Replace clicked — mode=${replaceMode}, text_len=${outputText.length}` }).catch(() => {});
       await invoke("replace_text", { text: outputText, html });
       await invoke("dismiss_popup");
@@ -313,7 +430,7 @@ const Popup: FC<PopupProps> = ({ selection }) => {
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
-  }, [outputText, translatedHtml, replaceMode]);
+  }, [outputText, outputHtml, replaceMode]);
 
   const switchReplaceMode = useCallback(async (mode: "rendered" | "markdown") => {
     setReplaceMode(mode);
@@ -329,9 +446,9 @@ const Popup: FC<PopupProps> = ({ selection }) => {
   const handleCopy = useCallback(async () => {
     if (!outputText) return;
     try {
-      if (replaceMode === "rendered" && translatedHtml) {
+      if (replaceMode === "rendered" && outputHtml) {
         await invoke("log_action", { action: `Copy clicked — mode=rendered, text_len=${outputText.length}` }).catch(() => {});
-        await invoke("copy_html_to_clipboard", { html: translatedHtml, text: outputText });
+        await invoke("copy_html_to_clipboard", { html: outputHtml, text: outputText });
       } else {
         await invoke("log_action", { action: `Copy clicked — mode=markdown, text_len=${outputText.length}` }).catch(() => {});
         await invoke("copy_to_clipboard", { text: outputText });
@@ -339,7 +456,7 @@ const Popup: FC<PopupProps> = ({ selection }) => {
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
-  }, [outputText, translatedHtml, replaceMode]);
+  }, [outputText, outputHtml, replaceMode]);
 
   const handleDismiss = useCallback(async () => {
     try {
@@ -357,6 +474,7 @@ const Popup: FC<PopupProps> = ({ selection }) => {
     setRefreshing(false);
     refreshingRef.current = false;
     hasResized.current = false;
+    setIsReadMode(false);
   };
 
   // ── Icon state (48×48) ──
@@ -491,54 +609,201 @@ const Popup: FC<PopupProps> = ({ selection }) => {
             : "0 8px 32px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.06)",
         }}
       >
-        {/* Layer 1: Translation (visible when original is collapsed) */}
-        {!showOriginal && (
-          <div className="flex-1 min-h-0 overflow-auto px-5 pt-5 pb-3" style={{ userSelect: "text", WebkitUserSelect: "text" }}>
-            {showRaw ? (
-              <pre className="text-[12px] leading-[1.6] text-gray-700 dark:text-gray-300 whitespace-pre-wrap break-words font-mono">{translated}</pre>
-            ) : (
-              <div
-                className="markdown-body text-[13.5px] leading-[1.7]"
-                style={{ background: "transparent" }}
-                dangerouslySetInnerHTML={{ __html: translatedHtml }}
-              />
-            )}
-          </div>
-        )}
+        {isReadMode ? (
+          /* ── Read Mode Content — 4 smart modes ── */
+          <>
+            {!showOriginal && (
+              <div className="flex-1 min-h-0 overflow-auto px-5 pt-5 pb-3" style={{ userSelect: "text", WebkitUserSelect: "text" }}>
 
-        {/* Layer 2: Original expanded (fills entire content area when open) */}
-        {showOriginal && (
-          <div className="flex-1 min-h-0 overflow-auto px-5 pt-5 pb-3" style={{ userSelect: "text", WebkitUserSelect: "text" }}>
-            {showRaw ? (
-              <pre className="text-[12px] leading-[1.6] text-gray-500 dark:text-gray-400 whitespace-pre-wrap break-words font-mono">{reorganized}</pre>
-            ) : (
-              <div className="markdown-body text-[12px] leading-[1.55] text-gray-400 dark:text-gray-500" style={{ background: "transparent" }}>
-                <div dangerouslySetInnerHTML={{ __html: reorganizedHtml }} />
+                {/* Word mode: translation + explanation + examples */}
+                {readModeType === "word" && (
+                  <div className="space-y-3">
+                    {/* Translation */}
+                    <div className="text-[15px] font-semibold text-gray-800 dark:text-gray-200">
+                      {readTranslation}
+                    </div>
+                    {/* Explanation */}
+                    {readExplanation && (
+                      showRaw ? (
+                        <pre className="text-[12px] leading-[1.6] text-gray-600 dark:text-gray-400 whitespace-pre-wrap break-words font-mono">{readExplanation}</pre>
+                      ) : (
+                        <div
+                          className="markdown-body text-[13px] leading-[1.65] text-gray-600 dark:text-gray-400"
+                          style={{ background: "transparent" }}
+                          dangerouslySetInnerHTML={{ __html: readExplanationHtml }}
+                        />
+                      )
+                    )}
+                    {/* Examples */}
+                    {readExamples.length > 0 && (
+                      <div className="space-y-1.5 border-t border-gray-100 dark:border-gray-700 pt-2">
+                        <div className="text-[11px] font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wide">Examples</div>
+                        {readExamples.map((ex: string, i: number) => (
+                          <div key={i} className="text-[12.5px] leading-[1.6] text-gray-600 dark:text-gray-400 pl-3 border-l-2 border-blue-200 dark:border-blue-800">
+                            {ex}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Simple mode: just the translation */}
+                {readModeType === "simple" && (
+                  showRaw ? (
+                    <pre className="text-[12px] leading-[1.6] text-gray-700 dark:text-gray-300 whitespace-pre-wrap break-words font-mono">{readTranslation}</pre>
+                  ) : (
+                    <div
+                      className="markdown-body text-[13.5px] leading-[1.7]"
+                      style={{ background: "transparent" }}
+                      dangerouslySetInnerHTML={{ __html: readTranslationHtml }}
+                    />
+                  )
+                )}
+
+                {/* Complex mode: translation + vocabulary highlights */}
+                {readModeType === "complex" && (
+                  <div className="space-y-3">
+                    {showRaw ? (
+                      <pre className="text-[12px] leading-[1.6] text-gray-700 dark:text-gray-300 whitespace-pre-wrap break-words font-mono">{readTranslation}</pre>
+                    ) : (
+                      <div
+                        className="markdown-body text-[13.5px] leading-[1.7]"
+                        style={{ background: "transparent" }}
+                        dangerouslySetInnerHTML={{ __html: readTranslationHtml }}
+                      />
+                    )}
+                    {readVocabulary.length > 0 && (
+                      <div className="space-y-2 border-t border-gray-100 dark:border-gray-700 pt-2">
+                        <div className="text-[11px] font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wide">📚 Vocabulary</div>
+                        {readVocabulary.map((v: { term: string; meaning: string; usage: string }, i: number) => (
+                          <div key={i} className="pl-3 border-l-2 border-purple-200 dark:border-purple-800">
+                            <span className="text-[12.5px] font-semibold text-purple-600 dark:text-purple-400">{v.term}</span>
+                            <span className="text-[12px] text-gray-600 dark:text-gray-400"> — {v.meaning}</span>
+                            {v.usage && <div className="text-[11.5px] text-gray-400 dark:text-gray-500 italic mt-0.5">{v.usage}</div>}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Long mode: summary as main content */}
+                {readModeType === "long" && (
+                  showRaw ? (
+                    <pre className="text-[12px] leading-[1.6] text-gray-700 dark:text-gray-300 whitespace-pre-wrap break-words font-mono">{readSummary || readTranslation}</pre>
+                  ) : (
+                    <div
+                      className="markdown-body text-[13.5px] leading-[1.7]"
+                      style={{ background: "transparent" }}
+                      dangerouslySetInnerHTML={{ __html: readSummaryHtml || readTranslationHtml }}
+                    />
+                  )
+                )}
+
+                {/* Fallback: if mode is unrecognized */}
+                {!["word", "simple", "complex", "long"].includes(readModeType) && readTranslation && (
+                  showRaw ? (
+                    <pre className="text-[12px] leading-[1.6] text-gray-700 dark:text-gray-300 whitespace-pre-wrap break-words font-mono">{readTranslation}</pre>
+                  ) : (
+                    <div
+                      className="markdown-body text-[13.5px] leading-[1.7]"
+                      style={{ background: "transparent" }}
+                      dangerouslySetInnerHTML={{ __html: readTranslationHtml }}
+                    />
+                  )
+                )}
               </div>
             )}
-          </div>
-        )}
 
-        {/* Toggle bar — always visible between content and action bar */}
-        {reorganizedHtml && (
-          <div className="flex-shrink-0 px-5 border-t border-gray-100 dark:border-gray-700">
-            <button
-              onClick={() => {
-                const next = !showOriginal;
-                setShowOriginal(next);
-                invoke("log_action", { action: `Original section ${next ? "expanded" : "collapsed"}` }).catch(() => {});
-              }}
-              className="flex items-center gap-1 text-[11px] text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors py-2 w-full"
-            >
-              <svg
-                className={`w-3 h-3 transition-transform ${showOriginal ? "rotate-90" : ""}`}
-                viewBox="0 0 12 12" fill="currentColor"
-              >
-                <path d="M4.5 2l5 4-5 4V2z" />
-              </svg>
-              <span className="font-medium tracking-wide uppercase">Original (reorganized)</span>
-            </button>
-          </div>
+            {/* Collapsible section: full translation (only in long mode) */}
+            {showOriginal && readModeType === "long" && readTranslation && (
+              <div className="flex-1 min-h-0 overflow-auto px-5 pt-5 pb-3" style={{ userSelect: "text", WebkitUserSelect: "text" }}>
+                {showRaw ? (
+                  <pre className="text-[12px] leading-[1.6] text-gray-500 dark:text-gray-400 whitespace-pre-wrap break-words font-mono">{readTranslation}</pre>
+                ) : (
+                  <div className="markdown-body text-[12px] leading-[1.55] text-gray-400 dark:text-gray-500" style={{ background: "transparent" }}>
+                    <div dangerouslySetInnerHTML={{ __html: readTranslationHtml }} />
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Toggle bar — only in long mode when we have both summary and translation */}
+            {readModeType === "long" && readSummary && readTranslation && (
+              <div className="flex-shrink-0 px-5 border-t border-gray-100 dark:border-gray-700">
+                <button
+                  onClick={() => {
+                    const next = !showOriginal;
+                    setShowOriginal(next);
+                    invoke("log_action", { action: `Full translation ${next ? "expanded" : "collapsed"}` }).catch(() => {});
+                  }}
+                  className="flex items-center gap-1 text-[11px] text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors py-2 w-full"
+                >
+                  <svg
+                    className={`w-3 h-3 transition-transform ${showOriginal ? "rotate-90" : ""}`}
+                    viewBox="0 0 12 12" fill="currentColor"
+                  >
+                    <path d="M4.5 2l5 4-5 4V2z" />
+                  </svg>
+                  <span className="font-medium tracking-wide uppercase">Full Translation</span>
+                </button>
+              </div>
+            )}
+          </>
+        ) : (
+          /* ── Write Mode Content (existing) ── */
+          <>
+            {/* Layer 1: Translation (visible when original is collapsed) */}
+            {!showOriginal && (
+              <div className="flex-1 min-h-0 overflow-auto px-5 pt-5 pb-3" style={{ userSelect: "text", WebkitUserSelect: "text" }}>
+                {showRaw ? (
+                  <pre className="text-[12px] leading-[1.6] text-gray-700 dark:text-gray-300 whitespace-pre-wrap break-words font-mono">{translated}</pre>
+                ) : (
+                  <div
+                    className="markdown-body text-[13.5px] leading-[1.7]"
+                    style={{ background: "transparent" }}
+                    dangerouslySetInnerHTML={{ __html: translatedHtml }}
+                  />
+                )}
+              </div>
+            )}
+
+            {/* Layer 2: Original expanded (fills entire content area when open) */}
+            {showOriginal && (
+              <div className="flex-1 min-h-0 overflow-auto px-5 pt-5 pb-3" style={{ userSelect: "text", WebkitUserSelect: "text" }}>
+                {showRaw ? (
+                  <pre className="text-[12px] leading-[1.6] text-gray-500 dark:text-gray-400 whitespace-pre-wrap break-words font-mono">{reorganized}</pre>
+                ) : (
+                  <div className="markdown-body text-[12px] leading-[1.55] text-gray-400 dark:text-gray-500" style={{ background: "transparent" }}>
+                    <div dangerouslySetInnerHTML={{ __html: reorganizedHtml }} />
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Toggle bar — always visible between content and action bar */}
+            {reorganizedHtml && (
+              <div className="flex-shrink-0 px-5 border-t border-gray-100 dark:border-gray-700">
+                <button
+                  onClick={() => {
+                    const next = !showOriginal;
+                    setShowOriginal(next);
+                    invoke("log_action", { action: `Original section ${next ? "expanded" : "collapsed"}` }).catch(() => {});
+                  }}
+                  className="flex items-center gap-1 text-[11px] text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors py-2 w-full"
+                >
+                  <svg
+                    className={`w-3 h-3 transition-transform ${showOriginal ? "rotate-90" : ""}`}
+                    viewBox="0 0 12 12" fill="currentColor"
+                  >
+                    <path d="M4.5 2l5 4-5 4V2z" />
+                  </svg>
+                  <span className="font-medium tracking-wide uppercase">{readModeSettings.native_language.split(' ')[0]} (Polished)</span>
+                </button>
+              </div>
+            )}
+          </>
         )}
 
         {/* Action bar — always visible at bottom */}
@@ -567,7 +832,8 @@ const Popup: FC<PopupProps> = ({ selection }) => {
                 {currentModel}
               </button>
             )}
-            {beastMode && (
+            {/* Beast Mode icon — Write Mode only */}
+            {!isReadMode && beastMode && (
               <button
                 onClick={() => {
                   invoke("log_action", { action: "Beast icon clicked — opening Settings" }).catch(() => {});
@@ -580,6 +846,12 @@ const Popup: FC<PopupProps> = ({ selection }) => {
                   <path d="M1 2.5L3.5 8l-1 2.5C2.5 10.5 4 13 8 14c4-1 5.5-3.5 5.5-3.5L12.5 8 15 2.5 11.5 5 8 1 4.5 5z" />
                 </svg>
               </button>
+            )}
+            {/* Read Mode indicator with mode type */}
+            {isReadMode && (
+              <span className="text-[10px] text-emerald-500 dark:text-emerald-400 font-medium px-1.5 py-0.5 bg-emerald-50 dark:bg-emerald-900/30 rounded">
+                {readModeType === "word" ? "📖 Word" : readModeType === "simple" ? "💬 Translate" : readModeType === "complex" ? "📚 Translate" : readModeType === "long" ? "📋 Summary" : "Read"}
+              </span>
             )}
             <button
               onClick={() => {
@@ -596,20 +868,22 @@ const Popup: FC<PopupProps> = ({ selection }) => {
             </button>
           </div>
           <div className="flex items-center gap-1">
-            {/* Markdown/Preview toggle */}
-            <button
-              onClick={() => {
-                const next = !showRaw;
-                setShowRaw(next);
-                invoke("log_action", { action: `Markdown view ${next ? "ON" : "OFF"}` }).catch(() => {});
-              }}
-              className={`flex items-center justify-center w-7 h-7 rounded-lg transition-colors ${showRaw ? "text-blue-500 bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 dark:hover:bg-blue-900/50" : "text-gray-400 dark:text-gray-500 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 hover:text-gray-600 dark:hover:text-gray-300"}`}
-              title={showRaw ? "Show preview" : "Show markdown"}
-            >
-              <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="currentColor">
-                <path d="M2.5 3A1.5 1.5 0 0 0 1 4.5v7A1.5 1.5 0 0 0 2.5 13h11a1.5 1.5 0 0 0 1.5-1.5v-7A1.5 1.5 0 0 0 13.5 3h-11zM3 9V7l1.5 2L6 7v2h1V5H6L4.5 7.5 3 5H2v4h1zm7-1h1.5L9.5 11V8H8V5h1v3z" />
-              </svg>
-            </button>
+            {/* Markdown/Preview toggle — Write Mode only */}
+            {!isReadMode && (
+              <button
+                onClick={() => {
+                  const next = !showRaw;
+                  setShowRaw(next);
+                  invoke("log_action", { action: `Markdown view ${next ? "ON" : "OFF"}` }).catch(() => {});
+                }}
+                className={`flex items-center justify-center w-7 h-7 rounded-lg transition-colors ${showRaw ? "text-blue-500 bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 dark:hover:bg-blue-900/50" : "text-gray-400 dark:text-gray-500 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 hover:text-gray-600 dark:hover:text-gray-300"}`}
+                title={showRaw ? "Show preview" : "Show markdown"}
+              >
+                <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M2.5 3A1.5 1.5 0 0 0 1 4.5v7A1.5 1.5 0 0 0 2.5 13h11a1.5 1.5 0 0 0 1.5-1.5v-7A1.5 1.5 0 0 0 13.5 3h-11zM3 9V7l1.5 2L6 7v2h1V5H6L4.5 7.5 3 5H2v4h1zm7-1h1.5L9.5 11V8H8V5h1v3z" />
+                </svg>
+              </button>
+            )}
             <button
               onClick={refreshing ? () => {
                 invoke("cancel_request").catch(() => {});
@@ -648,58 +922,61 @@ const Popup: FC<PopupProps> = ({ selection }) => {
                 <path d="M11 5V3.5A1.5 1.5 0 0 0 9.5 2h-6A1.5 1.5 0 0 0 2 3.5v6A1.5 1.5 0 0 0 3.5 11H5" />
               </svg>
             </button>
-            <div className="relative ml-1 flex" ref={replaceMenuRef}>
-              <button
-                onClick={handleReplace}
-                className="flex items-center gap-1.5 rounded-l-lg bg-copilot-blue px-3 py-1.5 text-xs font-medium text-white hover:bg-copilot-blue-hover transition-colors"
-                title={replaceMode === "rendered" ? "Replace with rendered text" : "Replace with markdown"}
-              >
-                {replaceMode === "rendered" ? (
-                  /* Rich text icon — lines with formatting (bold first line) */
-                  <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M2 3h12" strokeWidth="2.2" />
-                    <path d="M2 6.5h9" />
-                    <path d="M2 10h11" />
-                    <path d="M2 13.5h7" />
+            {/* Replace button — Write Mode only (in Read Mode, there's nothing to replace in-place) */}
+            {!isReadMode && (
+              <div className="relative ml-1 flex" ref={replaceMenuRef}>
+                <button
+                  onClick={handleReplace}
+                  className="flex items-center gap-1.5 rounded-l-lg bg-copilot-blue px-3 py-1.5 text-xs font-medium text-white hover:bg-copilot-blue-hover transition-colors"
+                  title={replaceMode === "rendered" ? "Replace with rendered text" : "Replace with markdown"}
+                >
+                  {replaceMode === "rendered" ? (
+                    /* Rich text icon — lines with formatting (bold first line) */
+                    <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M2 3h12" strokeWidth="2.2" />
+                      <path d="M2 6.5h9" />
+                      <path d="M2 10h11" />
+                      <path d="M2 13.5h7" />
+                    </svg>
+                  ) : (
+                    /* Markdown icon — "MD" in a rounded box */
+                    <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="0.5" y="3" width="15" height="10" rx="2" />
+                      <path d="M3.5 10V6L5.5 8.5 7.5 6v4" />
+                      <path d="M10.5 10V6l2.5 4V6" />
+                    </svg>
+                  )}
+                  Replace
+                </button>
+                <button
+                  onClick={(e) => { e.stopPropagation(); setShowReplaceMenu(!showReplaceMenu); }}
+                  className="flex items-center rounded-r-lg bg-copilot-blue px-1.5 py-1.5 text-white hover:bg-copilot-blue-hover transition-colors border-l border-white/20"
+                  title="Replace options"
+                >
+                  <svg className="w-2.5 h-2.5" viewBox="0 0 10 10" fill="currentColor">
+                    <path d="M2 3.5L5 6.5L8 3.5" />
                   </svg>
-                ) : (
-                  /* Markdown icon — "MD" in a rounded box */
-                  <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="0.5" y="3" width="15" height="10" rx="2" />
-                    <path d="M3.5 10V6L5.5 8.5 7.5 6v4" />
-                    <path d="M10.5 10V6l2.5 4V6" />
-                  </svg>
+                </button>
+                {showReplaceMenu && (
+                  <div className="absolute bottom-full right-0 mb-1 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 py-1 min-w-[180px] z-50">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); switchReplaceMode("rendered"); }}
+                      className={`w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 ${replaceMode === "rendered" ? "text-copilot-blue font-medium" : "text-gray-700 dark:text-gray-300"}`}
+                    >
+                      {replaceMode === "rendered" && <span>✓</span>}
+                      <span className={replaceMode !== "rendered" ? "ml-5" : ""}>Rendered text</span>
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); switchReplaceMode("markdown"); }}
+                      className={`w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 ${replaceMode === "markdown" ? "text-copilot-blue font-medium" : "text-gray-700 dark:text-gray-300"}`}
+                    >
+                      {replaceMode === "markdown" && <span>✓</span>}
+                      <span className={replaceMode !== "markdown" ? "ml-5" : ""}>Markdown</span>
+                    </button>
+                  </div>
                 )}
-                Replace
-              </button>
-              <button
-                onClick={(e) => { e.stopPropagation(); setShowReplaceMenu(!showReplaceMenu); }}
-                className="flex items-center rounded-r-lg bg-copilot-blue px-1.5 py-1.5 text-white hover:bg-copilot-blue-hover transition-colors border-l border-white/20"
-                title="Replace options"
-              >
-                <svg className="w-2.5 h-2.5" viewBox="0 0 10 10" fill="currentColor">
-                  <path d="M2 3.5L5 6.5L8 3.5" />
-                </svg>
-              </button>
-              {showReplaceMenu && (
-                <div className="absolute bottom-full right-0 mb-1 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 py-1 min-w-[180px] z-50">
-                  <button
-                    onClick={(e) => { e.stopPropagation(); switchReplaceMode("rendered"); }}
-                    className={`w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 ${replaceMode === "rendered" ? "text-copilot-blue font-medium" : "text-gray-700 dark:text-gray-300"}`}
-                  >
-                    {replaceMode === "rendered" && <span>✓</span>}
-                    <span className={replaceMode !== "rendered" ? "ml-5" : ""}>Rendered text</span>
-                  </button>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); switchReplaceMode("markdown"); }}
-                    className={`w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 ${replaceMode === "markdown" ? "text-copilot-blue font-medium" : "text-gray-700 dark:text-gray-300"}`}
-                  >
-                    {replaceMode === "markdown" && <span>✓</span>}
-                    <span className={replaceMode !== "markdown" ? "ml-5" : ""}>Markdown</span>
-                  </button>
-                </div>
-              )}
-            </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
