@@ -25,7 +25,7 @@ const ICON_SIZE: f64 = 48.0;
 
 /// Expanded preview width
 const EXPANDED_WIDTH: f64 = 400.0;
-const EXPANDED_MIN_HEIGHT: f64 = 160.0;
+const EXPANDED_MIN_HEIGHT: f64 = 120.0;
 const EXPANDED_MAX_HEIGHT: f64 = 400.0;
 /// Shadow margin (logical px) — extra space around content for CSS box-shadow
 const SHADOW_MARGIN: f64 = 20.0;

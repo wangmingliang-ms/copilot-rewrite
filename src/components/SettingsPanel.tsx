@@ -62,6 +62,7 @@ const SettingsPanel: FC<{ themeCtx: ThemeCtx }> = ({ themeCtx }) => {
     native_language: "Chinese (Simplified)",
     read_mode_enabled: true,
     read_mode_sub: "translate_summarize",
+    popup_icon_position: "top-center",
   });
   const [loginStep, setLoginStep] = useState<"idle" | "loading" | "code" | "waiting" | "error">("idle");
   const [deviceCode, setDeviceCode] = useState<DeviceCodeInfo | null>(null);
