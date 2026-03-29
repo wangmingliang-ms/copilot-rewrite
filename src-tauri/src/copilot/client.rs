@@ -247,26 +247,26 @@ Before producing output, silently analyze:
 
 ## Mode "long" — Long passage (multiple sentences, paragraphs, or > ~50 words)
 - Provide a **concise summary** in {native_language} (key points, conclusions, action items)
-- Provide the **full translation** into the output language with corrections applied
+- Provide the **full translation** into the output language (determined by TRANSLATION DIRECTION rules above). This should be a complete translation of the entire text, NOT the original text.
 - If the original has errors or contradictions, note them with [⚠️ Note: ...]
 
 # OUTPUT FORMAT
 Respond with ONLY a JSON object — no markdown code fences, no explanation, no preamble:
 
 For "word" mode:
-{{"mode": "word", "translation": "translated word/phrase", "explanation": "meaning, usage, nuance in {native_language}", "examples": ["example sentence 1 (translation)", "example sentence 2 (translation)"]}}
+{{"mode": "word", "target": "output language name", "translation": "translated word/phrase", "explanation": "meaning, usage, nuance in {native_language}", "examples": ["example sentence 1 (translation)", "example sentence 2 (translation)"]}}
 
 For "simple" mode:
-{{"mode": "simple", "translation": "translated sentence"}}
+{{"mode": "simple", "target": "output language name", "translation": "translated sentence"}}
 
 For "complex" mode (source is foreign language — include vocabulary):
-{{"mode": "complex", "translation": "full translated sentence", "vocabulary": [{{"term": "original word", "meaning": "explanation in {native_language}", "usage": "how it's typically used"}}]}}
+{{"mode": "complex", "target": "output language name", "translation": "full translated sentence", "vocabulary": [{{"term": "original word", "meaning": "explanation in {native_language}", "usage": "how it's typically used"}}]}}
 
 For "complex" mode (source is {native_language} — NO vocabulary):
-{{"mode": "complex", "translation": "full translated sentence"}}
+{{"mode": "complex", "target": "output language name", "translation": "full translated sentence"}}
 
 For "long" mode:
-{{"mode": "long", "summary": "concise summary in {native_language}", "translation": "full translation in output language"}}
+{{"mode": "long", "target": "the language of translation field", "summary": "concise summary in {native_language}", "translation": "full TRANSLATED text in the output language (NOT the original text)"}}
 
 Use \n for newlines within JSON string values.
 

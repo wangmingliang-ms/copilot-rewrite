@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.8.1] - 2026-03-29
+
+### 🔧 Improvements
+
+- **Dynamic fold labels in Read Mode** — The collapsible "Full Translation" section now shows the actual translation language (e.g. "English (Full Translation)" or "Chinese (Full Translation)") instead of a static label. Matches Write Mode's dynamic language labels.
+- **Popup icon default position** — Changed default popup icon position from Top Center to Top Left.
+- **Reduced minimum popup height** — Minimum expanded popup height reduced from 160px to 120px for shorter content.
+
+### 🐛 Bug Fixes
+
+- **Read Mode long mode translation content** — Fixed an issue where the "Full Translation" fold could contain the original text instead of the translated version.
+
 ## [0.8.0] - 2026-03-29
 
 ### ✨ Features

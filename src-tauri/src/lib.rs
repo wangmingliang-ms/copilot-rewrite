@@ -160,7 +160,7 @@ fn default_read_mode_sub() -> String {
 }
 
 fn default_popup_icon_position() -> String {
-    "top-center".to_string()
+    "top-left".to_string()
 }
 
 impl Settings {
@@ -219,7 +219,7 @@ impl Default for Settings {
             native_language: "Chinese (Simplified)".to_string(),
             read_mode_enabled: true,
             read_mode_sub: "translate_summarize".to_string(),
-            popup_icon_position: "top-center".to_string(),
+            popup_icon_position: "top-left".to_string(),
         }
     }
 }

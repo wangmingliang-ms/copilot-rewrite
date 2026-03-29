@@ -152,8 +152,8 @@ const Popup: FC<PopupProps> = ({ selection }) => {
   // Parse result — handles both Write Mode and Read Mode JSON formats
   // Write Mode: {"reorganized": "...", "translated": "..."}
   // Read Mode (smart): {"mode": "word|simple|complex|long", ...}
-  const { reorganized, translated, readModeType, readTranslation, readSummary, readExplanation, readExamples, readVocabulary } = useMemo(() => {
-    const empty = { reorganized: "", translated: "", readModeType: "" as string, readTranslation: "", readSummary: "", readExplanation: "", readExamples: [] as string[], readVocabulary: [] as { term: string; meaning: string; usage: string }[] };
+  const { reorganized, translated, readModeType, readTargetLang, readTranslation, readSummary, readExplanation, readExamples, readVocabulary } = useMemo(() => {
+    const empty = { reorganized: "", translated: "", readModeType: "" as string, readTargetLang: "", readTranslation: "", readSummary: "", readExplanation: "", readExamples: [] as string[], readVocabulary: [] as { term: string; meaning: string; usage: string }[] };
     if (!result?.result) return empty;
     const text = result.result.trim();
     try {
@@ -168,6 +168,7 @@ const Popup: FC<PopupProps> = ({ selection }) => {
           reorganized: "",
           translated: "",
           readModeType: mode,
+          readTargetLang: String(parsed.target || ""),
           readTranslation: String(parsed.translation || ""),
           readSummary: String(parsed.summary || ""),
           readExplanation: String(parsed.explanation || ""),
@@ -749,7 +750,7 @@ const Popup: FC<PopupProps> = ({ selection }) => {
                   >
                     <path d="M4.5 2l5 4-5 4V2z" />
                   </svg>
-                  <span className="font-medium tracking-wide uppercase">Full Translation</span>
+                  <span className="font-medium tracking-wide uppercase">{(readTargetLang || readModeSettings.native_language).split(/[\s(]/)[0]} (Full Translation)</span>
                 </button>
               </div>
             )}
