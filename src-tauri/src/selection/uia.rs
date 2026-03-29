@@ -350,20 +350,30 @@ impl UiaEngine {
     /// Try to get selected text from ANY element (input or non-input).
     /// Returns (Option<text>, is_input_element).
     ///
-    /// Strategy:
-    /// 0. Check TextSelectionChanged event — ONLY used to detect "selection cleared".
-    ///    The event sender element may be a child node (e.g. Text inside CK Editor)
-    ///    which doesn't know if it's inside an input area. So we don't use it for
-    ///    positive detection — only for the negative signal (no selection → clear caches).
-    /// 1. GetFocusedElement — fast, covers most apps, correctly identifies input vs non-input
-    /// 2. Cached element — re-check previously found element
-    /// 3. ElementFromPoint — mouse cursor fallback
-    /// 4. TreeWalker — traverse foreground window subtree (last resort)
+    /// Strategy priority (correctness first, then efficiency):
+    ///
+    /// 0. Event clear signal — zero cost, authoritative "selection was cleared".
+    ///    If event element has selection, cache it as fallback but don't return
+    ///    (event sender may be a child node with wrong is_input classification).
+    ///
+    /// 1. Cached element — zero cost re-check of previously found element.
+    ///    Avoids redundant cross-process COM calls on every poll cycle.
+    ///    Falls through if element expired or selection cleared.
+    ///
+    /// 2. GetFocusedElement — O(1) COM call, most accurate for is_input.
+    ///    Best for Write Mode detection (focused element = the input container).
+    ///
+    /// 3. ElementFromPoint — O(1) COM call, depends on mouse cursor position.
+    ///    Works when focused element doesn't have the selection (e.g. Read Mode
+    ///    in Teams where focus stays on CK Editor but user selected message text).
+    ///
+    /// 4. TreeWalker — O(n) subtree traversal, most comprehensive but slowest.
+    ///    Last resort when all other strategies fail.
     pub fn get_selected_text_any(&self) -> Result<(Option<String>, bool)> {
         // Strategy 0: Check TextSelectionChanged event — clear signal only.
         // The event is authoritative for "selection was cleared" (e.g. user clicked elsewhere
         // in the same window). But for positive selection detection, we defer to
-        // GetFocusedElement which correctly identifies the input container.
+        // other strategies so is_input is determined correctly.
         if self.event_handler_active
             && self.event_state.has_event.swap(false, Ordering::AcqRel)
         {
@@ -371,16 +381,14 @@ impl UiaEngine {
             if let Some(element) = element {
                 match self.get_text_from_element(&element) {
                     Ok(Some(_text)) => {
-                        // Event element has selection — good, but DON'T return it directly.
-                        // Cache the element for Strategy 2, but let Strategy 1 (GetFocusedElement)
-                        // handle the actual detection so is_input is determined correctly.
+                        // Event element has selection — cache it for Strategy 1,
+                        // but let the normal priority chain determine is_input.
                         debug!("TextSelectionChanged event: element has selection, caching for fallback");
                         *self.cached_element.borrow_mut() = Some(element);
-                        // Fall through to Strategy 1
+                        // Fall through to Strategy 1 (cached) or 2 (focused)
                     }
                     _ => {
                         // Event fired but element has no selection — selection was cleared.
-                        // Clear all caches so we don't report stale selection data.
                         debug!("TextSelectionChanged event: selection cleared");
                         *self.cached_element.borrow_mut() = None;
                         return Ok((None, false));
@@ -389,17 +397,8 @@ impl UiaEngine {
             }
         }
 
-        // Strategy 1: GetFocusedElement — correctly identifies input vs non-input
-        if let Ok(element) = self.get_focused_element() {
-            let is_input = self.is_editable_element(&element);
-            if let Ok(Some(text)) = self.get_text_from_element(&element) {
-                self.log_element_info(&element, is_input, "focused");
-                *self.cached_element.borrow_mut() = None;
-                return Ok((Some(text), is_input));
-            }
-        }
-
-        // Strategy 2: Re-check cached element
+        // Strategy 1: Re-check cached element (zero cost — no COM call needed)
+        // This is the hot path during continuous polling of an active selection.
         {
             let cached = self.cached_element.borrow();
             if let Some(ref element) = *cached {
@@ -409,11 +408,25 @@ impl UiaEngine {
                         self.log_element_info(element, is_input, "cached");
                         return Ok((Some(text), is_input));
                     }
-                    _ => {}
+                    _ => {
+                        // Element expired or selection cleared — fall through
+                    }
                 }
             }
         }
+        // Clear invalid cache
         *self.cached_element.borrow_mut() = None;
+
+        // Strategy 2: GetFocusedElement — most accurate for is_input classification
+        if let Ok(element) = self.get_focused_element() {
+            let is_input = self.is_editable_element(&element);
+            if let Ok(Some(text)) = self.get_text_from_element(&element) {
+                self.log_element_info(&element, is_input, "focused");
+                // Cache the focused element for Strategy 1 on next poll
+                *self.cached_element.borrow_mut() = Some(element);
+                return Ok((Some(text), is_input));
+            }
+        }
 
         // Strategy 3: ElementFromPoint at mouse cursor
         if let Some(element) = self.get_element_at_cursor() {
@@ -425,7 +438,7 @@ impl UiaEngine {
             }
         }
 
-        // Strategy 4: TreeWalker — traverse foreground window's UIA subtree
+        // Strategy 4: TreeWalker — traverse foreground window's UIA subtree (last resort)
         if let Some((element, text)) = self.find_selection_in_foreground_window() {
             let is_input = self.is_editable_element(&element);
             self.log_element_info(&element, is_input, "tree");
