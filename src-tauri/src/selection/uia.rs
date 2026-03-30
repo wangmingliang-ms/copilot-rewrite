@@ -415,30 +415,50 @@ impl UiaEngine {
     /// Try to get selected text from ANY element (input or non-input).
     /// Returns (Option<text>, is_input_element).
     ///
-    /// Strategy priority (correctness first, then efficiency):
+    /// Two-phase detection:
     ///
-    /// 0. Event clear signal — zero cost, authoritative "selection was cleared".
-    ///    If event element has selection, cache it as fallback but don't return
-    ///    (event sender may be a child node with wrong is_input classification).
+    /// **Phase 1 - Write Mode (v0.6.0 golden path):**
+    /// GetFocusedElement -> is editable? -> has selection? -> Write Mode.
+    /// This is the most reliable: if cursor is in an input box, the focused
+    /// element IS the input box.
     ///
-    /// 1. Cached element — zero cost re-check of previously found element.
-    ///    Avoids redundant cross-process COM calls on every poll cycle.
-    ///    Falls through if element expired or selection cleared.
-    ///
-    /// 2. GetFocusedElement — O(1) COM call, most accurate for is_input.
-    ///    Best for Write Mode detection (focused element = the input container).
-    ///
-    /// 3. ElementFromPoint — O(1) COM call, depends on mouse cursor position.
-    ///    Works when focused element doesn't have the selection (e.g. Read Mode
-    ///    in Teams where focus stays on CK Editor but user selected message text).
-    ///
-    /// 4. TreeWalker — O(n) subtree traversal, most comprehensive but slowest.
-    ///    Last resort when all other strategies fail.
+    /// **Phase 2 - Read Mode (only when focused element is NOT editable):**
+    /// Cached -> Event -> Focused(non-editable) -> ElementFromPoint -> TreeWalker.
+    /// Everything found here is is_input=false (Read Mode).
     pub fn get_selected_text_any(&self) -> Result<(Option<String>, bool)> {
-        // Strategy 0: Check TextSelectionChanged event — clear signal only.
-        // The event is authoritative for "selection was cleared" (e.g. user clicked elsewhere
-        // in the same window). But for positive selection detection, we defer to
-        // other strategies so is_input is determined correctly.
+        // =================================================================
+        // Phase 1: Write Mode -- check focused element first
+        // If focus is on an editable element with selected text -> Write Mode
+        // =================================================================
+        if let Ok(focused) = self.get_focused_element() {
+            if self.is_editable_element(&focused) {
+                if let Ok(Some(text)) = self.get_text_from_element(&focused) {
+                    self.log_element_info(&focused, true, "focused-write");
+                    *self.cached_element.borrow_mut() = Some(focused);
+                    // Consume any pending event to avoid stale detection
+                    if self.event_handler_active {
+                        self.event_state.has_event.swap(false, Ordering::AcqRel);
+                        self.event_state.event_element.lock().take();
+                    }
+                    return Ok((Some(text), true));
+                }
+            } else {
+                // Phase 1 miss: focused element is not editable — log for debugging
+                unsafe {
+                    let ct = focused.CurrentControlType().unwrap_or_default();
+                    let name = focused.CurrentName().unwrap_or_default();
+                    let class = focused.CurrentClassName().unwrap_or_default();
+                    debug!("Phase 1 skip: focused not editable — type={}, name={:?}, class={:?}", ct.0, name.to_string(), class.to_string());
+                }
+            }
+        }
+
+        // =================================================================
+        // Phase 2: focused element is not editable (or no focus)
+        // Still check is_editable_element on whatever we find
+        // =================================================================
+
+        // Check TextSelectionChanged event
         if self.event_handler_active
             && self.event_state.has_event.swap(false, Ordering::AcqRel)
         {
@@ -446,64 +466,51 @@ impl UiaEngine {
             if let Some(element) = element {
                 match self.get_text_from_element(&element) {
                     Ok(Some(_text)) => {
-                        // Event element has selection — cache it for Strategy 1,
-                        // but let the normal priority chain determine is_input.
-                        debug!("TextSelectionChanged event: element has selection, caching for fallback");
+                        debug!("TextSelectionChanged event: element has selection, caching");
                         *self.cached_element.borrow_mut() = Some(element);
-                        // Fall through to Strategy 1 (cached) or 2 (focused)
                     }
                     _ => {
-                        // Event fired but element has no selection — selection was cleared.
-                        debug!("TextSelectionChanged event: selection cleared");
+                        debug!("TextSelectionChanged event: no text, falling through");
                         *self.cached_element.borrow_mut() = None;
-                        return Ok((None, false));
                     }
                 }
             }
         }
 
-        // Strategy 1: Re-check cached element (zero cost — no COM call needed)
-        // This is the hot path during continuous polling of an active selection.
+        // Re-check cached element (hot path for sustained selection)
         {
             let cached = self.cached_element.borrow();
             if let Some(ref element) = *cached {
-                let is_input = self.is_editable_element(element);
-                match self.get_text_from_element(element) {
-                    Ok(Some(text)) => {
-                        self.log_element_info(element, is_input, "cached");
-                        return Ok((Some(text), is_input));
-                    }
-                    _ => {
-                        // Element expired or selection cleared — fall through
-                    }
+                if let Ok(Some(text)) = self.get_text_from_element(element) {
+                    let is_input = self.is_editable_element(element);
+                    self.log_element_info(element, is_input, "cached");
+                    return Ok((Some(text), is_input));
                 }
             }
         }
-        // Clear invalid cache
         *self.cached_element.borrow_mut() = None;
 
-        // Strategy 2: GetFocusedElement — most accurate for is_input classification
+        // GetFocusedElement for non-editable elements with selection
         if let Ok(element) = self.get_focused_element() {
-            let is_input = self.is_editable_element(&element);
             if let Ok(Some(text)) = self.get_text_from_element(&element) {
+                let is_input = self.is_editable_element(&element);
                 self.log_element_info(&element, is_input, "focused");
-                // Cache the focused element for Strategy 1 on next poll
                 *self.cached_element.borrow_mut() = Some(element);
                 return Ok((Some(text), is_input));
             }
         }
 
-        // Strategy 3: ElementFromPoint at mouse cursor
+        // ElementFromPoint at mouse cursor
         if let Some(element) = self.get_element_at_cursor() {
-            let is_input = self.is_editable_element(&element);
             if let Ok(Some(text)) = self.get_text_from_element(&element) {
+                let is_input = self.is_editable_element(&element);
                 self.log_element_info(&element, is_input, "point");
                 *self.cached_element.borrow_mut() = Some(element);
                 return Ok((Some(text), is_input));
             }
         }
 
-        // Strategy 4: TreeWalker — traverse foreground window's UIA subtree (last resort)
+        // TreeWalker -- traverse foreground window UIA subtree (last resort)
         if let Some((element, text)) = self.find_selection_in_foreground_window() {
             let is_input = self.is_editable_element(&element);
             self.log_element_info(&element, is_input, "tree");
@@ -513,7 +520,6 @@ impl UiaEngine {
 
         Ok((None, false))
     }
-
     /// Traverse the foreground window's UIA subtree to find an element with
     /// a TextPattern that has an active text selection.
     fn find_selection_in_foreground_window(&self) -> Option<(IUIAutomationElement, String)> {
@@ -535,6 +541,9 @@ impl UiaEngine {
     }
 
     /// Recursively walk the UIA tree looking for an element with TextPattern + selection.
+    /// Prefers editable elements (Write Mode) over non-editable (Read Mode).
+    /// If a non-editable element has selection, remember it but keep looking
+    /// for an editable child that also has selection.
     fn walk_tree_for_selection(
         &self,
         element: &IUIAutomationElement,
@@ -544,20 +553,35 @@ impl UiaEngine {
             return None;
         }
 
+        // Check current element for selection
+        let mut non_editable_result: Option<(IUIAutomationElement, String)> = None;
         if let Ok(Some(text)) = self.get_text_from_element(element) {
-            return Some((element.clone(), text));
+            if self.is_editable_element(element) {
+                // Found an editable element with selection — best case, return immediately
+                return Some((element.clone(), text));
+            }
+            // Non-editable with selection — remember but keep searching children
+            non_editable_result = Some((element.clone(), text));
         }
 
+        // Search children for a better (editable) match
         unsafe {
             let child = match self.tree_walker.GetFirstChildElement(element) {
                 Ok(c) => c,
-                Err(_) => return None,
+                Err(_) => return non_editable_result,
             };
 
             let mut current = child;
             loop {
                 if let Some(result) = self.walk_tree_for_selection(&current, depth + 1) {
-                    return Some(result);
+                    if self.is_editable_element(&result.0) {
+                        // Found editable child — prefer it
+                        return Some(result);
+                    }
+                    // Non-editable child result — only use if we don't have one yet
+                    if non_editable_result.is_none() {
+                        non_editable_result = Some(result);
+                    }
                 }
 
                 match self.tree_walker.GetNextSiblingElement(&current) {
@@ -567,7 +591,7 @@ impl UiaEngine {
             }
         }
 
-        None
+        non_editable_result
     }
 
     /// Get UIA element at the current mouse cursor position.
@@ -606,7 +630,14 @@ impl UiaEngine {
         unsafe {
             let control_type = element.CurrentControlType().unwrap_or_default();
 
-            // Check ValuePattern's IsReadOnly for any element that supports it
+            // Edit controls are always editable (input fields, textareas)
+            if control_type == UIA_EditControlTypeId {
+                return true;
+            }
+
+            // For other controls: check ValuePattern + IsReadOnly
+            // A contenteditable div = Document + ValuePattern(IsReadOnly=false)
+            // A plain webpage = Document + ValuePattern(IsReadOnly=true) OR no ValuePattern
             if let Ok(pattern_obj) = element.GetCurrentPattern(UIA_ValuePatternId) {
                 if let Ok(value_pattern) = pattern_obj
                     .cast::<windows::Win32::UI::Accessibility::IUIAutomationValuePattern>()
@@ -618,10 +649,7 @@ impl UiaEngine {
                         return true;
                     }
                 }
-            }
-
-            // No ValuePattern: Edit controls are assumed editable
-            if control_type == UIA_EditControlTypeId {
+                // ValuePattern exists but couldn't check IsReadOnly — assume editable
                 return true;
             }
 

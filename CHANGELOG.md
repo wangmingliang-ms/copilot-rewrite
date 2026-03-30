@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.8.3] - 2026-03-30
+
+### 🔧 Improvements
+
+- **Two-phase Write/Read Mode detection** — Restructured UIA text selection detection into two clear phases. Phase 1 checks the focused element for editability (Write Mode). Phase 2 falls back to event/cached/point/tree strategies with `is_editable_element` checks on each result.
+- **TreeWalker prefers editable elements** — When traversing the UIA subtree, editable child elements with selection are now preferred over non-editable parents, improving Write Mode detection in apps with nested UIA trees.
+- **Event handler no longer blocks fallback strategies** — When the TextSelectionChanged event fires but the event element has no text, detection now falls through to subsequent strategies instead of returning early.
+
+### 🐛 Bug Fixes
+
+- **Fixed Write Mode detection in Teams input boxes** — Teams CKEditor input fields are now correctly identified as Write Mode via Phase 1 focused element check.
+- **Fixed false Write Mode on browser webpages** — Restored `ValuePattern.IsReadOnly` check in `is_editable_element` to correctly classify read-only Document elements (e.g. Chrome/Edge webpages) as Read Mode.
+
+### 📝 Known Issues
+
+- **Feishu (Lark) input boxes detected as Read Mode** — Feishu's Electron-based UI exposes a single `Chrome_RenderWidgetHostHWND` Document element with `ReadOnly=true` for both input areas and message lists. UIA cannot distinguish between them, so Feishu input boxes are currently classified as Read Mode.
+
 ## [0.8.2] - 2026-03-29
 
 ### 🐛 Bug Fixes
