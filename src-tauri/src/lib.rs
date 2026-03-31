@@ -346,12 +346,14 @@ async fn process_and_show_preview(
     // Mark popup as "processing" to pause UIA monitoring
     *state.preview_visible.lock() = true;
 
-    info!("[POPUP] Loading — sending request (action={:?}, model={}, beast={}, refresh={}, text_len={})",
+    let t0 = std::time::Instant::now();
+    info!("[PERF] process_and_show_preview START (action={:?}, model={}, beast={}, refresh={}, text_len={})",
         request.action, settings.model, settings.beast_mode, request.is_refresh, request.text.len());
 
     // Emit loading event (frontend switches to spinning state)
     app.emit("show-preview-loading", ())
         .map_err(|e| e.to_string())?;
+    info!("[PERF] +{}ms — emitted show-preview-loading", t0.elapsed().as_millis());
 
     // Call Copilot API with cancellation support
     let native_lang = settings.native_language.clone();
@@ -380,15 +382,18 @@ async fn process_and_show_preview(
             ))
         }
     };
+    info!("[PERF] +{}ms — LLM future created, awaiting...", t0.elapsed().as_millis());
 
     tokio::select! {
         result = process_fut => {
+            let llm_ms = t0.elapsed().as_millis();
             match result {
                 Ok(result) => {
-                    info!("[POPUP] Result received — {} chars", result.len());
+                    info!("[PERF] +{}ms — LLM response received ({} chars)", llm_ms, result.len());
                     if !request.is_refresh {
                         overlay::expand_popup(&app, &result);
                     }
+                    info!("[PERF] +{}ms — popup expanded", t0.elapsed().as_millis());
 
                     let response = ProcessResponse {
                         original: request.text,
@@ -397,11 +402,12 @@ async fn process_and_show_preview(
                     };
                     app.emit("show-preview-result", &response)
                         .map_err(|e| e.to_string())?;
+                    info!("[PERF] +{}ms — emitted show-preview-result, DONE", t0.elapsed().as_millis());
                     Ok(())
                 }
                 Err(e) => {
                     let err_msg = format!("Copilot API error: {}", e);
-                    warn!("[POPUP] Error — {}", err_msg);
+                    warn!("[PERF] +{}ms — LLM ERROR: {}", llm_ms, err_msg);
                     *state.preview_visible.lock() = false;
                     let _ = app.emit("show-preview-error", &err_msg);
                     Err(err_msg)
@@ -409,7 +415,7 @@ async fn process_and_show_preview(
             }
         }
         _ = cancel_token.cancelled() => {
-            info!("[POPUP] Request cancelled by user");
+            info!("[PERF] +{}ms — Request cancelled by user", t0.elapsed().as_millis());
             *state.preview_visible.lock() = false;
             let _ = app.emit("request-cancelled", ());
             Err("Request cancelled".to_string())
@@ -685,7 +691,7 @@ async fn replace_text(
     // Re-enable monitoring after delay
     let state_clone = state.inner().clone();
     std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_millis(800));
+        std::thread::sleep(std::time::Duration::from_millis(300));
         *state_clone.enabled.lock() = true;
     });
 

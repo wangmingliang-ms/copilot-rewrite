@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.9.0] - 2026-03-31
+
+### ⚡ Performance
+
+- **Eliminated blocking `refreshSettings` on icon click** — Previously, clicking the popup icon would `await refreshSettings()` which made two sequential IPC calls (`get_settings` + `list_models`) before sending the LLM request. The `list_models` call hit the GitHub API, adding hundreds of milliseconds of latency. Now removed entirely — LLM request fires immediately on click.
+- **Replace delay reduced from ~1500ms to ~310ms** — Rewrote the text replacement pipeline:
+  - Window activation: replaced fixed 300ms sleep with a poll loop that verifies `GetForegroundWindow` matches the target (typically completes in 5-10ms, max 200ms timeout)
+  - Clipboard write: removed unnecessary 100ms sleep (Windows clipboard APIs are synchronous)
+  - SendInput (Ctrl+V): removed unnecessary 300ms sleep (input queue injection is synchronous)
+  - Re-enable monitoring cooldown: reduced from 800ms to 300ms
+- **Added `[PERF]` performance instrumentation** — Timestamped logs in `process_and_show_preview` track each stage: loading event emission, LLM future creation, LLM response, popup expansion, and result emission.
+- **Added `[PERF-LLM]` instrumentation in Copilot client** — Tracks Copilot token acquisition, HTTP request send, response headers, body read, and parsing completion times in the Write Mode `process()` method.
+
 ## [0.8.3] - 2026-03-30
 
 ### 🔧 Improvements

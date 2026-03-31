@@ -347,8 +347,6 @@ const Popup: FC<PopupProps> = ({ selection }) => {
     setIsReadMode(readMode);
 
     invoke("log_action", { action: `Icon clicked — ${readMode ? "Read" : "Write"} Mode (${selection.text.length} chars)` }).catch(() => {});
-    // Refresh settings display (model name + beast mode + read mode settings) before sending request
-    await refreshSettings();
 
     try {
       if (readMode) {

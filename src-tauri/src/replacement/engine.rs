@@ -51,21 +51,28 @@ pub fn replace_selected_text(text: &str, source_hwnd: Option<isize>, html: Optio
             let target = HWND(hwnd as *mut _);
             let result = SetForegroundWindow(target);
             debug_log(&format!("SetForegroundWindow result: {}", result.as_bool()));
-        }
-        // Wait for window activation
-        thread::sleep(Duration::from_millis(300));
 
-        // Verify focus switched
-        let new_fg = unsafe { GetForegroundWindow() };
-        debug_log(&format!(
-            "After activation, foreground HWND: {:?}",
-            new_fg.0
-        ));
+            // Poll until window is actually focused (max 200ms)
+            let deadline = std::time::Instant::now() + Duration::from_millis(200);
+            loop {
+                let fg = GetForegroundWindow();
+                if fg == target {
+                    debug_log("Window activated (verified)");
+                    break;
+                }
+                if std::time::Instant::now() >= deadline {
+                    debug_log(&format!("Window activation timeout, fg={:?}", fg.0));
+                    break;
+                }
+                thread::sleep(Duration::from_millis(5));
+            }
+        }
     } else {
         debug_log("WARNING: No source HWND provided!");
     }
 
     // Step 3: Write text to clipboard (with optional HTML for rich paste)
+    // Clipboard APIs are synchronous — no sleep needed after this
     debug_log("Setting clipboard...");
     if let Some(html_content) = html {
         debug_log("Using rich HTML clipboard format");
@@ -76,9 +83,8 @@ pub fn replace_selected_text(text: &str, source_hwnd: Option<isize>, html: Optio
     }
     debug_log("Clipboard set successfully");
 
-    thread::sleep(Duration::from_millis(100));
-
     // Step 4: Simulate Ctrl+V
+    // SendInput injects into the input queue synchronously — no sleep needed after
     debug_log("Sending Ctrl+V...");
     let sent = unsafe {
         let inputs = [
@@ -88,7 +94,6 @@ pub fn replace_selected_text(text: &str, source_hwnd: Option<isize>, html: Optio
             make_key_input(VK_CONTROL, true),
         ];
         let size = std::mem::size_of::<INPUT>() as i32;
-        debug_log(&format!("INPUT struct size: {}", size));
         SendInput(&inputs, size)
     };
     debug_log(&format!("SendInput returned: {} (expected 4)", sent));
@@ -99,8 +104,6 @@ pub fn replace_selected_text(text: &str, source_hwnd: Option<isize>, html: Optio
         anyhow::bail!("SendInput returned {}, last error: {}", sent, err);
     }
 
-    // Wait for paste to take effect
-    thread::sleep(Duration::from_millis(300));
     debug_log("=== REPLACE DONE ===");
 
     Ok(())

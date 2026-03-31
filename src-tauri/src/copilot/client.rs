@@ -419,7 +419,7 @@ impl CopilotClient {
             .http
             .get(COPILOT_TOKEN_URL)
             .header("Authorization", format!("token {}", github_token))
-            .header("User-Agent", "CopilotRewrite/0.3.0")
+            .header("User-Agent", "CopilotRewrite/0.9.0")
             .header("Accept", "application/json")
             .send()
             .await
@@ -476,8 +476,11 @@ impl CopilotClient {
             anyhow::bail!("GitHub token is not configured. Please set your GitHub token (with Copilot access) in Settings.");
         }
 
+        let t0 = Instant::now();
+
         // Step 1: Get Copilot session token
         let copilot_token = self.get_copilot_token(github_token).await?;
+        info!("[PERF-LLM] +{}ms — got copilot token", t0.elapsed().as_millis());
 
         // Step 2: Build the request
         let system_prompt = if beast_mode {
@@ -545,7 +548,7 @@ impl CopilotClient {
         };
 
         // Step 3: Call Copilot chat completions API with session token
-        debug!("Sending request to Copilot API...");
+        info!("[PERF-LLM] +{}ms — sending HTTP request to Copilot API...", t0.elapsed().as_millis());
 
         let response = self
             .http
@@ -556,11 +559,12 @@ impl CopilotClient {
             .header("Editor-Plugin-Version", "copilot-chat/0.24")
             .header("Copilot-Integration-Id", "vscode-chat")
             .header("Openai-Intent", "conversation-panel")
-            .header("User-Agent", "CopilotRewrite/0.3.0")
+            .header("User-Agent", "CopilotRewrite/0.9.0")
             .json(&request)
             .send()
             .await
             .context("Failed to send request to Copilot API")?;
+        info!("[PERF-LLM] +{}ms — HTTP response headers received", t0.elapsed().as_millis());
 
         let status = response.status();
         if !status.is_success() {
@@ -584,6 +588,7 @@ impl CopilotClient {
             .text()
             .await
             .context("Failed to read response body")?;
+        info!("[PERF-LLM] +{}ms — response body read ({} bytes)", t0.elapsed().as_millis(), body.len());
         let mut result = String::new();
         let mut actual_model_logged = false;
 
@@ -618,7 +623,7 @@ impl CopilotClient {
             }
         }
 
-        info!("Copilot API returned {} chars", result.len());
+        info!("[PERF-LLM] +{}ms — parsed {} chars, DONE", t0.elapsed().as_millis(), result.len());
 
         Ok(result.trim().to_string())
     }
@@ -674,7 +679,7 @@ impl CopilotClient {
             .header("Editor-Plugin-Version", "copilot-chat/0.24")
             .header("Copilot-Integration-Id", "vscode-chat")
             .header("Openai-Intent", "conversation-panel")
-            .header("User-Agent", "CopilotRewrite/0.3.0")
+            .header("User-Agent", "CopilotRewrite/0.9.0")
             .json(&request)
             .send()
             .await
@@ -747,7 +752,7 @@ impl CopilotClient {
             .http
             .get(COPILOT_MODELS_URL)
             .header("Authorization", format!("Bearer {}", copilot_token))
-            .header("User-Agent", "CopilotRewrite/0.3.0")
+            .header("User-Agent", "CopilotRewrite/0.9.0")
             .header("Accept", "application/json")
             .header("Editor-Version", "vscode/1.96.0")
             .header("Editor-Plugin-Version", "copilot-chat/0.24")
