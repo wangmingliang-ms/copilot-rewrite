@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.9.1] - 2026-03-31
+
+### 🐛 Bug Fixes
+
+- **Fixed browser input areas incorrectly entering Read Mode** — When selecting text in browser input fields (e.g. GitHub review comment boxes), the tree-walker strategy could return `is_input=false` before the focused-element strategy corrected it to `is_input=true`. Since the monitor only updated `is_input` when the text content changed, the incorrect Read Mode flag would persist. Now the monitor also detects mode changes (`is_input` flips) even when the selected text is unchanged, and re-triggers the popup with the correct Write Mode.
+
 ## [0.9.0] - 2026-03-31
 
 ### ⚡ Performance

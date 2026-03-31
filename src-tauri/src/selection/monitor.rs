@@ -271,6 +271,16 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
                             last_change_time = Instant::now();
                             last_selection = Some(text_trimmed);
                             last_is_input = is_input;
+                        } else if is_input != last_is_input {
+                            // Same text but mode changed (e.g. tree found Read then focused found Write)
+                            info!(
+                                "Mode changed: is_input {} → {} (text unchanged, {} chars)",
+                                last_is_input, is_input, text_trimmed.len()
+                            );
+                            last_is_input = is_input;
+                            // Reset debounce to re-trigger popup with correct mode
+                            debounce_text = Some(text_trimmed.clone());
+                            last_change_time = Instant::now();
                         } else if let Some(ref debounced) = debounce_text {
                             if last_change_time.elapsed() >= Duration::from_millis(DEBOUNCE_MS) {
                                 // Debounce complete — show popup icon
