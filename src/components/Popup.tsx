@@ -121,11 +121,11 @@ const Popup: FC<PopupProps> = ({ selection }) => {
       refreshingRef.current = false;
     });
 
-    // Reset to icon state when popup is hidden and re-shown
     const unSelection = listen("selection-detected", () => {
       setState("icon");
       setResult(null);
       setError(null);
+      refreshSettings(); // pick up model/settings changes
     });
 
     // Handle backend-initiated cancellation
@@ -321,6 +321,9 @@ const Popup: FC<PopupProps> = ({ selection }) => {
   const handleIconClick = useCallback(async () => {
     // Show spinner immediately — don't wait for auth/settings checks
     setState("spinning");
+
+    // Refresh settings to pick up model/beast mode changes from Settings window
+    await refreshSettings();
 
     // Check auth status fresh on every click — picks up login done in Settings
     try {
