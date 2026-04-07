@@ -15,7 +15,8 @@ use windows::Win32::Graphics::Gdi::MonitorFromPoint;
 use windows::Win32::Graphics::Gdi::MONITOR_DEFAULTTONEAREST;
 use windows::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetWindowLongW, SetWindowLongW, SetWindowPos, GWL_EXSTYLE, GWL_STYLE, HWND_TOP,
+    GetWindowLongW, IsWindow, IsWindowVisible, SetWindowLongW, SetWindowPos, ShowWindow,
+    GWL_EXSTYLE, GWL_STYLE, HWND_TOP, SW_SHOWNOACTIVATE,
     SWP_FRAMECHANGED, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, WS_CAPTION, WS_EX_NOACTIVATE,
     WS_EX_TOOLWINDOW, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_SYSMENU, WS_THICKFRAME,
 };
@@ -163,7 +164,38 @@ pub fn show_popup_icon(
             x - SHADOW_MARGIN,
             y - SHADOW_MARGIN,
         )));
-        let _ = window.show();
+
+        // Use Win32 ShowWindow directly for reliability after sleep/resume.
+        // Tauri's window.show() can silently fail when WebView2 is in a bad state.
+        match window.hwnd() {
+            Ok(hwnd) => {
+                let hwnd_win = HWND(hwnd.0 as *mut _);
+                unsafe {
+                    if !IsWindow(hwnd_win).as_bool() {
+                        warn!("Popup HWND is no longer valid! Window may need restart.");
+                    }
+                    // SW_SHOWNOACTIVATE: show without stealing focus
+                    let _ = ShowWindow(hwnd_win, SW_SHOWNOACTIVATE);
+                    // Force to top of Z-order
+                    let _ = SetWindowPos(
+                        hwnd_win,
+                        HWND_TOP,
+                        0, 0, 0, 0,
+                        SWP_NOMOVE | SWP_NOSIZE,
+                    );
+                }
+                // Verify it's actually visible
+                let visible = unsafe { IsWindowVisible(hwnd_win).as_bool() };
+                if !visible {
+                    warn!("Popup window is NOT visible after ShowWindow! Trying Tauri fallback...");
+                    let _ = window.show();
+                }
+            }
+            Err(e) => {
+                warn!("Failed to get popup HWND for ShowWindow: {}. Using Tauri fallback.", e);
+                let _ = window.show();
+            }
+        }
 
         info!("Popup icon shown at ({:.0}, {:.0})", x, y);
     }

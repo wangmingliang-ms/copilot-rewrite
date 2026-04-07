@@ -107,8 +107,44 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
     let mut seen_generation = state
         .selection_generation
         .load(std::sync::atomic::Ordering::Relaxed);
+    let mut last_health_check = Instant::now();
+    let health_check_interval = Duration::from_secs(300); // Check every 5 minutes
 
     loop {
+        // Periodic health check: verify popup window is still alive
+        if last_health_check.elapsed() >= health_check_interval {
+            last_health_check = Instant::now();
+            if let Some(popup) = app_handle.get_webview_window("popup") {
+                match popup.hwnd() {
+                    Ok(hwnd) => {
+                        let hwnd_win = windows::Win32::Foundation::HWND(hwnd.0 as *mut _);
+                        let valid = unsafe {
+                            windows::Win32::UI::WindowsAndMessaging::IsWindow(hwnd_win).as_bool()
+                        };
+                        if !valid {
+                            error!("Health check: popup HWND is INVALID. Window destroyed?");
+                        } else {
+                            info!("Health check: popup window OK (HWND=0x{:X})", hwnd.0 as isize);
+                        }
+                    }
+                    Err(e) => {
+                        error!("Health check: cannot get popup HWND: {}", e);
+                    }
+                }
+                // Ping WebView2 to check if the renderer is still alive
+                match popup.eval("window.__healthcheck = Date.now()") {
+                    Ok(_) => {
+                        info!("Health check: WebView2 renderer responsive");
+                    }
+                    Err(e) => {
+                        error!("Health check: WebView2 eval FAILED: {}. Renderer may be dead!", e);
+                    }
+                }
+            } else {
+                error!("Health check: popup webview window NOT FOUND in Tauri!");
+            }
+        }
+
         // Check if monitoring is enabled
         if !*state.enabled.lock() {
             // Clear state so same text can re-trigger after re-enable
