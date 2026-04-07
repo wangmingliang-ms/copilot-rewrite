@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.9.2] - 2026-04-08
+
+### 🐛 Bug Fixes
+
+- **Fixed popup invisible after Windows sleep/resume** — After the computer sleeps for hours or days, the popup icon could become invisible even though the backend correctly detected text selections. Root cause: Tauri's `window.show()` silently fails when the WebView2 renderer enters a bad state after sleep/resume. Now uses Win32 `ShowWindow(SW_SHOWNOACTIVATE)` + `SetWindowPos(HWND_TOP)` directly, with `IsWindowVisible` verification and Tauri fallback.
+- **Fixed popup model display not updating after Settings change** — Changing the model in Settings was saved correctly to the backend, but the Popup window still displayed the old model name. The Popup now refreshes settings (including the model name) on every icon click and on every new text selection event.
+
+### 🔧 Improvements
+
+- **Periodic popup health check** — A background health check runs every 5 minutes to verify the popup window is still functional: validates the HWND via `IsWindow`, and pings the WebView2 renderer via `eval()`. Logs `ERROR` when the window or renderer is in a bad state, enabling faster diagnosis of long-running stability issues.
+
 ## [0.9.1] - 2026-03-31
 
 ### 🐛 Bug Fixes
