@@ -478,13 +478,34 @@ impl UiaEngine {
         }
 
         // Re-check cached element (hot path for sustained selection)
+        // But only if the cached element is still relevant — for editable elements,
+        // verify it's still focused. Browsers keep selection state on unfocused inputs,
+        // which would cause stale popup if we don't check.
         {
             let cached = self.cached_element.borrow();
             if let Some(ref element) = *cached {
-                if let Ok(Some(text)) = self.get_text_from_element(element) {
-                    let is_input = self.is_editable_element(element);
-                    self.log_element_info(element, is_input, "cached");
-                    return Ok((Some(text), is_input));
+                let is_input = self.is_editable_element(element);
+                if is_input {
+                    // Editable cached element: only trust it if it matches the current focused element
+                    if let Ok(focused) = self.get_focused_element() {
+                        let same = unsafe {
+                            self.automation.CompareElements(element, &focused).unwrap_or_default().as_bool()
+                        };
+                        if same {
+                            if let Ok(Some(text)) = self.get_text_from_element(element) {
+                                self.log_element_info(element, true, "cached-focused");
+                                return Ok((Some(text), true));
+                            }
+                        } else {
+                            debug!("Cached editable element lost focus — clearing cache");
+                        }
+                    }
+                } else {
+                    // Non-editable cached element: trust as-is (Read Mode)
+                    if let Ok(Some(text)) = self.get_text_from_element(element) {
+                        self.log_element_info(element, false, "cached");
+                        return Ok((Some(text), false));
+                    }
                 }
             }
         }

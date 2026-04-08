@@ -104,6 +104,8 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
     let mut last_is_input = true;
     let mut selection_source_hwnd: isize = 0; // HWND that had the selection
     let mut popup_icon_visible = false; // Track if popup icon (not preview) is shown
+    let mut popup_icon_shown_at: Option<Instant> = None; // When icon was first shown
+    const POPUP_ICON_TIMEOUT: Duration = Duration::from_secs(10); // Auto-hide icon after 10s
     let mut seen_generation = state
         .selection_generation
         .load(std::sync::atomic::Ordering::Relaxed);
@@ -184,6 +186,29 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
             }
         }
 
+        // Auto-hide popup icon if it's been visible too long without interaction.
+        // This prevents stale popups when UIA fails to detect selection clear.
+        if popup_icon_visible && !preview_is_visible {
+            if let Some(shown_at) = popup_icon_shown_at {
+                if shown_at.elapsed() >= POPUP_ICON_TIMEOUT {
+                    info!("Popup icon timeout ({}s) — auto-hiding stale popup",
+                        POPUP_ICON_TIMEOUT.as_secs());
+                    last_selection = None;
+                    debounce_text = None;
+                    popup_icon_visible = false;
+                    popup_icon_shown_at = None;
+                    selection_source_hwnd = 0;
+                    overlay::hide_popup(&app_handle);
+                    *state.current_selection.lock() = None;
+                    if let Some(ref uia_engine) = uia {
+                        uia_engine.clear_cache();
+                    }
+                    std::thread::sleep(Duration::from_millis(poll_interval));
+                    continue;
+                }
+            }
+        }
+
         // Try to get selected text via UIA
         // Skip if the foreground window is our own popup (e.g., user selecting text in preview)
         let current_fg = unsafe { GetForegroundWindow().0 as isize };
@@ -238,6 +263,7 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
             last_selection = None;
             debounce_text = None;
             popup_icon_visible = false;
+            popup_icon_shown_at = None;
             selection_source_hwnd = 0;
             overlay::hide_popup(&app_handle);
             *state.current_selection.lock() = None;
@@ -348,6 +374,7 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
                                 show_popup(app_handle.clone(), &state, selection_info);
                                 selection_source_hwnd = source_hwnd;
                                 popup_icon_visible = true;
+                                popup_icon_shown_at = Some(Instant::now());
                                 debounce_text = None;
                             }
                         }
@@ -364,6 +391,7 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
                 last_selection = None;
                 debounce_text = None;
                 popup_icon_visible = false;
+                popup_icon_shown_at = None;
                 selection_source_hwnd = 0;
                 overlay::hide_popup(&app_handle);
                 *state.current_selection.lock() = None;
