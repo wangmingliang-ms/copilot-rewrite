@@ -39,6 +39,10 @@ pub fn replace_selected_text(text: &str, source_hwnd: Option<isize>, html: Optio
         source_hwnd
     ));
 
+    // Save the user's clipboard content — will be restored when _guard is dropped
+    // (after Ctrl+V has been sent and a short delay for the target app to process it)
+    let _clipboard_guard = clipboard::ClipboardGuard::new();
+
     // Step 1: Check current foreground window
     let current_fg = unsafe { GetForegroundWindow() };
     debug_log(&format!("Current foreground HWND: {:?}", current_fg.0));
