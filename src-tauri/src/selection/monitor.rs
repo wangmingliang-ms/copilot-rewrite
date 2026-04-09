@@ -286,57 +286,62 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
                                 last_selection.as_ref().map(|s| s.len()).unwrap_or(0),
                                 is_input
                             );
-                            debounce_text = Some(text_trimmed.clone());
-                            last_change_time = Instant::now();
-                            last_selection = Some(text_trimmed);
+                            last_selection = Some(text_trimmed.clone());
                             last_is_input = is_input;
+
+                            if mouse_just_released {
+                                // Mouseup + new selection → show popup immediately, no debounce
+                                info!("Instant popup trigger via mouseup (skip debounce)");
+                            } else {
+                                // Start debounce timer (keyboard selection, etc.)
+                                debounce_text = Some(text_trimmed.clone());
+                                last_change_time = Instant::now();
+                            }
                         } else if is_input != last_is_input {
-                            // Same text but mode changed (e.g. tree found Read then focused found Write)
                             info!(
                                 "Mode changed: is_input {} → {} (text unchanged, {} chars)",
                                 last_is_input, is_input, text_trimmed.len()
                             );
                             last_is_input = is_input;
-                            // Reset debounce to re-trigger popup with correct mode
                             debounce_text = Some(text_trimmed.clone());
                             last_change_time = Instant::now();
-                        } else if let Some(ref debounced) = debounce_text {
-                            // Show popup instantly on mouseup, or after debounce timer
-                            if mouse_just_released || last_change_time.elapsed() >= Duration::from_millis(DEBOUNCE_MS) {
-                                // Debounce complete or instant mouseup trigger
-                                if mouse_just_released {
-                                    info!("Instant popup trigger via mouseup");
-                                }
-                                let mouse_pos = get_cursor_position();
-                                let source_hwnd = unsafe { GetForegroundWindow().0 as isize };
-                                let (app_name, window_title) = get_window_context(source_hwnd);
+                        }
 
-                                // Get bounding rect of selected text for popup width sizing
-                                let input_rect = if let Some(ref uia_engine) = uia {
-                                    uia_engine
-                                        .get_selection_rect()
-                                        .map(|r| (r.x, r.y, r.width, r.height))
-                                } else {
-                                    None
-                                };
+                        // Check if we should show the popup now
+                        let instant_show = mouse_just_released && text_changed;
+                        let debounce_ready = debounce_text.is_some()
+                            && last_change_time.elapsed() >= Duration::from_millis(DEBOUNCE_MS);
 
-                                let selection_info = SelectionInfo {
-                                    text: debounced.clone(),
-                                    mouse_x: mouse_pos.0,
-                                    mouse_y: mouse_pos.1,
-                                    source: SelectionSource::UIA,
-                                    source_hwnd: Some(source_hwnd),
-                                    input_rect,
-                                    app_name,
-                                    window_title,
-                                    is_input_element: last_is_input,
-                                };
+                        if instant_show || debounce_ready {
+                            let show_text = if instant_show { &text_trimmed } else { debounce_text.as_ref().unwrap() };
+                            let mouse_pos = get_cursor_position();
+                            let source_hwnd = unsafe { GetForegroundWindow().0 as isize };
+                            let (app_name, window_title) = get_window_context(source_hwnd);
 
-                                show_popup(app_handle.clone(), &state, selection_info);
-                                selection_source_hwnd = source_hwnd;
-                                popup_icon_visible = true;
-                                debounce_text = None;
-                            }
+                            let input_rect = if let Some(ref uia_engine) = uia {
+                                uia_engine
+                                    .get_selection_rect()
+                                    .map(|r| (r.x, r.y, r.width, r.height))
+                            } else {
+                                None
+                            };
+
+                            let selection_info = SelectionInfo {
+                                text: show_text.clone(),
+                                mouse_x: mouse_pos.0,
+                                mouse_y: mouse_pos.1,
+                                source: SelectionSource::UIA,
+                                source_hwnd: Some(source_hwnd),
+                                input_rect,
+                                app_name,
+                                window_title,
+                                is_input_element: last_is_input,
+                            };
+
+                            show_popup(app_handle.clone(), &state, selection_info);
+                            selection_source_hwnd = source_hwnd;
+                            popup_icon_visible = true;
+                            debounce_text = None;
                         }
                     }
                 }
