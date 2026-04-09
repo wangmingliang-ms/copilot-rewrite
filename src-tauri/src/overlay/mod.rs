@@ -330,8 +330,9 @@ pub fn hide_popup(app_handle: &AppHandle) {
         }
     }
     info!("Popup hidden");
-    // Reset to icon size + noactivate for next show
-    shrink_popup(app_handle);
+    // Note: icon size + WS_EX_NOACTIVATE are set in show_popup_icon() before the
+    // next show, so we don't need to reset them here. This avoids a redundant
+    // DPI calculation and SetWindowPos call on a hidden window.
 }
 
 /// Toggle WS_EX_NOACTIVATE on the popup window
