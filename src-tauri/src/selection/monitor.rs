@@ -106,7 +106,6 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
     let mut selection_source_hwnd: isize = 0; // HWND that had the selection
     let mut popup_icon_visible = false; // Track if popup icon (not preview) is shown
     let mut mouse_idle_after_popup = false; // True once mouse was released after popup appeared
-    let mut mouse_was_down = false; // Track mouse button state transitions
 
     let mut seen_generation = state
         .selection_generation
@@ -195,7 +194,7 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
         //
         // Key insight: we must NOT dismiss on the mouseup that ends the selection drag.
         // We wait for a full idle cycle (mouse released after popup shown), then detect
-        // the NEXT press→release as a dismiss signal.
+        // the NEXT mousedown, dismiss immediately (don't wait for release — faster response).
         if popup_icon_visible && !preview_is_visible && !last_is_input {
             let lbutton_down = unsafe { GetAsyncKeyState(0x01) } & (0x8000u16 as i16) != 0;
             
@@ -203,50 +202,42 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
                 // Phase 1: waiting for mouse to be released after popup appeared
                 if !lbutton_down {
                     mouse_idle_after_popup = true;
-                    mouse_was_down = false;
                     debug!("Read Mode dismiss: mouse now idle, watching for next click");
                 }
-            } else {
-                // Phase 2: mouse was idle, now detect next click (press→release)
-                if lbutton_down && !mouse_was_down {
-                    mouse_was_down = true;
-                } else if !lbutton_down && mouse_was_down {
-                    // Click completed — check if it was on our popup
-                    mouse_was_down = false;
-                    let click_on_popup = {
-                        if let Some(popup) = app_handle.get_webview_window("popup") {
-                            if let (Ok(pos), Ok(size)) = (popup.outer_position(), popup.outer_size()) {
-                                let mut cursor = POINT::default();
-                                let _ = unsafe { GetCursorPos(&mut cursor) };
-                                cursor.x >= pos.x && cursor.x <= pos.x + size.width as i32
-                                    && cursor.y >= pos.y && cursor.y <= pos.y + size.height as i32
-                            } else {
-                                false
-                            }
+            } else if lbutton_down {
+                // Phase 2: mousedown detected — dismiss immediately (unless on popup)
+                let click_on_popup = {
+                    if let Some(popup) = app_handle.get_webview_window("popup") {
+                        if let (Ok(pos), Ok(size)) = (popup.outer_position(), popup.outer_size()) {
+                            let mut cursor = POINT::default();
+                            let _ = unsafe { GetCursorPos(&mut cursor) };
+                            cursor.x >= pos.x && cursor.x <= pos.x + size.width as i32
+                                && cursor.y >= pos.y && cursor.y <= pos.y + size.height as i32
                         } else {
                             false
                         }
-                    };
-                    if !click_on_popup {
-                        info!("Read Mode: mouse click detected \u{2014} dismissing popup icon");
-                        last_selection = None;
-                        debounce_text = None;
-                        popup_icon_visible = false;
-                        mouse_idle_after_popup = false;
-                        selection_source_hwnd = 0;
-                        overlay::hide_popup(&app_handle);
-                        *state.current_selection.lock() = None;
-                        if let Some(ref uia_engine) = uia {
-                            uia_engine.clear_cache();
-                        }
-                        std::thread::sleep(Duration::from_millis(poll_interval));
-                        continue;
+                    } else {
+                        false
                     }
+                };
+                if !click_on_popup {
+                    info!("Read Mode: mousedown detected \u{2014} dismissing popup icon");
+                    last_selection = None;
+                    debounce_text = None;
+                    popup_icon_visible = false;
+                    mouse_idle_after_popup = false;
+                    selection_source_hwnd = 0;
+                    overlay::hide_popup(&app_handle);
+                    *state.current_selection.lock() = None;
+                    if let Some(ref uia_engine) = uia {
+                        uia_engine.clear_cache();
+                    }
+                    std::thread::sleep(Duration::from_millis(poll_interval));
+                    continue;
                 }
             }
         } else {
             mouse_idle_after_popup = false;
-            mouse_was_down = false;
         }
 
         // Try to get selected text via UIA
