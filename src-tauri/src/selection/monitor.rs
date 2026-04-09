@@ -391,10 +391,13 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
                             debounce_text = Some(text_trimmed.clone());
                             last_change_time = Instant::now();
                         } else if let Some(ref debounced) = debounce_text {
-                            if mouse_just_released || last_change_time.elapsed() >= Duration::from_millis(DEBOUNCE_MS) {
-                                // Debounce complete (or mouseup instant trigger) — show popup icon
+                            // Only show popup when mouse is NOT held down (not mid-drag)
+                            // mouseup triggers instant show; debounce timer only fires when mouse is up
+                            let mouse_is_up = !lbutton_now;
+                            if mouse_just_released || (mouse_is_up && last_change_time.elapsed() >= Duration::from_millis(DEBOUNCE_MS)) {
+                                // Mouse released (instant) or debounce complete with mouse up
                                 if mouse_just_released {
-                                    debug!("Instant popup trigger via mouseup");
+                                    info!("Instant popup trigger via mouseup");
                                 }
                                 let mouse_pos = get_cursor_position();
                                 let source_hwnd = unsafe { GetForegroundWindow().0 as isize };
