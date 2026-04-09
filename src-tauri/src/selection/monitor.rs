@@ -73,7 +73,7 @@ fn get_window_context(hwnd: isize) -> (String, String) {
 }
 
 /// Minimum time between showing the popup (debounce)
-const DEBOUNCE_MS: u64 = 100;
+const DEBOUNCE_MS: u64 = 200;
 /// Minimum text length to trigger popup
 const MIN_TEXT_LENGTH: usize = 1;
 /// Maximum text length to process (avoid huge payloads)
@@ -105,50 +105,13 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
     let mut last_is_input = true;
     let mut selection_source_hwnd: isize = 0; // HWND that had the selection
     let mut popup_icon_visible = false; // Track if popup icon (not preview) is shown
-    let mut mouse_idle_after_popup = false; // True once mouse was released after popup appeared
     let mut mouse_selecting = false; // Track if user is dragging to select text
 
     let mut seen_generation = state
         .selection_generation
         .load(std::sync::atomic::Ordering::Relaxed);
-    let mut last_health_check = Instant::now();
-    let health_check_interval = Duration::from_secs(300); // Check every 5 minutes
 
     loop {
-        // Periodic health check: verify popup window is still alive
-        if last_health_check.elapsed() >= health_check_interval {
-            last_health_check = Instant::now();
-            if let Some(popup) = app_handle.get_webview_window("popup") {
-                match popup.hwnd() {
-                    Ok(hwnd) => {
-                        let hwnd_win = windows::Win32::Foundation::HWND(hwnd.0 as *mut _);
-                        let valid = unsafe {
-                            windows::Win32::UI::WindowsAndMessaging::IsWindow(hwnd_win).as_bool()
-                        };
-                        if !valid {
-                            error!("Health check: popup HWND is INVALID. Window destroyed?");
-                        } else {
-                            info!("Health check: popup window OK (HWND=0x{:X})", hwnd.0 as isize);
-                        }
-                    }
-                    Err(e) => {
-                        error!("Health check: cannot get popup HWND: {}", e);
-                    }
-                }
-                // Ping WebView2 to check if the renderer is still alive
-                match popup.eval("window.__healthcheck = Date.now()") {
-                    Ok(_) => {
-                        info!("Health check: WebView2 renderer responsive");
-                    }
-                    Err(e) => {
-                        error!("Health check: WebView2 eval FAILED: {}. Renderer may be dead!", e);
-                    }
-                }
-            } else {
-                error!("Health check: popup webview window NOT FOUND in Tauri!");
-            }
-        }
-
         // Check if monitoring is enabled
         if !*state.enabled.lock() {
             // Clear state so same text can re-trigger after re-enable
@@ -186,59 +149,6 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
                     }
                 }
             }
-        }
-
-        // Read Mode mouse-click dismiss: when popup icon is visible for a Read Mode
-        // selection (non-input), detect left mouse button click to dismiss the popup.
-        // UIA TextPattern in Read Mode often retains stale selection even after user
-        // clicks elsewhere to deselect, so we must use mouse state as a dismissal signal.
-        //
-        // Key insight: we must NOT dismiss on the mouseup that ends the selection drag.
-        // We wait for a full idle cycle (mouse released after popup shown), then detect
-        // the NEXT mousedown, dismiss immediately (don't wait for release — faster response).
-        if popup_icon_visible && !preview_is_visible && !last_is_input {
-            let lbutton_down = unsafe { GetAsyncKeyState(0x01) } & (0x8000u16 as i16) != 0;
-            
-            if !mouse_idle_after_popup {
-                // Phase 1: waiting for mouse to be released after popup appeared
-                if !lbutton_down {
-                    mouse_idle_after_popup = true;
-                    debug!("Read Mode dismiss: mouse now idle, watching for next click");
-                }
-            } else if lbutton_down {
-                // Phase 2: mousedown detected — dismiss immediately (unless on popup)
-                let click_on_popup = {
-                    if let Some(popup) = app_handle.get_webview_window("popup") {
-                        if let (Ok(pos), Ok(size)) = (popup.outer_position(), popup.outer_size()) {
-                            let mut cursor = POINT::default();
-                            let _ = unsafe { GetCursorPos(&mut cursor) };
-                            cursor.x >= pos.x && cursor.x <= pos.x + size.width as i32
-                                && cursor.y >= pos.y && cursor.y <= pos.y + size.height as i32
-                        } else {
-                            false
-                        }
-                    } else {
-                        false
-                    }
-                };
-                if !click_on_popup {
-                    info!("Read Mode: mousedown detected \u{2014} dismissing popup icon");
-                    last_selection = None;
-                    debounce_text = None;
-                    popup_icon_visible = false;
-                    mouse_idle_after_popup = false;
-                    selection_source_hwnd = 0;
-                    overlay::hide_popup(&app_handle);
-                    *state.current_selection.lock() = None;
-                    if let Some(ref uia_engine) = uia {
-                        uia_engine.clear_cache();
-                    }
-                    std::thread::sleep(Duration::from_millis(poll_interval));
-                    continue;
-                }
-            }
-        } else {
-            mouse_idle_after_popup = false;
         }
 
         // Mouse-event driven popup: detect mouseup after drag to trigger instant UIA check.
@@ -391,11 +301,9 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
                             debounce_text = Some(text_trimmed.clone());
                             last_change_time = Instant::now();
                         } else if let Some(ref debounced) = debounce_text {
-                            // Only show popup when mouse is NOT held down (not mid-drag)
-                            // mouseup triggers instant show; debounce timer only fires when mouse is up
-                            let mouse_is_up = !lbutton_now;
-                            if mouse_just_released || (mouse_is_up && last_change_time.elapsed() >= Duration::from_millis(DEBOUNCE_MS)) {
-                                // Mouse released (instant) or debounce complete with mouse up
+                            // Show popup instantly on mouseup, or after debounce timer
+                            if mouse_just_released || last_change_time.elapsed() >= Duration::from_millis(DEBOUNCE_MS) {
+                                // Debounce complete or instant mouseup trigger
                                 if mouse_just_released {
                                     info!("Instant popup trigger via mouseup");
                                 }
@@ -427,7 +335,6 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
                                 show_popup(app_handle.clone(), &state, selection_info);
                                 selection_source_hwnd = source_hwnd;
                                 popup_icon_visible = true;
-                                mouse_idle_after_popup = false; // Reset: wait for mouse release before watching for dismiss click
                                 debounce_text = None;
                             }
                         }
@@ -435,27 +342,22 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
                 }
             }
         } else {
-            // No selection detected — unconditionally hide popup regardless of state
-            // (icon, spinning, or expanded — selection loss always dismisses)
-            if last_selection.is_some() {
+            // No selection detected
+            if last_selection.is_some() && !preview_is_visible {
                 info!(
-                    "Selection cleared \u{2014} hiding popup (was {} chars, preview_was={})",
-                    last_selection.as_ref().map(|s| s.len()).unwrap_or(0),
-                    preview_is_visible
+                    "Selection cleared — hiding popup (was {} chars)",
+                    last_selection.as_ref().map(|s| s.len()).unwrap_or(0)
                 );
-                // Cancel any in-flight API request
-                state.cancel_token.lock().cancel();
-                // Reset all state
                 last_selection = None;
                 debounce_text = None;
                 popup_icon_visible = false;
                 selection_source_hwnd = 0;
                 overlay::hide_popup(&app_handle);
                 *state.current_selection.lock() = None;
-                *state.preview_visible.lock() = false;
-                state.selection_generation.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             }
+            // If preview_is_visible: do nothing — let dismiss_popup handle cleanup
         }
+
         std::thread::sleep(Duration::from_millis(poll_interval));
     }
 }
