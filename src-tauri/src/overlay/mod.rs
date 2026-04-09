@@ -43,8 +43,8 @@ const CHARS_PER_LINE: f64 = 50.0;
 const POPUP_OFFSET_X: f64 = 8.0;
 const POPUP_OFFSET_Y: f64 = 16.0;
 
-/// Stored popup position (logical coordinates) — set once, reused across state transitions
-static POPUP_POS: Mutex<(f64, f64)> = Mutex::new((0.0, 0.0));
+/// Stored popup position (logical coordinates) and DPI scale — set once, reused across state transitions
+static POPUP_POS: Mutex<(f64, f64, f64)> = Mutex::new((0.0, 0.0, 1.0));
 /// Stored input element rect (physical pixels) — for expand_popup sizing/positioning
 static INPUT_RECT: Mutex<Option<(i32, i32, i32, i32)>> = Mutex::new(None);
 /// Stored popup bottom edge (logical Y) — anchored during content resizing
@@ -147,8 +147,8 @@ pub fn show_popup_icon(
             y = screen_h - icon_logical - 8.0;
         }
 
-        // Store position and input rect for subsequent transitions
-        *POPUP_POS.lock() = (x, y);
+        // Store position, scale, and input rect for subsequent transitions
+        *POPUP_POS.lock() = (x, y, scale);
         *INPUT_RECT.lock() = input_rect;
 
         // Ensure icon size (+ shadow margin) + WS_EX_NOACTIVATE
@@ -254,7 +254,7 @@ pub fn expand_popup(app_handle: &AppHandle, text: &str) {
                 (px, py, w)
             } else {
                 // No selection rect — use stored popup position
-                let (stored_x, stored_y) = *POPUP_POS.lock();
+                let (stored_x, stored_y, _) = *POPUP_POS.lock();
                 let mut x = stored_x;
                 let mut y = stored_y;
                 if x + w > screen_w {
@@ -299,11 +299,8 @@ pub fn expand_popup(app_handle: &AppHandle, text: &str) {
 /// Shrink popup back to icon size and re-apply WS_EX_NOACTIVATE
 pub fn shrink_popup(app_handle: &AppHandle) {
     set_noactivate(app_handle, true);
-    // Include shadow margin in the physical size
-    let scale = {
-        let (px, py) = *POPUP_POS.lock();
-        get_scale_at((px * 1.5) as i32, (py * 1.5) as i32) // approximate
-    };
+    // Use the stored scale factor from when the popup was originally positioned
+    let scale = POPUP_POS.lock().2;
     let sm_physical = SHADOW_MARGIN * scale;
     resize_popup_physical(
         app_handle,
