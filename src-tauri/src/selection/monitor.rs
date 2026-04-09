@@ -71,12 +71,18 @@ fn get_window_context(hwnd: isize) -> (String, String) {
     (app_name, window_title)
 }
 
-/// Debounce time for keyboard selections (mouse bypasses this)
-const DEBOUNCE_MS: u64 = 100;
+/// Debounce time for keyboard selections (mouse bypasses this via mouseup_time).
+/// SPEC 3.1: keyboard fallback with debounce.
+const DEBOUNCE_MS: u64 = 300;
 /// Minimum text length to trigger popup
 const MIN_TEXT_LENGTH: usize = 1;
 /// Maximum text length to process
 const MAX_TEXT_LENGTH: usize = 5000;
+/// How long after mouseup the instant-show window remains valid (ms).
+/// UIA typically needs 1-2 poll iterations to detect the new selection.
+const MOUSEUP_WINDOW_MS: u64 = 500;
+/// Fast poll interval (ms) used right after mouseup for responsive popup appearance.
+const FAST_POLL_MS: u64 = 20;
 
 /// Start the selection monitoring engine
 pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
@@ -99,9 +105,10 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
     let mut last_is_input = true;
     let mut selection_source_hwnd: isize = 0;
     let mut popup_icon_visible = false;
-    let mut mouse_idle_after_popup = false; // For Read Mode dismiss
+    let mut mouse_idle_after_popup = false; // For mousedown dismiss
     let mut mouse_selecting = false;        // Track drag state
-    let mut mouseup_pending = false;        // Persists across iterations until consumed
+    let mut mouseup_time: Option<Instant> = None; // Timestamp of last mouseup (expires after MOUSEUP_WINDOW_MS)
+    let mut mouseup_cursor_pos: (i32, i32) = (0, 0); // Mouse position captured at mouseup
 
     let mut seen_generation = state
         .selection_generation
@@ -110,7 +117,7 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
     let health_check_interval = Duration::from_secs(300);
 
     loop {
-        // ── Health check (every 5 min) ──────────────────────────────────
+        // -- Health check (every 5 min) --
         if last_health_check.elapsed() >= health_check_interval {
             last_health_check = Instant::now();
             if let Some(popup) = app_handle.get_webview_window("popup") {
@@ -137,7 +144,7 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
             }
         }
 
-        // ── Monitoring enabled? ─────────────────────────────────────────
+        // -- Monitoring enabled? --
         if !*state.enabled.lock() {
             last_selection = None;
             debounce_text = None;
@@ -145,12 +152,12 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
             continue;
         }
 
-        // ── Generation check (external dismiss) ────────────────────────
+        // -- Generation check (external dismiss) --
         let current_gen = state
             .selection_generation
             .load(std::sync::atomic::Ordering::Relaxed);
         if current_gen != seen_generation {
-            info!("Generation changed ({} → {}) — resetting monitor state", seen_generation, current_gen);
+            info!("Generation changed ({} -> {}) -- resetting monitor state", seen_generation, current_gen);
             last_selection = None;
             debounce_text = None;
             seen_generation = current_gen;
@@ -159,12 +166,12 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
         let mut preview_is_visible = *state.preview_visible.lock();
         let poll_interval = state.settings.lock().poll_interval_ms;
 
-        // ── Safety: preview_visible stuck but popup hidden ──────────────
+        // -- Safety: preview_visible stuck but popup hidden --
         if preview_is_visible {
             if let Some(popup) = app_handle.get_webview_window("popup") {
                 if let Ok(visible) = popup.is_visible() {
                     if !visible {
-                        warn!("preview_visible stuck — auto-resetting");
+                        warn!("preview_visible stuck -- auto-resetting");
                         *state.preview_visible.lock() = false;
                         preview_is_visible = false;
                     }
@@ -172,17 +179,28 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
             }
         }
 
-        // ── Mouse state ─────────────────────────────────────────────────
+        // -- Mouse state --
         let lbutton_now = unsafe { GetAsyncKeyState(0x01) } & (0x8000u16 as i16) != 0;
 
-        // ── Read Mode mouse-click dismiss ───────────────────────────────
-        // When popup icon is visible for non-input (Read Mode), detect click to dismiss.
-        // UIA retains stale selection in Read Mode, so mouse is the dismiss signal.
-        if popup_icon_visible && !preview_is_visible && !last_is_input {
+        // -- Expire stale mouseup_time --
+        if let Some(t) = mouseup_time {
+            if t.elapsed() >= Duration::from_millis(MOUSEUP_WINDOW_MS) {
+                debug!("mouseup_time expired ({}ms elapsed)", t.elapsed().as_millis());
+                mouseup_time = None;
+            }
+        }
+
+        // -- Mousedown dismiss for icon state --
+        // When popup icon is visible (not expanded), detect mousedown elsewhere
+        // to dismiss immediately. Applies to BOTH Read Mode and Write Mode:
+        // - Read Mode: UIA retains stale selection, mouse is the dismiss signal
+        // - Write Mode: UIA TextPattern.GetSelection() takes 1-3s to return
+        //   empty after deselection, mousedown provides instant dismiss
+        if popup_icon_visible && !preview_is_visible {
             if !mouse_idle_after_popup {
                 if !lbutton_now {
                     mouse_idle_after_popup = true;
-                    debug!("Read Mode dismiss: mouse idle, watching for next click");
+                    debug!("Mousedown dismiss: mouse idle, watching for next click");
                 }
             } else if lbutton_now {
                 let click_on_popup = {
@@ -196,12 +214,15 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
                     } else { false }
                 };
                 if !click_on_popup {
-                    info!("Read Mode: mousedown — dismissing popup icon");
+                    info!("Mousedown elsewhere -- dismissing popup icon (is_input={})", last_is_input);
                     last_selection = None;
                     debounce_text = None;
                     popup_icon_visible = false;
                     mouse_idle_after_popup = false;
                     selection_source_hwnd = 0;
+                    mouseup_time = None;
+                    // Don't set mouse_selecting here -- let the mouseup detection
+                    // section handle the new drag that may be starting
                     overlay::hide_popup(&app_handle);
                     *state.current_selection.lock() = None;
                     if let Some(ref uia_engine) = uia {
@@ -215,23 +236,25 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
             mouse_idle_after_popup = false;
         }
 
-        // ── Mouseup detection (persistent flag) ─────────────────────────
-        // mouseup_pending stays true until consumed by a show_popup call.
-        // This handles the case where UIA takes 1-2 loop iterations to
-        // detect the selection after mouseup.
+        // -- Mouseup detection (timestamped) --
+        // On mouseup, record the timestamp and cursor position. The instant-show
+        // window (MOUSEUP_WINDOW_MS) stays valid across multiple loop iterations,
+        // bridging the gap where UIA needs 1-2 iterations to detect the selection.
+        // Once UIA returns text while mouseup_time is still valid -> show instantly.
         if !popup_icon_visible && !preview_is_visible {
             if lbutton_now && !mouse_selecting {
                 mouse_selecting = true;
             } else if !lbutton_now && mouse_selecting {
                 mouse_selecting = false;
-                mouseup_pending = true;
-                info!("Mouseup detected — pending instant show");
+                mouseup_time = Some(Instant::now());
+                mouseup_cursor_pos = get_cursor_position();
+                info!("Mouseup detected at ({}, {}) -- pending instant show", mouseup_cursor_pos.0, mouseup_cursor_pos.1);
             }
         } else if !lbutton_now {
             mouse_selecting = false;
         }
 
-        // ── Foreground window check ─────────────────────────────────────
+        // -- Foreground window check --
         let current_fg = unsafe { GetForegroundWindow().0 as isize };
         let is_own_window = {
             let is_popup = if let Some(popup) = app_handle.get_webview_window("popup") {
@@ -243,7 +266,7 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
             is_popup || is_settings
         };
 
-        // Foreground changed → dismiss
+        // Foreground changed -> dismiss
         let fg_pid = unsafe {
             let mut pid: u32 = 0;
             GetWindowThreadProcessId(windows::Win32::Foundation::HWND(current_fg as *mut _), Some(&mut pid));
@@ -261,14 +284,14 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
 
         if (popup_icon_visible || preview_is_visible) && !is_own_window && fg_changed {
             info!(
-                "Foreground changed: source=0x{:X}(pid={}) current=0x{:X}(pid={}) — hiding popup",
+                "Foreground changed: source=0x{:X}(pid={}) current=0x{:X}(pid={}) -- hiding popup",
                 selection_source_hwnd, source_pid, current_fg, fg_pid
             );
             last_selection = None;
             debounce_text = None;
             popup_icon_visible = false;
             selection_source_hwnd = 0;
-            mouseup_pending = false;
+            mouseup_time = None;
             overlay::hide_popup(&app_handle);
             *state.current_selection.lock() = None;
             *state.preview_visible.lock() = false;
@@ -280,14 +303,14 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
             continue;
         }
 
-        // ── Own window foreground → skip UIA ────────────────────────────
+        // -- Own window foreground -> skip UIA --
         if is_own_window {
-            trace!("Own popup is foreground — preserving current state");
+            trace!("Own popup is foreground -- preserving current state");
             std::thread::sleep(Duration::from_millis(poll_interval));
             continue;
         }
 
-        // ── UIA selection check ─────────────────────────────────────────
+        // -- UIA selection check --
         let selected_text = if let Some(ref uia_engine) = uia {
             let read_mode_enabled = state.settings.lock().read_mode_enabled;
             match uia_engine.get_selected_text_any() {
@@ -310,7 +333,7 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
             None
         };
 
-        // ── Process selection ───────────────────────────────────────────
+        // -- Process selection --
         if let Some((text, is_input)) = selected_text {
             if text.len() >= MIN_TEXT_LENGTH && text.len() <= MAX_TEXT_LENGTH {
                 let text_trimmed = text.trim().to_string();
@@ -320,46 +343,58 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
                         last_selection = Some(text_trimmed);
                     } else {
                         let text_changed = last_selection.as_ref() != Some(&text_trimmed);
+                        let mouseup_active = mouseup_time.is_some();
 
                         if text_changed {
                             info!(
-                                "Selection changed: {} chars (was {} chars), is_input={}",
+                                "Selection changed: {} chars (was {} chars), is_input={}, mouseup_active={}",
                                 text_trimmed.len(),
                                 last_selection.as_ref().map(|s| s.len()).unwrap_or(0),
-                                is_input
+                                is_input,
+                                mouseup_active,
                             );
                             last_selection = Some(text_trimmed.clone());
                             last_is_input = is_input;
 
-                            if !mouseup_pending {
-                                // Keyboard or other — start debounce timer
+                            if !mouseup_active {
+                                // Keyboard path -- start debounce timer
                                 debounce_text = Some(text_trimmed.clone());
                                 last_change_time = Instant::now();
                             }
-                            // If mouseup_pending, skip debounce — will show below
+                            // If mouseup_active, skip debounce -- will show below
                         } else if is_input != last_is_input {
                             info!(
-                                "Mode changed: is_input {} → {} ({} chars)",
+                                "Mode changed: is_input {} -> {} ({} chars)",
                                 last_is_input, is_input, text_trimmed.len()
                             );
                             last_is_input = is_input;
-                            if !mouseup_pending {
+                            if !mouseup_active {
                                 debounce_text = Some(text_trimmed.clone());
                                 last_change_time = Instant::now();
                             }
                         }
 
-                        // ── Show popup? ─────────────────────────────────
-                        let instant = mouseup_pending && last_selection.is_some();
+                        // -- Show popup? --
+                        let instant = mouseup_active && last_selection.is_some();
                         let debounced = debounce_text.is_some()
                             && last_change_time.elapsed() >= Duration::from_millis(DEBOUNCE_MS);
 
                         if instant || debounced {
                             let show_text = last_selection.as_ref().unwrap();
                             if instant {
-                                info!("Instant popup via mouseup (skip debounce)");
+                                info!(
+                                    "Instant popup via mouseup ({}ms after mouseup)",
+                                    mouseup_time.unwrap().elapsed().as_millis()
+                                );
                             }
-                            let mouse_pos = get_cursor_position();
+                            // Use mouseup cursor position for instant path (captured
+                            // at mouseup time before mouse may have moved), otherwise
+                            // use current cursor position for keyboard path.
+                            let mouse_pos = if instant {
+                                mouseup_cursor_pos
+                            } else {
+                                get_cursor_position()
+                            };
                             let source_hwnd = unsafe { GetForegroundWindow().0 as isize };
                             let (app_name, window_title) = get_window_context(source_hwnd);
 
@@ -387,18 +422,18 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
                             selection_source_hwnd = source_hwnd;
                             popup_icon_visible = true;
                             mouse_idle_after_popup = false;
-                            mouseup_pending = false;
+                            mouseup_time = None;
                             debounce_text = None;
                         }
                     }
                 }
             }
         } else {
-            // ── No selection — unconditional dismiss ────────────────────
-            // Selection gone = Popup gone, regardless of state (SPEC §3.3)
+            // -- No selection -- unconditional dismiss --
+            // Selection gone = Popup gone, regardless of state (SPEC 3.3)
             if last_selection.is_some() {
                 info!(
-                    "Selection cleared — hiding popup (was {} chars, preview_was={})",
+                    "Selection cleared -- hiding popup (was {} chars, preview_was={})",
                     last_selection.as_ref().map(|s| s.len()).unwrap_or(0),
                     preview_is_visible
                 );
@@ -407,7 +442,7 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
                 debounce_text = None;
                 popup_icon_visible = false;
                 selection_source_hwnd = 0;
-                mouseup_pending = false;
+                mouseup_time = None;
                 overlay::hide_popup(&app_handle);
                 *state.current_selection.lock() = None;
                 *state.preview_visible.lock() = false;
@@ -415,7 +450,15 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
             }
         }
 
-        std::thread::sleep(Duration::from_millis(poll_interval));
+        // -- Dynamic sleep interval --
+        // Use fast polling right after mouseup to minimize latency between
+        // mouseup and UIA detecting the selection. Normal poll interval otherwise.
+        let sleep_ms = if mouseup_time.is_some() {
+            FAST_POLL_MS
+        } else {
+            poll_interval
+        };
+        std::thread::sleep(Duration::from_millis(sleep_ms));
     }
 }
 
