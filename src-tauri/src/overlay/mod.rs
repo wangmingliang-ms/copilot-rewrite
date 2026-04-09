@@ -7,7 +7,7 @@
 // All subsequent state transitions (spinning, expanded) reuse the stored position
 // to prevent jumping caused by DPI round-trip errors or cursor movement.
 
-use log::{debug, info, warn};
+use log::{debug, error, info, warn};
 use parking_lot::Mutex;
 use tauri::{AppHandle, LogicalPosition, LogicalSize, Manager, Position};
 use windows::Win32::Foundation::{HWND, POINT};
@@ -16,7 +16,7 @@ use windows::Win32::Graphics::Gdi::MONITOR_DEFAULTTONEAREST;
 use windows::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
 use windows::Win32::UI::WindowsAndMessaging::{
     GetWindowLongW, IsWindow, IsWindowVisible, SetWindowLongW, SetWindowPos, ShowWindow,
-    GWL_EXSTYLE, GWL_STYLE, HWND_TOP, SW_SHOWNOACTIVATE,
+    GWL_EXSTYLE, GWL_STYLE, HWND_TOP, SW_HIDE, SW_SHOWNOACTIVATE,
     SWP_FRAMECHANGED, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, WS_CAPTION, WS_EX_NOACTIVATE,
     WS_EX_TOOLWINDOW, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_SYSMENU, WS_THICKFRAME,
 };
@@ -314,10 +314,22 @@ pub fn shrink_popup(app_handle: &AppHandle) {
 
 /// Hide the popup window
 pub fn hide_popup(app_handle: &AppHandle) {
-    info!("Popup hidden");
     if let Some(window) = app_handle.get_webview_window("popup") {
         let _ = window.hide();
+        // Belt-and-suspenders: also use Win32 to ensure window is truly hidden.
+        // Tauri's window.hide() can silently fail in some edge cases.
+        if let Ok(hwnd) = window.hwnd() {
+            unsafe {
+                let hwnd_win = HWND(hwnd.0 as *mut _);
+                let _ = ShowWindow(hwnd_win, SW_HIDE);
+                if IsWindowVisible(hwnd_win).as_bool() {
+                    error!("Popup STILL visible after hide! Forcing SW_HIDE again.");
+                    let _ = ShowWindow(hwnd_win, SW_HIDE);
+                }
+            }
+        }
     }
+    info!("Popup hidden");
     // Reset to icon size + noactivate for next show
     shrink_popup(app_handle);
 }
