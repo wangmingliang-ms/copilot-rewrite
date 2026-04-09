@@ -28,8 +28,10 @@ pub struct AppState {
     pub selection_generation: std::sync::atomic::AtomicU64,
     /// User settings
     pub settings: Mutex<Settings>,
-    /// Copilot API client
+    /// Copilot API client (for chat completions — has its own HTTP client with 30s timeout)
     pub copilot_client: copilot::CopilotClient,
+    /// Shared HTTP client for lightweight requests (OAuth, GitHub API, etc.)
+    pub http_client: reqwest::Client,
     /// Pending OAuth device code (during login flow)
     pub pending_device_code: Mutex<Option<copilot::DeviceCodeResponse>>,
     /// Cancellation token for in-flight LLM requests
@@ -57,6 +59,7 @@ impl AppState {
             selection_generation: std::sync::atomic::AtomicU64::new(0),
             settings: Mutex::new(settings),
             copilot_client: copilot::CopilotClient::new(),
+            http_client: reqwest::Client::new(),
             pending_device_code: Mutex::new(None),
             cancel_token: Mutex::new(tokio_util::sync::CancellationToken::new()),
         }
@@ -435,8 +438,7 @@ fn cancel_request(state: tauri::State<'_, Arc<AppState>>) {
 async fn start_github_login(
     state: tauri::State<'_, Arc<AppState>>,
 ) -> Result<copilot::DeviceCodeResponse, String> {
-    let http = reqwest::Client::new();
-    let device_code = copilot::oauth::request_device_code(&http)
+    let device_code = copilot::oauth::request_device_code(&state.http_client)
         .await
         .map_err(|e| format!("Login failed: {}", e))?;
 
@@ -453,9 +455,8 @@ async fn poll_github_login(state: tauri::State<'_, Arc<AppState>>) -> Result<Aut
 
     let device_info = device_info.ok_or("No pending login. Call start_github_login first.")?;
 
-    let http = reqwest::Client::new();
     let token =
-        copilot::oauth::poll_for_token(&http, &device_info.device_code, device_info.interval)
+        copilot::oauth::poll_for_token(&state.http_client, &device_info.device_code, device_info.interval)
             .await
             .map_err(|e| format!("Login failed: {}", e))?;
 
@@ -493,8 +494,7 @@ async fn get_auth_status(state: tauri::State<'_, Arc<AppState>>) -> Result<AuthS
             saved
         } else {
             // auth.json missing or has no username — fetch from GitHub API
-            let http = reqwest::Client::new();
-            match http
+            match state.http_client
                 .get("https://api.github.com/user")
                 .header("Authorization", format!("token {}", settings.api_token))
                 .header("User-Agent", "CopilotRewrite/0.1.0")
