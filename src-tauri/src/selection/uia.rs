@@ -358,11 +358,29 @@ impl UiaEngine {
             // SAFEARRAY of doubles: each rect is [x, y, width, height] (4 doubles per rect)
             let mut data_ptr: *mut core::ffi::c_void = core::ptr::null_mut();
             windows::Win32::System::Ole::SafeArrayAccessData(rects_sa, &mut data_ptr).ok()?;
+
+            // RAII guard: ensure SafeArrayUnaccessData is always called
+            struct SafeArrayGuard(*const windows::Win32::System::Com::SAFEARRAY);
+            impl Drop for SafeArrayGuard {
+                fn drop(&mut self) {
+                    unsafe {
+                        let _ = windows::Win32::System::Ole::SafeArrayUnaccessData(self.0);
+                    }
+                }
+            }
+            let _sa_guard = SafeArrayGuard(rects_sa);
+
             let num_elements = {
                 let lower = windows::Win32::System::Ole::SafeArrayGetLBound(rects_sa, 1).unwrap_or(0);
                 let upper = windows::Win32::System::Ole::SafeArrayGetUBound(rects_sa, 1).unwrap_or(-1);
+                if upper < lower {
+                    return None; // _sa_guard drops, calling SafeArrayUnaccessData
+                }
                 (upper - lower + 1) as usize
             };
+            if num_elements == 0 || data_ptr.is_null() {
+                return None;
+            }
             let doubles = core::slice::from_raw_parts(data_ptr as *const f64, num_elements);
 
             // Compute the union bounding box of all rectangles
@@ -382,7 +400,7 @@ impl UiaEngine {
                 }
             }
 
-            let _ = windows::Win32::System::Ole::SafeArrayUnaccessData(rects_sa);
+            // _sa_guard drops here, calling SafeArrayUnaccessData
 
             if max_x > min_x && max_y > min_y {
                 Some(ElementRect {
