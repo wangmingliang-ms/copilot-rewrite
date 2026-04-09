@@ -105,7 +105,8 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
     let mut last_is_input = true;
     let mut selection_source_hwnd: isize = 0; // HWND that had the selection
     let mut popup_icon_visible = false; // Track if popup icon (not preview) is shown
-    let mut last_mouse_click_seen = false; // Track left mouse button state for Read Mode dismiss
+    let mut mouse_idle_after_popup = false; // True once mouse was released after popup appeared
+    let mut mouse_was_down = false; // Track mouse button state transitions
 
     let mut seen_generation = state
         .selection_generation
@@ -191,45 +192,61 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
         // selection (non-input), detect left mouse button click to dismiss the popup.
         // UIA TextPattern in Read Mode often retains stale selection even after user
         // clicks elsewhere to deselect, so we must use mouse state as a dismissal signal.
+        //
+        // Key insight: we must NOT dismiss on the mouseup that ends the selection drag.
+        // We wait for a full idle cycle (mouse released after popup shown), then detect
+        // the NEXT press→release as a dismiss signal.
         if popup_icon_visible && !preview_is_visible && !last_is_input {
             let lbutton_down = unsafe { GetAsyncKeyState(0x01) } & (0x8000u16 as i16) != 0;
-            if lbutton_down && !last_mouse_click_seen {
-                // Mouse button just pressed — schedule dismiss after release
-                last_mouse_click_seen = true;
-            } else if !lbutton_down && last_mouse_click_seen {
-                // Mouse button released — check if click was on our popup (allow icon click)
-                last_mouse_click_seen = false;
-                let click_on_popup = {
-                    if let Some(popup) = app_handle.get_webview_window("popup") {
-                        if let (Ok(pos), Ok(size)) = (popup.outer_position(), popup.outer_size()) {
-                            let mut cursor = POINT::default();
-                            let _ = unsafe { GetCursorPos(&mut cursor) };
-                            cursor.x >= pos.x && cursor.x <= pos.x + size.width as i32
-                                && cursor.y >= pos.y && cursor.y <= pos.y + size.height as i32
+            
+            if !mouse_idle_after_popup {
+                // Phase 1: waiting for mouse to be released after popup appeared
+                if !lbutton_down {
+                    mouse_idle_after_popup = true;
+                    mouse_was_down = false;
+                    debug!("Read Mode dismiss: mouse now idle, watching for next click");
+                }
+            } else {
+                // Phase 2: mouse was idle, now detect next click (press→release)
+                if lbutton_down && !mouse_was_down {
+                    mouse_was_down = true;
+                } else if !lbutton_down && mouse_was_down {
+                    // Click completed — check if it was on our popup
+                    mouse_was_down = false;
+                    let click_on_popup = {
+                        if let Some(popup) = app_handle.get_webview_window("popup") {
+                            if let (Ok(pos), Ok(size)) = (popup.outer_position(), popup.outer_size()) {
+                                let mut cursor = POINT::default();
+                                let _ = unsafe { GetCursorPos(&mut cursor) };
+                                cursor.x >= pos.x && cursor.x <= pos.x + size.width as i32
+                                    && cursor.y >= pos.y && cursor.y <= pos.y + size.height as i32
+                            } else {
+                                false
+                            }
                         } else {
                             false
                         }
-                    } else {
-                        false
+                    };
+                    if !click_on_popup {
+                        info!("Read Mode: mouse click detected \u{2014} dismissing popup icon");
+                        last_selection = None;
+                        debounce_text = None;
+                        popup_icon_visible = false;
+                        mouse_idle_after_popup = false;
+                        selection_source_hwnd = 0;
+                        overlay::hide_popup(&app_handle);
+                        *state.current_selection.lock() = None;
+                        if let Some(ref uia_engine) = uia {
+                            uia_engine.clear_cache();
+                        }
+                        std::thread::sleep(Duration::from_millis(poll_interval));
+                        continue;
                     }
-                };
-                if !click_on_popup {
-                    info!("Read Mode: mouse click detected — dismissing popup icon");
-                    last_selection = None;
-                    debounce_text = None;
-                    popup_icon_visible = false;
-                    selection_source_hwnd = 0;
-                    overlay::hide_popup(&app_handle);
-                    *state.current_selection.lock() = None;
-                    if let Some(ref uia_engine) = uia {
-                        uia_engine.clear_cache();
-                    }
-                    std::thread::sleep(Duration::from_millis(poll_interval));
-                    continue;
                 }
             }
         } else {
-            last_mouse_click_seen = false;
+            mouse_idle_after_popup = false;
+            mouse_was_down = false;
         }
 
         // Try to get selected text via UIA
@@ -396,6 +413,7 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
                                 show_popup(app_handle.clone(), &state, selection_info);
                                 selection_source_hwnd = source_hwnd;
                                 popup_icon_visible = true;
+                                mouse_idle_after_popup = false; // Reset: wait for mouse release before watching for dismiss click
                                 debounce_text = None;
                             }
                         }
