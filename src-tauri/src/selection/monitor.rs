@@ -11,6 +11,7 @@ use windows::Win32::Foundation::POINT;
 use windows::Win32::System::Threading::{
     OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_FORMAT, PROCESS_QUERY_LIMITED_INFORMATION,
 };
+use windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
 use windows::Win32::UI::WindowsAndMessaging::{
     GetCursorPos, GetForegroundWindow, GetWindowTextW, GetWindowThreadProcessId,
 };
@@ -104,6 +105,7 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
     let mut last_is_input = true;
     let mut selection_source_hwnd: isize = 0; // HWND that had the selection
     let mut popup_icon_visible = false; // Track if popup icon (not preview) is shown
+    let mut last_mouse_click_seen = false; // Track left mouse button state for Read Mode dismiss
 
     let mut seen_generation = state
         .selection_generation
@@ -185,6 +187,50 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
             }
         }
 
+        // Read Mode mouse-click dismiss: when popup icon is visible for a Read Mode
+        // selection (non-input), detect left mouse button click to dismiss the popup.
+        // UIA TextPattern in Read Mode often retains stale selection even after user
+        // clicks elsewhere to deselect, so we must use mouse state as a dismissal signal.
+        if popup_icon_visible && !preview_is_visible && !last_is_input {
+            let lbutton_down = unsafe { GetAsyncKeyState(0x01) } & (0x8000u16 as i16) != 0;
+            if lbutton_down && !last_mouse_click_seen {
+                // Mouse button just pressed — schedule dismiss after release
+                last_mouse_click_seen = true;
+            } else if !lbutton_down && last_mouse_click_seen {
+                // Mouse button released — check if click was on our popup (allow icon click)
+                last_mouse_click_seen = false;
+                let click_on_popup = {
+                    if let Some(popup) = app_handle.get_webview_window("popup") {
+                        if let (Ok(pos), Ok(size)) = (popup.outer_position(), popup.outer_size()) {
+                            let mut cursor = POINT::default();
+                            let _ = unsafe { GetCursorPos(&mut cursor) };
+                            cursor.x >= pos.x && cursor.x <= pos.x + size.width as i32
+                                && cursor.y >= pos.y && cursor.y <= pos.y + size.height as i32
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    }
+                };
+                if !click_on_popup {
+                    info!("Read Mode: mouse click detected — dismissing popup icon");
+                    last_selection = None;
+                    debounce_text = None;
+                    popup_icon_visible = false;
+                    selection_source_hwnd = 0;
+                    overlay::hide_popup(&app_handle);
+                    *state.current_selection.lock() = None;
+                    if let Some(ref uia_engine) = uia {
+                        uia_engine.clear_cache();
+                    }
+                    std::thread::sleep(Duration::from_millis(poll_interval));
+                    continue;
+                }
+            }
+        } else {
+            last_mouse_click_seen = false;
+        }
 
         // Try to get selected text via UIA
         // Skip if the foreground window is our own popup (e.g., user selecting text in preview)
