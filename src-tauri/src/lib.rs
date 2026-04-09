@@ -828,32 +828,49 @@ pub fn run() {
     env_logger::Builder::new()
         .filter_level(LevelFilter::Info)
         .filter_module("copilot_rewrite", LevelFilter::Debug)
-        .format(move |buf, record| {
-            use std::io::Write;
-            let now = chrono::Local::now();
-            let line = format!(
-                "[{} {} {}] {}\n",
-                now.format("%Y-%m-%d %H:%M:%S%.3f"),
-                record.level(),
-                record.module_path().unwrap_or(""),
-                record.args()
-            );
-            // Write to stderr (all levels — for terminal debugging)
-            let _ = buf.write_all(line.as_bytes());
-            // Write to date-rotated log file (INFO and above only)
-            if record.level() <= log::Level::Info {
-                let today = now.format("%Y-%m-%d").to_string();
-                let log_path = log_dir_for_closure.join(format!("{}.log", today));
-                if let Ok(mut f) = std::fs::OpenOptions::new()
-                    .create(true)
-                    .append(true)
-                    .open(&log_path)
-                {
-                    let _ = f.write_all(line.as_bytes());
-                    let _ = f.flush();
+        .format({
+            // Cache the log file handle — only re-open when the date changes
+            let cached_log_file: Arc<Mutex<Option<(String, std::fs::File)>>> =
+                Arc::new(Mutex::new(None));
+            move |buf, record| {
+                use std::io::Write;
+                let now = chrono::Local::now();
+                let line = format!(
+                    "[{} {} {}] {}\n",
+                    now.format("%Y-%m-%d %H:%M:%S%.3f"),
+                    record.level(),
+                    record.module_path().unwrap_or(""),
+                    record.args()
+                );
+                // Write to stderr (all levels — for terminal debugging)
+                let _ = buf.write_all(line.as_bytes());
+                // Write to date-rotated log file (INFO and above only)
+                if record.level() <= log::Level::Info {
+                    let today = now.format("%Y-%m-%d").to_string();
+                    let mut guard = cached_log_file.lock();
+                    // Re-open if no cached handle or date has changed
+                    let needs_reopen = match guard.as_ref() {
+                        Some((cached_date, _)) => *cached_date != today,
+                        None => true,
+                    };
+                    if needs_reopen {
+                        let log_path = log_dir_for_closure.join(format!("{}.log", &today));
+                        if let Ok(f) = std::fs::OpenOptions::new()
+                            .create(true)
+                            .append(true)
+                            .open(&log_path)
+                        {
+                            *guard = Some((today, f));
+                        }
+                    }
+                    if let Some((_, ref mut f)) = *guard {
+                        let _ = f.write_all(line.as_bytes());
+                        // No flush per line — OS will flush on its own schedule,
+                        // or we flush on date rotation / process exit
+                    }
                 }
+                Ok(())
             }
-            Ok(())
         })
         .init();
 
