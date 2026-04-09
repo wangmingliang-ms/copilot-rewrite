@@ -590,7 +590,7 @@ fn open_settings(app: tauri::AppHandle) -> Result<(), String> {
             };
             if let Ok(hwnd) = window.hwnd() {
                 unsafe {
-                    let h = HWND(hwnd.0);
+                    let h = HWND(hwnd.0 as *mut _);
                     let _ = ShowWindow(h, SW_RESTORE);
                     let _ = BringWindowToTop(h);
                     let _ = SetForegroundWindow(h);
