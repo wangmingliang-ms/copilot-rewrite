@@ -18,7 +18,7 @@ use std::sync::Arc;
 use windows::core::{Interface, BSTR, GUID};
 use windows::Win32::Foundation::{HWND, POINT, S_OK};
 use windows::Win32::System::Com::{
-    CoCreateInstance, CoInitializeEx, CLSCTX_ALL, COINIT_MULTITHREADED,
+    CoCreateInstance, CoInitializeEx, CLSCTX_ALL, COINIT_APARTMENTTHREADED,
 };
 use windows::Win32::System::Threading::GetCurrentProcessId;
 use windows::Win32::UI::Accessibility::{
@@ -228,7 +228,11 @@ impl UiaEngine {
     /// Also registers a TextSelectionChanged event handler on the desktop root.
     pub fn new() -> Result<Self> {
         unsafe {
-            CoInitializeEx(None, COINIT_MULTITHREADED)
+            // STA (Single-Threaded Apartment) is required for UIA:
+            // UIA interacts with UI elements across processes via COM proxies,
+            // which need a message pump on the calling thread. STA provides this.
+            // The selection monitor runs on a dedicated OS thread, satisfying STA.
+            CoInitializeEx(None, COINIT_APARTMENTTHREADED)
                 .ok()
                 .context("Failed to initialize COM")?;
 
