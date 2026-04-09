@@ -460,7 +460,151 @@ impl CopilotClient {
         Ok(token_response.token)
     }
 
-    /// Process text using the Copilot API
+    /// Shared helper: send a chat completion request to Copilot API with 401 retry.
+    ///
+    /// Handles token exchange, HTTP request, 401 token-expired retry (once),
+    /// and SSE stream parsing. Both `process()` and `process_read_mode()` delegate here.
+    async fn call_chat_completion(
+        &self,
+        github_token: &str,
+        model: &str,
+        system_prompt: String,
+        user_text: &str,
+    ) -> Result<String> {
+        let t0 = Instant::now();
+
+        // Get Copilot session token
+        let copilot_token = self.get_copilot_token(github_token).await?;
+        info!("[PERF-LLM] +{}ms — got copilot token", t0.elapsed().as_millis());
+
+        let request = ChatCompletionRequest {
+            model: model.to_string(),
+            messages: vec![
+                ChatMessage {
+                    role: "system".to_string(),
+                    content: system_prompt,
+                },
+                ChatMessage {
+                    role: "user".to_string(),
+                    content: user_text.to_string(),
+                },
+            ],
+            temperature: 0.3,
+            stream: true,
+        };
+
+        // Try up to 2 times (initial + one retry on 401)
+        for attempt in 0..2 {
+            let token = if attempt == 0 {
+                copilot_token.clone()
+            } else {
+                // 401 retry: fetch a fresh token
+                warn!("Retrying with fresh Copilot token (attempt {})", attempt + 1);
+                self.get_copilot_token(github_token).await?
+            };
+
+            info!(
+                "[PERF-LLM] +{}ms — sending HTTP request (attempt {})",
+                t0.elapsed().as_millis(),
+                attempt + 1
+            );
+
+            let response = self
+                .http
+                .post(COPILOT_CHAT_URL)
+                .header("Authorization", format!("Bearer {}", token))
+                .header("Content-Type", "application/json")
+                .header("Editor-Version", "vscode/1.96.0")
+                .header("Editor-Plugin-Version", "copilot-chat/0.24")
+                .header("Copilot-Integration-Id", "vscode-chat")
+                .header("Openai-Intent", "conversation-panel")
+                .header("User-Agent", "CopilotRewrite/0.9.0")
+                .json(&request)
+                .send()
+                .await
+                .context("Failed to send request to Copilot API")?;
+
+            info!(
+                "[PERF-LLM] +{}ms — HTTP response headers received",
+                t0.elapsed().as_millis()
+            );
+
+            let status = response.status();
+            if status.as_u16() == 401 && attempt == 0 {
+                let error_body = response.text().await.unwrap_or_default();
+                warn!(
+                    "Copilot token expired (HTTP 401: {}), clearing cache and retrying...",
+                    error_body
+                );
+                *self.cached_token.lock() = None;
+                continue; // retry with fresh token
+            }
+
+            if !status.is_success() {
+                let error_body = response.text().await.unwrap_or_default();
+                anyhow::bail!(
+                    "Copilot API returned HTTP {}: {}",
+                    status.as_u16(),
+                    error_body
+                );
+            }
+
+            // Parse SSE stream response
+            let body = response
+                .text()
+                .await
+                .context("Failed to read response body")?;
+            info!(
+                "[PERF-LLM] +{}ms — response body read ({} bytes)",
+                t0.elapsed().as_millis(),
+                body.len()
+            );
+
+            let mut result = String::new();
+            let mut actual_model_logged = false;
+
+            for line in body.lines() {
+                let line = line.trim();
+                if let Some(data) = line.strip_prefix("data: ") {
+                    if data == "[DONE]" {
+                        break;
+                    }
+                    if let Ok(chunk) = serde_json::from_str::<ChatCompletionResponse>(data) {
+                        if !actual_model_logged {
+                            info!(
+                                "API responding with model: {} (requested: {})",
+                                chunk.model.as_deref().unwrap_or("unknown"),
+                                model
+                            );
+                            actual_model_logged = true;
+                        }
+                        if let Some(choice) = chunk.choices.first() {
+                            if let Some(ref delta) = choice.delta {
+                                if let Some(ref content) = delta.content {
+                                    result.push_str(content);
+                                }
+                            }
+                            if let Some(ref message) = choice.message {
+                                result.push_str(&message.content);
+                            }
+                        }
+                    }
+                }
+            }
+
+            info!(
+                "[PERF-LLM] +{}ms — parsed {} chars, DONE",
+                t0.elapsed().as_millis(),
+                result.len()
+            );
+            return Ok(result.trim().to_string());
+        }
+
+        // Should be unreachable — the loop always returns or bails
+        anyhow::bail!("Unexpected: retry loop exited without result")
+    }
+
+    /// Process text using the Copilot API (Write Mode)
     pub async fn process(
         &self,
         text: &str,
@@ -476,13 +620,6 @@ impl CopilotClient {
             anyhow::bail!("GitHub token is not configured. Please set your GitHub token (with Copilot access) in Settings.");
         }
 
-        let t0 = Instant::now();
-
-        // Step 1: Get Copilot session token
-        let copilot_token = self.get_copilot_token(github_token).await?;
-        info!("[PERF-LLM] +{}ms — got copilot token", t0.elapsed().as_millis());
-
-        // Step 2: Build the request
         let system_prompt = if beast_mode {
             match action {
                 RewriteAction::Translate => beast_translate_system_prompt(target_language),
@@ -524,108 +661,11 @@ impl CopilotClient {
             action,
             model,
             beast_mode,
-            if app_context.is_empty() {
-                "none"
-            } else {
-                app_context
-            }
+            if app_context.is_empty() { "none" } else { app_context }
         );
 
-        let request = ChatCompletionRequest {
-            model: model.to_string(),
-            messages: vec![
-                ChatMessage {
-                    role: "system".to_string(),
-                    content: system_prompt,
-                },
-                ChatMessage {
-                    role: "user".to_string(),
-                    content: text.to_string(),
-                },
-            ],
-            temperature: 0.3,
-            stream: true,
-        };
-
-        // Step 3: Call Copilot chat completions API with session token
-        info!("[PERF-LLM] +{}ms — sending HTTP request to Copilot API...", t0.elapsed().as_millis());
-
-        let response = self
-            .http
-            .post(COPILOT_CHAT_URL)
-            .header("Authorization", format!("Bearer {}", copilot_token))
-            .header("Content-Type", "application/json")
-            .header("Editor-Version", "vscode/1.96.0")
-            .header("Editor-Plugin-Version", "copilot-chat/0.24")
-            .header("Copilot-Integration-Id", "vscode-chat")
-            .header("Openai-Intent", "conversation-panel")
-            .header("User-Agent", "CopilotRewrite/0.9.0")
-            .json(&request)
-            .send()
+        self.call_chat_completion(github_token, model, system_prompt, text)
             .await
-            .context("Failed to send request to Copilot API")?;
-        info!("[PERF-LLM] +{}ms — HTTP response headers received", t0.elapsed().as_millis());
-
-        let status = response.status();
-        if !status.is_success() {
-            let error_body = response.text().await.unwrap_or_default();
-
-            // If token expired, clear cache and retry once
-            if status.as_u16() == 401 {
-                warn!("Copilot token expired, clearing cache...");
-                *self.cached_token.lock() = None;
-            }
-
-            anyhow::bail!(
-                "Copilot API returned HTTP {}: {}",
-                status.as_u16(),
-                error_body
-            );
-        }
-
-        // Parse SSE stream response
-        let body = response
-            .text()
-            .await
-            .context("Failed to read response body")?;
-        info!("[PERF-LLM] +{}ms — response body read ({} bytes)", t0.elapsed().as_millis(), body.len());
-        let mut result = String::new();
-        let mut actual_model_logged = false;
-
-        for line in body.lines() {
-            let line = line.trim();
-            if let Some(data) = line.strip_prefix("data: ") {
-                if data == "[DONE]" {
-                    break;
-                }
-                if let Ok(chunk) = serde_json::from_str::<ChatCompletionResponse>(data) {
-                    // Log the actual model used by the API (from first chunk)
-                    if !actual_model_logged {
-                        info!(
-                            "API responding with model: {} (requested: {})",
-                            chunk.model.as_deref().unwrap_or("unknown"),
-                            model
-                        );
-                        actual_model_logged = true;
-                    }
-                    if let Some(choice) = chunk.choices.first() {
-                        if let Some(ref delta) = choice.delta {
-                            if let Some(ref content) = delta.content {
-                                result.push_str(content);
-                            }
-                        }
-                        // Also handle non-streaming format just in case
-                        if let Some(ref message) = choice.message {
-                            result.push_str(&message.content);
-                        }
-                    }
-                }
-            }
-        }
-
-        info!("[PERF-LLM] +{}ms — parsed {} chars, DONE", t0.elapsed().as_millis(), result.len());
-
-        Ok(result.trim().to_string())
     }
 
     /// Process text in Read Mode — unified smart prompt that auto-detects content type
@@ -642,8 +682,6 @@ impl CopilotClient {
             anyhow::bail!("GitHub token is not configured.");
         }
 
-        let copilot_token = self.get_copilot_token(github_token).await?;
-
         let system_prompt = read_mode_smart_prompt(native_language, target_language);
 
         info!(
@@ -654,82 +692,8 @@ impl CopilotClient {
             model
         );
 
-        let request = ChatCompletionRequest {
-            model: model.to_string(),
-            messages: vec![
-                ChatMessage {
-                    role: "system".to_string(),
-                    content: system_prompt,
-                },
-                ChatMessage {
-                    role: "user".to_string(),
-                    content: text.to_string(),
-                },
-            ],
-            temperature: 0.3,
-            stream: true,
-        };
-
-        let response = self
-            .http
-            .post(COPILOT_CHAT_URL)
-            .header("Authorization", format!("Bearer {}", copilot_token))
-            .header("Content-Type", "application/json")
-            .header("Editor-Version", "vscode/1.96.0")
-            .header("Editor-Plugin-Version", "copilot-chat/0.24")
-            .header("Copilot-Integration-Id", "vscode-chat")
-            .header("Openai-Intent", "conversation-panel")
-            .header("User-Agent", "CopilotRewrite/0.9.0")
-            .json(&request)
-            .send()
+        self.call_chat_completion(github_token, model, system_prompt, text)
             .await
-            .context("Failed to send request to Copilot API")?;
-
-        let status = response.status();
-        if !status.is_success() {
-            let error_body = response.text().await.unwrap_or_default();
-            if status.as_u16() == 401 {
-                warn!("Copilot token expired, clearing cache...");
-                *self.cached_token.lock() = None;
-            }
-            anyhow::bail!(
-                "Copilot API returned HTTP {}: {}",
-                status.as_u16(),
-                error_body
-            );
-        }
-
-        // Parse SSE stream response (same as process())
-        let body = response
-            .text()
-            .await
-            .context("Failed to read response body")?;
-        let mut result = String::new();
-
-        for line in body.lines() {
-            let line = line.trim();
-            if let Some(data) = line.strip_prefix("data: ") {
-                if data == "[DONE]" {
-                    break;
-                }
-                if let Ok(chunk) = serde_json::from_str::<ChatCompletionResponse>(data) {
-                    if let Some(choice) = chunk.choices.first() {
-                        if let Some(ref delta) = choice.delta {
-                            if let Some(ref content) = delta.content {
-                                result.push_str(content);
-                            }
-                        }
-                        if let Some(ref message) = choice.message {
-                            result.push_str(&message.content);
-                        }
-                    }
-                }
-            }
-        }
-
-        info!("Read Mode: Copilot API returned {} chars", result.len());
-
-        Ok(result.trim().to_string())
     }
 }
 
