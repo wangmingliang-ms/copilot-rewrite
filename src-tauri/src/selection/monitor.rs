@@ -106,6 +106,7 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
     let mut selection_source_hwnd: isize = 0; // HWND that had the selection
     let mut popup_icon_visible = false; // Track if popup icon (not preview) is shown
     let mut mouse_idle_after_popup = false; // True once mouse was released after popup appeared
+    let mut mouse_selecting = false; // Track if user is dragging to select text
 
     let mut seen_generation = state
         .selection_generation
@@ -238,6 +239,22 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
             }
         } else {
             mouse_idle_after_popup = false;
+        }
+
+        // Mouse-event driven popup: detect mouseup after drag to trigger instant UIA check.
+        // This bypasses the poll+debounce delay for a near-instant popup response.
+        let lbutton_now = unsafe { GetAsyncKeyState(0x01) } & (0x8000u16 as i16) != 0;
+        let mut mouse_just_released = false;
+        if !popup_icon_visible && !preview_is_visible {
+            if lbutton_now && !mouse_selecting {
+                mouse_selecting = true; // Mouse button pressed — potential selection start
+            } else if !lbutton_now && mouse_selecting {
+                mouse_selecting = false;
+                mouse_just_released = true; // Mouse released — selection may have completed
+                debug!("Mouse released — will do instant UIA check");
+            }
+        } else if !lbutton_now {
+            mouse_selecting = false;
         }
 
         // Try to get selected text via UIA
@@ -374,8 +391,11 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
                             debounce_text = Some(text_trimmed.clone());
                             last_change_time = Instant::now();
                         } else if let Some(ref debounced) = debounce_text {
-                            if last_change_time.elapsed() >= Duration::from_millis(DEBOUNCE_MS) {
-                                // Debounce complete — show popup icon
+                            if mouse_just_released || last_change_time.elapsed() >= Duration::from_millis(DEBOUNCE_MS) {
+                                // Debounce complete (or mouseup instant trigger) — show popup icon
+                                if mouse_just_released {
+                                    debug!("Instant popup trigger via mouseup");
+                                }
                                 let mouse_pos = get_cursor_position();
                                 let source_hwnd = unsafe { GetForegroundWindow().0 as isize };
                                 let (app_name, window_title) = get_window_context(source_hwnd);
