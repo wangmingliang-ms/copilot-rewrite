@@ -827,7 +827,7 @@ pub fn run() {
             let now = chrono::Local::now();
             let line = format!(
                 "[{} {} {}] {}\n",
-                now.format("%Y-%m-%d %H:%M:%S"),
+                now.format("%Y-%m-%d %H:%M:%S%.3f"),
                 record.level(),
                 record.module_path().unwrap_or(""),
                 record.args()

@@ -73,7 +73,7 @@ fn get_window_context(hwnd: isize) -> (String, String) {
 }
 
 /// Minimum time between showing the popup (debounce)
-const DEBOUNCE_MS: u64 = 200;
+const DEBOUNCE_MS: u64 = 100;
 /// Minimum text length to trigger popup
 const MIN_TEXT_LENGTH: usize = 1;
 /// Maximum text length to process (avoid huge payloads)
