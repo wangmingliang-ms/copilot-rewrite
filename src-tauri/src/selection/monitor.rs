@@ -432,22 +432,27 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
                 }
             }
         } else {
-            // No selection detected
-            if last_selection.is_some() && !preview_is_visible {
+            // No selection detected — unconditionally hide popup regardless of state
+            // (icon, spinning, or expanded — selection loss always dismisses)
+            if last_selection.is_some() {
                 info!(
-                    "Selection cleared — hiding popup (was {} chars)",
-                    last_selection.as_ref().map(|s| s.len()).unwrap_or(0)
+                    "Selection cleared \u{2014} hiding popup (was {} chars, preview_was={})",
+                    last_selection.as_ref().map(|s| s.len()).unwrap_or(0),
+                    preview_is_visible
                 );
+                // Cancel any in-flight API request
+                state.cancel_token.lock().cancel();
+                // Reset all state
                 last_selection = None;
                 debounce_text = None;
                 popup_icon_visible = false;
                 selection_source_hwnd = 0;
                 overlay::hide_popup(&app_handle);
                 *state.current_selection.lock() = None;
+                *state.preview_visible.lock() = false;
+                state.selection_generation.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             }
-            // If preview_is_visible: do nothing — let dismiss_popup handle cleanup
         }
-
         std::thread::sleep(Duration::from_millis(poll_interval));
     }
 }
