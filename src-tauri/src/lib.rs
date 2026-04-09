@@ -688,10 +688,16 @@ async fn replace_text(
     .map_err(|e| format!("Thread error: {}", e))?
     .map_err(|e| format!("Replace error: {}", e));
 
-    // Re-enable monitoring after delay
+    // Re-enable monitoring after delay.
+    // 800ms allows slow apps (Outlook, Teams) to process the paste before
+    // UIA polling resumes. Also bump generation to prevent the pasted text
+    // from being detected as a new selection.
     let state_clone = state.inner().clone();
     std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_millis(300));
+        std::thread::sleep(std::time::Duration::from_millis(800));
+        state_clone
+            .selection_generation
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         *state_clone.enabled.lock() = true;
     });
 
