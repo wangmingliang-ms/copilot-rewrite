@@ -26,6 +26,24 @@ function findUnescapedQuote(s: string): number {
   return -1;
 }
 
+/** Extract a JSON string value for a given key from potentially partial JSON.
+ *  Returns the unescaped string content, or null if the key is not found. */
+function extractJsonStringValue(json: string, key: string): string | null {
+  const marker = `"${key}"`;
+  const idx = json.indexOf(marker);
+  if (idx === -1) return null;
+  const afterKey = json.substring(idx + marker.length);
+  const valMatch = afterKey.match(/^\s*:\s*"/);
+  if (!valMatch) return null;
+  const valueStart = idx + marker.length + valMatch[0].length;
+  let raw = json.substring(valueStart);
+  const closingIdx = findUnescapedQuote(raw);
+  if (closingIdx !== -1) {
+    raw = raw.substring(0, closingIdx);
+  }
+  return raw.replace(/\\n/g, "\n").replace(/\\"/g, '"').replace(/\\\\/g, "\\");
+}
+
 const Popup: FC<PopupProps> = ({ selection }) => {
   const [state, setState] = useState<PopupState>("icon");
   const stateRef = useRef<PopupState>("icon");
@@ -279,56 +297,62 @@ const Popup: FC<PopupProps> = ({ selection }) => {
     return marked.parse(readExplanation) as string;
   }, [readExplanation]);
 
-  // Extract displayable text from streaming content.
+  // Extract displayable content from streaming text.
   // The LLM often returns JSON (Write Mode: {"reorganized":"...","translated":"..."},
-  // Read Mode: {"mode":"...","translation":"..."}). During streaming the JSON is incomplete,
-  // so we extract the last string value being written to show meaningful content.
-  const streamingDisplayText = useMemo(() => {
-    if (!streamingText) return "";
-    const text = streamingText.trim();
+  // Read Mode: {"mode":"...","translation":"...","vocabulary":[...]}). During streaming
+  // the JSON is incomplete, so we extract values incrementally.
+  const streamingParsed = useMemo(() => {
+    const empty = { text: "", vocabulary: [] as { term: string; meaning: string; usage: string }[] };
+    if (!streamingText) return empty;
+    const raw = streamingText.trim();
 
     // If it doesn't look like JSON, render as-is (plain text modes like Translate/Polish)
-    if (!text.startsWith("{")) return text;
+    if (!raw.startsWith("{")) return { ...empty, text: raw };
 
-    // Try to extract content from partial JSON.
-    // Strategy: find the last key-value pair being written and extract its string value.
-    // For Write Mode: we want "translated" (or "reorganized" if "translated" hasn't started)
-    // For Read Mode: we want "translation" (or "summary", "explanation")
-
-    // Priority order of keys to extract (last wins — we want the one currently streaming)
+    // Priority order of text keys to extract (last found wins — the one currently streaming)
     const keys = ["reorganized", "translated", "summary", "explanation", "translation"];
     let bestContent = "";
     for (const key of keys) {
-      const marker = `"${key}"`;
-      const idx = text.indexOf(marker);
-      if (idx === -1) continue;
-      // Find the start of the string value after the key
-      const afterKey = text.substring(idx + marker.length);
-      // Skip :\s*"
-      const valMatch = afterKey.match(/^\s*:\s*"/);
-      if (!valMatch) continue;
-      const valueStart = idx + marker.length + valMatch[0].length;
-      // Extract everything from valueStart to end, handling escaped quotes
-      let raw = text.substring(valueStart);
-      // If the value is properly closed, trim the closing quote
-      // Otherwise take everything (it's still being streamed)
-      const closingIdx = findUnescapedQuote(raw);
-      if (closingIdx !== -1) {
-        raw = raw.substring(0, closingIdx);
-      }
-      // Unescape JSON string escapes
-      bestContent = raw.replace(/\\n/g, "\n").replace(/\\"/g, '"').replace(/\\\\/g, "\\");
+      const extracted = extractJsonStringValue(raw, key);
+      if (extracted !== null) bestContent = extracted;
     }
 
-    return bestContent || text; // Fallback to raw text if no key found
+    // Try to extract vocabulary entries from partial JSON
+    const vocabulary: { term: string; meaning: string; usage: string }[] = [];
+    const vocabIdx = raw.indexOf('"vocabulary"');
+    if (vocabIdx !== -1) {
+      const afterVocab = raw.substring(vocabIdx);
+      const arrStart = afterVocab.indexOf("[");
+      if (arrStart !== -1) {
+        const arrContent = afterVocab.substring(arrStart + 1);
+        // Extract complete objects {...} from the array
+        const objRegex = /\{[^}]*\}/g;
+        let match;
+        while ((match = objRegex.exec(arrContent)) !== null) {
+          try {
+            const obj = JSON.parse(match[0]);
+            if (obj.term) {
+              vocabulary.push({
+                term: String(obj.term || ""),
+                meaning: String(obj.meaning || ""),
+                usage: String(obj.usage || ""),
+              });
+            }
+          } catch { /* partial object, skip */ }
+        }
+      }
+    }
+
+    // Also try to extract examples array for "word" mode
+    return { text: bestContent || raw, vocabulary };
   }, [streamingText]);
 
   // Streaming markdown — render extracted content as markdown
   const streamingHtml = useMemo(() => {
-    if (!streamingDisplayText) return "";
+    if (!streamingParsed.text) return "";
     marked.setOptions({ breaks: true, gfm: true });
-    return marked.parse(streamingDisplayText) as string;
-  }, [streamingDisplayText]);
+    return marked.parse(streamingParsed.text) as string;
+  }, [streamingParsed.text]);
 
   // The text to use for Replace/Copy
   // Write Mode: translated text; Read Mode: all relevant content
@@ -677,6 +701,19 @@ const Popup: FC<PopupProps> = ({ selection }) => {
               style={{ background: "transparent" }}
               dangerouslySetInnerHTML={{ __html: streamingHtml }}
             />
+            {/* Vocabulary entries extracted during streaming */}
+            {streamingParsed.vocabulary.length > 0 && (
+              <div className="space-y-2 border-t border-gray-100 dark:border-gray-700 pt-2 mt-3">
+                <div className="text-[11px] font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wide">Vocabulary</div>
+                {streamingParsed.vocabulary.map((v, i) => (
+                  <div key={i} className="pl-3 border-l-2 border-purple-200 dark:border-purple-800">
+                    <span className="text-[12.5px] font-semibold text-purple-600 dark:text-purple-400">{v.term}</span>
+                    <span className="text-[12px] text-gray-600 dark:text-gray-400"> — {v.meaning}</span>
+                    {v.usage && <div className="text-[11.5px] text-gray-400 dark:text-gray-500 italic mt-0.5">{v.usage}</div>}
+                  </div>
+                ))}
+              </div>
+            )}
             {/* Blinking cursor indicator */}
             <span className="inline-block w-[2px] h-[1em] bg-copilot-blue align-text-bottom animate-pulse ml-0.5" />
           </div>
