@@ -3,7 +3,8 @@
 
 use crate::clipboard;
 use anyhow::{Context, Result};
-use std::fs::OpenOptions;
+use std::cell::RefCell;
+use std::fs::{File, OpenOptions};
 use std::io::Write as IoWrite;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -16,18 +17,34 @@ use windows::Win32::UI::WindowsAndMessaging::{
     AllowSetForegroundWindow, GetForegroundWindow, SetForegroundWindow, ASFW_ANY,
 };
 
+// Thread-local cached file handle for debug_log.
+// Avoids opening the file on every debug_log call during a single replacement.
+thread_local! {
+    static DEBUG_LOG_FILE: RefCell<Option<File>> = const { RefCell::new(None) };
+}
+
 fn debug_log(msg: &str) {
-    // Use Roaming AppData (same as auth.json location)
-    if let Some(dir) = dirs::config_dir() {
-        let log_path = dir.join("copilot-rewrite").join("replace-debug.log");
-        if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(&log_path) {
+    DEBUG_LOG_FILE.with(|cell| {
+        let mut handle = cell.borrow_mut();
+        // Open the file on first use (lazy init per thread)
+        if handle.is_none() {
+            if let Some(dir) = dirs::config_dir() {
+                let log_path = dir.join("copilot-rewrite").join("replace-debug.log");
+                *handle = OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&log_path)
+                    .ok();
+            }
+        }
+        if let Some(ref mut f) = *handle {
             let secs = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_millis();
             let _ = writeln!(f, "[{}] {}", secs, msg);
         }
-    }
+    });
 }
 
 /// Replace the currently selected text in the specified source application

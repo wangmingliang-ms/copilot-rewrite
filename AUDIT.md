@@ -77,7 +77,7 @@ Hidden window doesn't need resize. Defer to next `show_popup_icon`.
 ### 10. Overlay functions repeatedly look up popup window by name
 **File:** `overlay/mod.rs`
 **Category:** Performance
-**Status:** DEFERRED — low impact, high churn
+**Status:** ✅ FIXED — cached `WebviewWindow` in static `POPUP_WINDOW`, set once in `setup_popup_window()`. All overlay functions now use `get_popup()` helper.
 
 ### 11. OAuth creates new `reqwest::Client` per call instead of reusing
 **File:** `lib.rs` lines 438, 456
@@ -100,22 +100,22 @@ New client = new connection pool. Should reuse `CopilotClient.http`.
 ### 13. `estimate_height` double-scans string
 **File:** `overlay/mod.rs` line 392
 **Category:** Performance
-**Status:** DEFERRED
+**Status:** ✅ FIXED — rewritten as single-pass loop counting chars and newlines simultaneously.
 
 ### 14. `build_cf_html` header offset relies on placeholder length invariant
 **File:** `clipboard/manager.rs` lines 62-82
 **Category:** Correctness
-**Status:** DEFERRED — add comment
+**Status:** ✅ FIXED — added safety invariant doc comment explaining the 10-char placeholder ↔ `{:010}` format dependency.
 
 ### 15. `debug_log` in replacement engine opens file per call
 **File:** `replacement/engine.rs` lines 19-31
 **Category:** Performance
-**Status:** DEFERRED — only during replace
+**Status:** ✅ FIXED — cached file handle in `thread_local!` static, opened once per thread on first use.
 
 ### 16. `extract_translated` doesn't handle Unicode escapes
 **File:** `overlay/mod.rs` lines 401-433
 **Category:** Cosmetic
-**Status:** DEFERRED — content resize corrects it
+**Status:** ✅ FIXED — function removed entirely (dead code after switch from JSON to separator format for Read Mode).
 
 ### 17. `image` crate may be unused
 **File:** `Cargo.toml` line 29
@@ -125,7 +125,7 @@ New client = new connection pool. Should reuse `CopilotClient.http`.
 ### 18. `once_cell` may be replaceable with std
 **File:** `Cargo.toml` line 31
 **Category:** Dependencies
-**Status:** DEFERRED
+**Status:** ✅ FIXED — removed from Cargo.toml (not used in source code, only pulled by transitive dependencies).
 
 ### 19. `open_settings` HWND cast inconsistency
 **File:** `lib.rs` line 593
@@ -135,4 +135,4 @@ New client = new connection pool. Should reuse `CopilotClient.http`.
 ### 20. No TCP keepalive on HTTP client
 **File:** `copilot/client.rs` line 390-393
 **Category:** Latency
-**Status:** DEFERRED
+**Status:** ✅ FIXED — added `.tcp_keepalive(Duration::from_secs(30))` to the `reqwest::Client` builder.

@@ -10,6 +10,7 @@
 use log::{debug, error, info, warn};
 use parking_lot::Mutex;
 use tauri::{AppHandle, LogicalPosition, LogicalSize, Manager, Position};
+use tauri::WebviewWindow;
 use windows::Win32::Foundation::{HWND, POINT};
 use windows::Win32::Graphics::Gdi::MonitorFromPoint;
 use windows::Win32::Graphics::Gdi::MONITOR_DEFAULTTONEAREST;
@@ -51,12 +52,29 @@ static POPUP_POS: Mutex<(f64, f64, f64)> = Mutex::new((0.0, 0.0, 1.0));
 static INPUT_RECT: Mutex<Option<(i32, i32, i32, i32)>> = Mutex::new(None);
 /// Stored popup bottom edge (logical Y) — anchored during content resizing
 static POPUP_BOTTOM: Mutex<f64> = Mutex::new(0.0);
+/// Cached popup WebviewWindow — set once in setup_popup_window, avoids HashMap lookup per call
+static POPUP_WINDOW: Mutex<Option<WebviewWindow>> = Mutex::new(None);
 
-/// Set up popup window styles — strip frame, apply WS_EX_NOACTIVATE
+/// Get the cached popup window (set during setup_popup_window).
+/// Falls back to app_handle lookup if cache is empty (shouldn't happen after setup).
+fn get_popup(app_handle: &AppHandle) -> Option<WebviewWindow> {
+    let cached = POPUP_WINDOW.lock();
+    if cached.is_some() {
+        return cached.clone();
+    }
+    drop(cached);
+    app_handle.get_webview_window("popup")
+}
+
+/// Set up popup window styles — strip frame, apply WS_EX_NOACTIVATE.
+/// Also caches the WebviewWindow for reuse by all overlay functions.
 pub fn setup_popup_window(app_handle: &AppHandle) {
     info!("Setting up popup window...");
 
     if let Some(window) = app_handle.get_webview_window("popup") {
+        // Cache for reuse — avoids HashMap lookup on every overlay call
+        *POPUP_WINDOW.lock() = Some(window.clone());
+
         match window.hwnd() {
             Ok(hwnd) => {
                 unsafe {
@@ -109,7 +127,7 @@ pub fn show_popup_icon(
     input_rect: Option<(i32, i32, i32, i32)>,
     icon_position: &str,
 ) {
-    if let Some(window) = app_handle.get_webview_window("popup") {
+    if let Some(window) = get_popup(app_handle) {
         let scale = get_scale_at(mouse_x, mouse_y);
         let (screen_w, screen_h, _) = get_primary_screen_info(app_handle);
         let icon_logical = ICON_SIZE / scale;
@@ -203,78 +221,63 @@ pub fn show_popup_icon(
     }
 }
 
-/// Expand popup to show result text — removes WS_EX_NOACTIVATE for interactivity.
-/// Uses input element rect for width and vertical positioning when available.
-pub fn expand_popup(app_handle: &AppHandle, text: &str) {
-    if let Some(window) = app_handle.get_webview_window("popup") {
-        // Extract translated text from JSON for height estimation
-        let est_text = extract_translated(text).unwrap_or(text);
-        let height = estimate_height(est_text);
-        let (screen_w, screen_h, _) = get_primary_screen_info(app_handle);
+/// Compute expanded popup position and width given a target height.
+/// Returns (x, y, w_logical) in logical coordinates, clamped to screen bounds.
+/// Uses input element rect when available, otherwise falls back to stored popup position.
+fn compute_expanded_position(app_handle: &AppHandle, height: f64) -> (f64, f64, f64) {
+    let (screen_w, screen_h, _) = get_primary_screen_info(app_handle);
+    let stored_input = *INPUT_RECT.lock();
 
-        let (x, y, w_logical) = {
-            let stored_input = *INPUT_RECT.lock();
+    // Determine width and scale from selection rect (one get_scale_at call)
+    let (w, scale_opt) = if let Some((_rx, ry, rw, _rh)) = stored_input {
+        let scale = get_scale_at(0, ry);
+        let elem_w = rw as f64 / scale;
+        (elem_w.max(EXPANDED_WIDTH).min(screen_w - 16.0), Some(scale))
+    } else {
+        (EXPANDED_WIDTH, None)
+    };
 
-            // Determine width: use selection width if available (clamped), otherwise default
-            let w = if let Some((_rx, ry, rw, _rh)) = stored_input {
-                let scale = get_scale_at(0, ry);
-                let elem_w = rw as f64 / scale;
-                elem_w.max(EXPANDED_WIDTH).min(screen_w - 16.0)
-            } else {
-                EXPANDED_WIDTH
-            };
+    // Position relative to selection rect, or fallback to stored popup pos
+    if let Some((sx, sy, _sw, sh)) = stored_input {
+        let scale = scale_opt.unwrap_or_else(|| get_scale_at(sx, sy));
+        let sel_x = sx as f64 / scale;
+        let sel_y = sy as f64 / scale;
+        let sel_h = sh as f64 / scale;
 
-            // Position: prefer placing relative to selection rect, fallback to stored popup pos
-            if let Some((sx, sy, _sw, sh)) = stored_input {
-                let scale = get_scale_at(sx, sy);
-                let sel_x = sx as f64 / scale;
-                let sel_y = sy as f64 / scale;
-                let sel_h = sh as f64 / scale;
+        // Try above selection first (12px gap)
+        let mut py = sel_y - height - 12.0;
+        let mut px = sel_x;
 
-                // Try above selection first (12px gap)
-                let mut py = sel_y - height - 12.0;
-                let mut px = sel_x;
+        if py < 0.0 {
+            // Not enough room above — place below selection
+            py = sel_y + sel_h + 12.0;
+        }
+        if py + height > screen_h {
+            py = screen_h - height - 8.0;
+        }
+        if px + w > screen_w {
+            px = screen_w - w - 8.0;
+        }
+        if px < 0.0 { px = 8.0; }
+        if py < 0.0 { py = 8.0; }
 
-                if py < 0.0 {
-                    // Not enough room above — place below selection
-                    py = sel_y + sel_h + 12.0;
-                }
-                // If below also overflows, clamp to screen bottom
-                if py + height > screen_h {
-                    py = screen_h - height - 8.0;
-                }
-                if px + w > screen_w {
-                    px = screen_w - w - 8.0;
-                }
-                if px < 0.0 {
-                    px = 8.0;
-                }
-                if py < 0.0 {
-                    py = 8.0;
-                }
+        (px, py, w)
+    } else {
+        let (stored_x, stored_y, _) = *POPUP_POS.lock();
+        let mut x = stored_x;
+        let mut y = stored_y;
+        if x + w > screen_w { x = screen_w - w - 8.0; }
+        if y + height > screen_h { y = screen_h - height - 8.0; }
+        if x < 0.0 { x = 8.0; }
+        if y < 0.0 { y = 8.0; }
+        (x, y, w)
+    }
+}
 
-                (px, py, w)
-            } else {
-                // No selection rect — use stored popup position
-                let (stored_x, stored_y, _) = *POPUP_POS.lock();
-                let mut x = stored_x;
-                let mut y = stored_y;
-                if x + w > screen_w {
-                    x = screen_w - w - 8.0;
-                }
-                if y + height > screen_h {
-                    y = screen_h - height - 8.0;
-                }
-                if x < 0.0 {
-                    x = 8.0;
-                }
-                if y < 0.0 {
-                    y = 8.0;
-                }
-                (x, y, w)
-            }
-        };
-
+/// Apply expanded size and position to the popup window.
+/// Removes WS_EX_NOACTIVATE, sets size/position, stores bottom anchor.
+fn apply_expanded_layout(app_handle: &AppHandle, x: f64, y: f64, w_logical: f64, height: f64, label: &str) {
+    if let Some(window) = get_popup(app_handle) {
         // Remove WS_EX_NOACTIVATE so buttons are clickable
         set_noactivate(app_handle, false);
 
@@ -292,82 +295,26 @@ pub fn expand_popup(app_handle: &AppHandle, text: &str) {
         let _ = window.set_position(Position::Logical(LogicalPosition::new(win_x, win_y)));
 
         info!(
-            "Popup expanded to {:.0}x{:.0} (content {:.0}x{:.0}) at ({:.0}, {:.0}), bottom={:.0}",
-            win_w, win_h, w_logical, height, win_x, win_y, content_bottom
+            "Popup {} to {:.0}x{:.0} (content {:.0}x{:.0}) at ({:.0}, {:.0}), bottom={:.0}",
+            label, win_w, win_h, w_logical, height, win_x, win_y, content_bottom
         );
     }
+}
+
+/// Expand popup to show result text — removes WS_EX_NOACTIVATE for interactivity.
+/// Uses input element rect for width and vertical positioning when available.
+pub fn expand_popup(app_handle: &AppHandle, text: &str) {
+    let height = estimate_height(text);
+    let (x, y, w_logical) = compute_expanded_position(app_handle, height);
+    apply_expanded_layout(app_handle, x, y, w_logical, height, "expanded");
 }
 
 /// Expand popup for streaming — uses a fixed default height instead of estimating from text.
 /// The frontend resize effect will adjust the height as content grows.
 pub fn expand_popup_streaming(app_handle: &AppHandle) {
-    if let Some(window) = app_handle.get_webview_window("popup") {
-        let height = EXPANDED_STREAMING_HEIGHT;
-        let (screen_w, screen_h, _) = get_primary_screen_info(app_handle);
-
-        let (x, y, w_logical) = {
-            let stored_input = *INPUT_RECT.lock();
-
-            let w = if let Some((_rx, ry, rw, _rh)) = stored_input {
-                let scale = get_scale_at(0, ry);
-                let elem_w = rw as f64 / scale;
-                elem_w.max(EXPANDED_WIDTH).min(screen_w - 16.0)
-            } else {
-                EXPANDED_WIDTH
-            };
-
-            if let Some((sx, sy, _sw, sh)) = stored_input {
-                let scale = get_scale_at(sx, sy);
-                let sel_x = sx as f64 / scale;
-                let sel_y = sy as f64 / scale;
-                let sel_h = sh as f64 / scale;
-
-                let mut py = sel_y - height - 12.0;
-                let mut px = sel_x;
-
-                if py < 0.0 {
-                    py = sel_y + sel_h + 12.0;
-                }
-                if py + height > screen_h {
-                    py = screen_h - height - 8.0;
-                }
-                if px + w > screen_w {
-                    px = screen_w - w - 8.0;
-                }
-                if px < 0.0 { px = 8.0; }
-                if py < 0.0 { py = 8.0; }
-
-                (px, py, w)
-            } else {
-                let (stored_x, stored_y, _) = *POPUP_POS.lock();
-                let mut x = stored_x;
-                let mut y = stored_y;
-                if x + w > screen_w { x = screen_w - w - 8.0; }
-                if y + height > screen_h { y = screen_h - height - 8.0; }
-                if x < 0.0 { x = 8.0; }
-                if y < 0.0 { y = 8.0; }
-                (x, y, w)
-            }
-        };
-
-        set_noactivate(app_handle, false);
-
-        let win_w = w_logical + SHADOW_MARGIN * 2.0;
-        let win_h = height + SHADOW_MARGIN * 2.0;
-        let win_x = x - SHADOW_MARGIN;
-        let win_y = y - SHADOW_MARGIN;
-
-        let content_bottom = y + height;
-        *POPUP_BOTTOM.lock() = content_bottom;
-
-        let _ = window.set_size(LogicalSize::new(win_w, win_h));
-        let _ = window.set_position(Position::Logical(LogicalPosition::new(win_x, win_y)));
-
-        info!(
-            "Popup streaming expand to {:.0}x{:.0} (content {:.0}x{:.0}) at ({:.0}, {:.0}), bottom={:.0}",
-            win_w, win_h, w_logical, height, win_x, win_y, content_bottom
-        );
-    }
+    let height = EXPANDED_STREAMING_HEIGHT;
+    let (x, y, w_logical) = compute_expanded_position(app_handle, height);
+    apply_expanded_layout(app_handle, x, y, w_logical, height, "streaming expand");
 }
 
 /// Shrink popup back to icon size and re-apply WS_EX_NOACTIVATE
@@ -385,7 +332,7 @@ pub fn shrink_popup(app_handle: &AppHandle) {
 
 /// Hide the popup window
 pub fn hide_popup(app_handle: &AppHandle) {
-    if let Some(window) = app_handle.get_webview_window("popup") {
+    if let Some(window) = get_popup(app_handle) {
         let _ = window.hide();
         // Belt-and-suspenders: also use Win32 to ensure window is truly hidden.
         // Tauri's window.hide() can silently fail in some edge cases.
@@ -408,7 +355,7 @@ pub fn hide_popup(app_handle: &AppHandle) {
 
 /// Toggle WS_EX_NOACTIVATE on the popup window
 fn set_noactivate(app_handle: &AppHandle, enable: bool) {
-    if let Some(window) = app_handle.get_webview_window("popup") {
+    if let Some(window) = get_popup(app_handle) {
         if let Ok(hwnd) = window.hwnd() {
             unsafe {
                 let hwnd_win = HWND(hwnd.0 as *mut _);
@@ -437,7 +384,7 @@ fn set_noactivate(app_handle: &AppHandle, enable: bool) {
 
 /// Resize popup to exact physical pixels via SetWindowPos
 fn resize_popup_physical(app_handle: &AppHandle, w: f64, h: f64) {
-    if let Some(window) = app_handle.get_webview_window("popup") {
+    if let Some(window) = get_popup(app_handle) {
         if let Ok(hwnd) = window.hwnd() {
             unsafe {
                 let hwnd_win = HWND(hwnd.0 as *mut _);
@@ -455,59 +402,30 @@ fn resize_popup_physical(app_handle: &AppHandle, w: f64, h: f64) {
     }
 }
 
-/// Estimate expanded height based on text content
+/// Estimate expanded height based on text content (single pass over chars)
 fn estimate_height(text: &str) -> f64 {
     if text.is_empty() {
         return EXPANDED_MIN_HEIGHT;
     }
-    let newline_count = text.chars().filter(|c| *c == '\n').count() as f64;
-    let char_count = text.chars().count() as f64;
-    let wrapped_lines = (char_count / CHARS_PER_LINE).ceil();
-    let total_lines = wrapped_lines.max(newline_count + 1.0);
+    let mut newline_count = 0usize;
+    let mut char_count = 0usize;
+    for c in text.chars() {
+        char_count += 1;
+        if c == '\n' {
+            newline_count += 1;
+        }
+    }
+    let wrapped_lines = (char_count as f64 / CHARS_PER_LINE).ceil();
+    let total_lines = wrapped_lines.max(newline_count as f64 + 1.0);
     let text_height = total_lines * LINE_HEIGHT_PX;
     let height = text_height + TEXT_PADDING + BUTTONS_HEIGHT;
     height.clamp(EXPANDED_MIN_HEIGHT, EXPANDED_MAX_HEIGHT)
 }
 
-/// Extract "translated" field from JSON response for height estimation
-fn extract_translated(text: &str) -> Option<&str> {
-    // Quick JSON parse: find "translated": "..." value
-    let marker = "\"translated\"";
-    let idx = text.find(marker)?;
-    let rest = &text[idx + marker.len()..];
-    // Skip whitespace and colon
-    let rest = rest.trim_start();
-    let rest = rest.strip_prefix(':')?;
-    let rest = rest.trim_start();
-    let rest = rest.strip_prefix('"')?;
-    // Find the end of the string value (handle escaped quotes)
-    let mut end = 0;
-    let mut escaped = false;
-    for (i, c) in rest.char_indices() {
-        if escaped {
-            escaped = false;
-            continue;
-        }
-        if c == '\\' {
-            escaped = true;
-            continue;
-        }
-        if c == '"' {
-            end = i;
-            break;
-        }
-    }
-    if end > 0 {
-        Some(&rest[..end])
-    } else {
-        None
-    }
-}
-
 /// Resize expanded popup to fit actual rendered content height (called from frontend)
 /// Anchors the bottom edge — grows/shrinks upward
 pub fn resize_popup_to_content(app_handle: &AppHandle, content_height: f64) {
-    if let Some(window) = app_handle.get_webview_window("popup") {
+    if let Some(window) = get_popup(app_handle) {
         // Add 20px buffer to avoid sub-pixel scrollbar
         let height = (content_height + 20.0).clamp(EXPANDED_MIN_HEIGHT, EXPANDED_MAX_HEIGHT);
         let stored_input = *INPUT_RECT.lock();

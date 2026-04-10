@@ -158,19 +158,16 @@ unsafe extern "system" fn raw_handle_automation_event(
     let handler = &*this;
 
     if event_id == UIA_Text_TextSelectionChangedEventId.0 {
-        // Reconstruct IUIAutomationElement from raw pointer
         if !sender.is_null() {
-            // Get process ID of the sender element to filter our own process
-            let sender_element: IUIAutomationElement =
-                IUIAutomationElement::from_raw(sender);
-            // AddRef because from_raw takes ownership, but COM still holds a reference
-            // Actually, we need to be careful: the sender pointer is borrowed from COM,
-            // we must AddRef before using it. from_raw doesn't AddRef.
-            // We need to manually AddRef the sender.
-            std::mem::forget(sender_element.clone()); // clone does AddRef; forget the original (no Release)
-            // Now sender_element holds our own AddRef'd reference
+            // Safety: `sender` is a borrowed COM pointer from the UIA callback.
+            // `from_raw` takes ownership without AddRef, so we wrap in ManuallyDrop
+            // to prevent Release when it goes out of scope (COM still owns this ref).
+            // We then clone() to get our own AddRef'd reference for caching.
+            let borrowed = std::mem::ManuallyDrop::new(
+                IUIAutomationElement::from_raw(sender),
+            );
 
-            let sender_pid = sender_element.CurrentProcessId().unwrap_or(0) as u32;
+            let sender_pid = borrowed.CurrentProcessId().unwrap_or(0) as u32;
             if sender_pid == handler.our_pid {
                 trace!("TextSelectionChanged from own process — ignoring");
                 return S_OK.0;
@@ -181,7 +178,9 @@ unsafe extern "system" fn raw_handle_automation_event(
                 sender_pid
             );
 
-            *handler.shared.event_element.lock() = Some(sender_element);
+            // clone() does AddRef — this is our owned reference to cache
+            let cached = (*borrowed).clone();
+            *handler.shared.event_element.lock() = Some(cached);
             handler.shared.has_event.store(true, Ordering::Release);
         }
     }
@@ -448,15 +447,19 @@ impl UiaEngine {
     /// Cached -> Event -> Focused(non-editable) -> ElementFromPoint -> TreeWalker.
     /// Everything found here is is_input=false (Read Mode).
     pub fn get_selected_text_any(&self) -> Result<(Option<String>, bool)> {
+        // Get focused element ONCE — this is a cross-process COM call (1-10ms).
+        // Reused across Phase 1, cached element validation, and Phase 2 fallback.
+        let focused = self.get_focused_element().ok();
+
         // =================================================================
         // Phase 1: Write Mode -- check focused element first
         // If focus is on an editable element with selected text -> Write Mode
         // =================================================================
-        if let Ok(focused) = self.get_focused_element() {
-            if self.is_editable_element(&focused) {
-                if let Ok(Some(text)) = self.get_text_from_element(&focused) {
-                    self.log_element_info(&focused, true, "focused-write");
-                    *self.cached_element.borrow_mut() = Some(focused);
+        if let Some(ref focused_el) = focused {
+            if self.is_editable_element(focused_el) {
+                if let Ok(Some(text)) = self.get_text_from_element(focused_el) {
+                    self.log_element_info(focused_el, true, "focused-write");
+                    *self.cached_element.borrow_mut() = Some(focused_el.clone());
                     // Consume any pending event to avoid stale detection
                     if self.event_handler_active {
                         self.event_state.has_event.swap(false, Ordering::AcqRel);
@@ -467,9 +470,9 @@ impl UiaEngine {
             } else {
                 // Phase 1 miss: focused element is not editable — log for debugging
                 unsafe {
-                    let ct = focused.CurrentControlType().unwrap_or_default();
-                    let name = focused.CurrentName().unwrap_or_default();
-                    let class = focused.CurrentClassName().unwrap_or_default();
+                    let ct = focused_el.CurrentControlType().unwrap_or_default();
+                    let name = focused_el.CurrentName().unwrap_or_default();
+                    let class = focused_el.CurrentClassName().unwrap_or_default();
                     debug!("Phase 1 skip: focused not editable — type={}, name={:?}, class={:?}", ct.0, name.to_string(), class.to_string());
                 }
             }
@@ -509,9 +512,9 @@ impl UiaEngine {
                 let is_input = self.is_editable_element(element);
                 if is_input {
                     // Editable cached element: only trust it if it matches the current focused element
-                    if let Ok(focused) = self.get_focused_element() {
+                    if let Some(ref focused_el) = focused {
                         let same = unsafe {
-                            self.automation.CompareElements(element, &focused).unwrap_or_default().as_bool()
+                            self.automation.CompareElements(element, focused_el).unwrap_or_default().as_bool()
                         };
                         if same {
                             if let Ok(Some(text)) = self.get_text_from_element(element) {
@@ -533,12 +536,12 @@ impl UiaEngine {
         }
         *self.cached_element.borrow_mut() = None;
 
-        // GetFocusedElement for non-editable elements with selection
-        if let Ok(element) = self.get_focused_element() {
-            if let Ok(Some(text)) = self.get_text_from_element(&element) {
-                let is_input = self.is_editable_element(&element);
-                self.log_element_info(&element, is_input, "focused");
-                *self.cached_element.borrow_mut() = Some(element);
+        // Reuse focused element for non-editable selection check
+        if let Some(focused_el) = focused {
+            if let Ok(Some(text)) = self.get_text_from_element(&focused_el) {
+                let is_input = self.is_editable_element(&focused_el);
+                self.log_element_info(&focused_el, is_input, "focused");
+                *self.cached_element.borrow_mut() = Some(focused_el);
                 return Ok((Some(text), is_input));
             }
         }

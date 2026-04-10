@@ -100,6 +100,8 @@ struct MonitorState {
     cached_fg_context: Option<(isize, String, String)>,
     /// When preview_visible was first observed true (for stuck detection)
     preview_visible_since: Option<Instant>,
+    /// Last time we queried window visibility for stuck detection (throttled to every 5s)
+    last_stuck_check: Instant,
     /// Timer for keyboard-only UIA fallback polling
     keyboard_poll_timer: Instant,
 }
@@ -120,6 +122,7 @@ impl MonitorState {
             seen_generation: initial_generation,
             cached_fg_context: None,
             preview_visible_since: None,
+            last_stuck_check: Instant::now(),
             keyboard_poll_timer: Instant::now(),
         }
     }
@@ -145,6 +148,7 @@ impl MonitorState {
         self.mouse_selecting = false;
         self.cached_fg_context = None;
         self.preview_visible_since = None;
+        self.last_stuck_check = Instant::now();
         overlay::hide_popup(app_handle);
         *state.current_selection.lock() = None;
 
@@ -206,8 +210,9 @@ impl MonitorState {
 
 // ─── Health Check ────────────────────────────────────────────────────────────
 
-/// Periodic health check — verifies popup window and WebView2 are alive.
-/// Called every 5 minutes. Completely independent of selection detection.
+/// Periodic health check — verifies popup window HWND is still valid.
+/// Called every 5 minutes from the monitor thread.
+/// Does NOT call eval() — that would block the COM thread if WebView2 is unresponsive.
 fn run_health_check(app_handle: &AppHandle) {
     if let Some(popup) = app_handle.get_webview_window("popup") {
         match popup.hwnd() {
@@ -226,10 +231,6 @@ fn run_health_check(app_handle: &AppHandle) {
                 }
             }
             Err(e) => error!("Health check: cannot get popup HWND: {}", e),
-        }
-        match popup.eval("window.__healthcheck = Date.now()") {
-            Ok(_) => info!("Health check: WebView2 renderer responsive"),
-            Err(e) => error!("Health check: WebView2 eval FAILED: {}", e),
         }
     } else {
         error!("Health check: popup webview window NOT FOUND");
@@ -439,13 +440,17 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
             }
 
             // Check 1: Tauri reports popup hidden but preview_visible is still true
-            if let Some(popup) = app_handle.get_webview_window("popup") {
-                if let Ok(visible) = popup.is_visible() {
-                    if !visible {
-                        warn!("preview_visible stuck (popup hidden) -- auto-resetting");
-                        *state.preview_visible.lock() = false;
-                        preview_is_visible = false;
-                        ms.preview_visible_since = None;
+            // Throttled to every 5s to avoid per-iteration IPC + Win32 calls
+            if ms.last_stuck_check.elapsed() >= Duration::from_secs(5) {
+                ms.last_stuck_check = Instant::now();
+                if let Some(popup) = app_handle.get_webview_window("popup") {
+                    if let Ok(visible) = popup.is_visible() {
+                        if !visible {
+                            warn!("preview_visible stuck (popup hidden) -- auto-resetting");
+                            *state.preview_visible.lock() = false;
+                            preview_is_visible = false;
+                            ms.preview_visible_since = None;
+                        }
                     }
                 }
             }
@@ -623,17 +628,22 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
         // ── 10. Process selection / show popup / dismiss ──
         if let Some((text, is_input)) = selected_text {
             if text.len() >= MIN_TEXT_LENGTH && text.len() <= MAX_TEXT_LENGTH {
-                let text_trimmed = text.trim().to_string();
+                let trimmed = text.trim();
 
-                if !text_trimmed.is_empty() {
+                if !trimmed.is_empty() {
                     if preview_is_visible {
-                        ms.last_selection = Some(text_trimmed);
+                        // During preview, just track the selection (no popup changes)
+                        if ms.last_selection.as_deref() != Some(trimmed) {
+                            ms.last_selection = Some(trimmed.to_string());
+                        }
                     } else {
                         let text_changed =
-                            ms.last_selection.as_ref() != Some(&text_trimmed);
+                            ms.last_selection.as_deref() != Some(trimmed);
                         let mouseup_active = ms.mouseup_time.is_some();
 
                         if text_changed {
+                            // Only allocate String when text actually changed
+                            let text_trimmed = trimmed.to_string();
                             info!(
                                 "Selection changed: {} chars (was {} chars), is_input={}, mouseup_active={}",
                                 text_trimmed.len(),
@@ -641,7 +651,6 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
                                 is_input,
                                 mouseup_active,
                             );
-                            ms.last_selection = Some(text_trimmed.clone());
                             ms.last_is_input = is_input;
 
                             if !mouseup_active {
@@ -649,17 +658,18 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
                                 ms.debounce_text = Some(text_trimmed.clone());
                                 ms.last_change_time = Instant::now();
                             }
+                            ms.last_selection = Some(text_trimmed);
                             // If mouseup_active, skip debounce -- will show below
                         } else if is_input != ms.last_is_input {
                             info!(
                                 "Mode changed: is_input {} -> {} ({} chars)",
                                 ms.last_is_input,
                                 is_input,
-                                text_trimmed.len()
+                                trimmed.len()
                             );
                             ms.last_is_input = is_input;
                             if !mouseup_active {
-                                ms.debounce_text = Some(text_trimmed.clone());
+                                ms.debounce_text = ms.last_selection.clone();
                                 ms.last_change_time = Instant::now();
                             }
                         }

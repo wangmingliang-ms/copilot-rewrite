@@ -58,7 +58,11 @@ pub fn set_html(html: &str, plain_text: &str) -> Result<()> {
     Ok(())
 }
 
-/// Build the CF_HTML clipboard format string with required headers
+/// Build the CF_HTML clipboard format string with required headers.
+///
+/// SAFETY INVARIANT: The placeholder strings (SSSSSSSSSS, etc.) are each exactly
+/// 10 characters, matching the `{:010}` format width. If the placeholder length
+/// changes, the offset calculations will be wrong (header.len() would change).
 fn build_cf_html(html_fragment: &str) -> String {
     // CF_HTML format: https://docs.microsoft.com/en-us/windows/win32/dataxchg/html-clipboard-format
     let header = "Version:0.9\r\nStartHTML:SSSSSSSSSS\r\nEndHTML:EEEEEEEEEE\r\nStartFragment:FFFFFFFFFF\r\nEndFragment:GGGGGGGGGG\r\n";
