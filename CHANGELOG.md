@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.11.0] - 2026-04-10
+
+### ⚡ Performance
+
+- **Read Mode: switched from JSON to separator format** — Read Mode LLM output now uses plain-text separators (`---VOCABULARY---` / `---SUMMARY---`) instead of JSON. Translation streams immediately as plain text — no more waiting for valid JSON structure. Eliminates the fragile 3-level JSON fallback parser (JSON.parse → newline fixer → extractJsonStringValue).
+- **UIA detection: cached GetFocusedElement()** — The cross-process COM call `GetFocusedElement()` (1-10ms) is now called once per poll and reused across all 3 detection phases, saving 2-20ms per iteration.
+- **Overlay: deduplicated popup positioning** — Extracted shared `compute_expanded_position()` helper, eliminating ~50 lines of duplicated code between `expand_popup()` and `expand_popup_streaming()`. Fixed redundant `get_scale_at()` calls (2 Win32 syscalls saved per expand).
+- **Overlay: cached popup WebviewWindow** — All overlay functions now use a cached `WebviewWindow` static instead of HashMap lookup per call.
+- **Monitor: reduced allocations on hot path** — `text.trim()` comparison now uses a borrowed `&str` slice; `to_string()` only happens when text actually changes.
+- **Monitor: throttled preview_visible stuck check** — Window visibility query reduced from every loop iteration to every 5 seconds.
+- **Single-pass `estimate_height()`** — Height estimation now counts chars and newlines in one loop instead of two `.chars()` iterations.
+- **TCP keepalive on HTTP client** — Added 30s TCP keepalive to the reqwest client to prevent idle connection drops.
+
+### 🔧 Improvements
+
+- **Safer COM event handler** — Rewrote the manual COM vtable's `clone()`+`forget()` pattern to use `ManuallyDrop` for clearer ownership semantics and no risk of double-release.
+- **Removed health check eval()** — The 5-minute health check no longer calls `popup.eval()` (which wrote `window.__healthcheck` that nothing read and could block the COM thread if WebView2 was unresponsive).
+- **Cached debug_log file handle** — Replacement engine's debug log now uses a `thread_local!` cached file handle instead of opening the file on every call.
+- **Removed unused `once_cell` dependency** — Dropped direct `once_cell` dependency from Cargo.toml (not used in source code).
+- **Safety comment on `build_cf_html`** — Added doc comment explaining the 10-char placeholder ↔ `{:010}` format width invariant.
+- **Removed dead `extract_translated()` function** — JSON-based text extraction for height estimation was dead code after the separator format switch.
+- **All AUDIT items resolved** — 19 of 20 audit findings now fixed (only #1 SSE streaming architecture remains as TODO).
+
+### 🧪 Tests
+
+- **33 new separator parsing tests** — `tests/readModeSeparator.test.ts` covers `parseVocabularyLines` (15 tests) and `parseReadModeSeparator` (18 tests) for all section combinations, streaming partial text, CJK content, and edge cases.
+
 ## [0.10.0] - 2026-04-10
 
 ### ⚡ Performance
