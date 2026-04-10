@@ -622,9 +622,10 @@ const Popup: FC<PopupProps> = ({ selection }) => {
   // ── Icon state (48×48) ──
   if (state === "icon") {
     return (
-      <div className="w-screen h-screen flex items-center justify-center" style={{ padding: "20px", background: "transparent" }}>
+      <div className="w-screen h-screen flex items-center justify-center" style={{ padding: "20px", background: "transparent", pointerEvents: "none" }}>
         <div className="w-full h-full flex items-center justify-center"
           style={{
+            pointerEvents: "auto",
             background: isDark
               ? "linear-gradient(135deg, #1e293b 0%, #0f172a 100%)"
               : "linear-gradient(135deg, #fff 0%, #f0f4ff 100%)",
@@ -658,7 +659,7 @@ const Popup: FC<PopupProps> = ({ selection }) => {
   // ── Spinning state (48×48 with spinner — click to cancel) ──
   if (state === "spinning") {
     return (
-      <div className="w-screen h-screen flex items-center justify-center" style={{ padding: "20px", background: "transparent" }}>
+      <div className="w-screen h-screen flex items-center justify-center" style={{ padding: "20px", background: "transparent", pointerEvents: "none" }}>
         <button
           className="w-full h-full flex items-center justify-center group"
           onClick={() => {
@@ -668,6 +669,7 @@ const Popup: FC<PopupProps> = ({ selection }) => {
           }}
           title="Click to cancel"
           style={{
+            pointerEvents: "auto",
             background: isDark
               ? "linear-gradient(135deg, #1e293b 0%, #0f172a 100%)"
               : "linear-gradient(135deg, #fff 0%, #f0f4ff 100%)",
