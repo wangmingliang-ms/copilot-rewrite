@@ -199,45 +199,59 @@ const Popup: FC<PopupProps> = ({ selection }) => {
     refreshSettings();
   }, [refreshSettings]);
 
-  // Parse result — handles both Write Mode and Read Mode JSON formats
-  // Write Mode: {"reorganized": "...", "translated": "..."}
-  // Read Mode (smart): {"mode": "word|simple|complex|long", ...}
-  const { reorganized, translated, readModeType, readTargetLang, readTranslation, readSummary, readExplanation, readExamples, readVocabulary } = useMemo(() => {
-    const empty = { reorganized: "", translated: "", readModeType: "" as string, readTargetLang: "", readTranslation: "", readSummary: "", readExplanation: "", readExamples: [] as string[], readVocabulary: [] as { term: string; meaning: string; usage: string }[] };
+  // Parse result — handles both Write Mode and Read Mode formats
+  // Write Mode: "[reorganized]\n---TRANSLATED---\n[translated]" (separator format)
+  // Read Mode: {"translation": "...", "summary": "...", "vocabulary": [...]} (JSON)
+  const { reorganized, translated, readLayout, readTranslation, readSummary, readVocabulary } = useMemo(() => {
+    const empty = { reorganized: "", translated: "", readLayout: "" as string, readTranslation: "", readSummary: "", readVocabulary: [] as { term: string; meaning: string }[] };
     if (!result?.result) return empty;
     const text = result.result.trim();
+
+    // Write Mode: check for separator format first
+    const SEP = "---TRANSLATED---";
+    const sepIdx = text.indexOf(SEP);
+    if (sepIdx !== -1) {
+      return {
+        ...empty,
+        reorganized: text.slice(0, sepIdx).trim(),
+        translated: text.slice(sepIdx + SEP.length).trim(),
+      };
+    }
+
+    // Try JSON parse (Read Mode, or legacy Write Mode fallback)
     try {
-      // Strip markdown code fences if LLM wraps in ```json ... ```
       const cleaned = text.replace(/^```(?:json)?\s*\n?/i, "").replace(/\n?```\s*$/, "");
       const parsed = JSON.parse(cleaned);
 
-      // Read Mode smart format (new unified format)
-      if (parsed.mode) {
-        const mode = String(parsed.mode);
-        return {
-          reorganized: "",
-          translated: "",
-          readModeType: mode,
-          readTargetLang: String(parsed.target || ""),
-          readTranslation: String(parsed.translation || ""),
-          readSummary: String(parsed.summary || ""),
-          readExplanation: String(parsed.explanation || ""),
-          readExamples: Array.isArray(parsed.examples) ? parsed.examples.map(String) : [],
-          readVocabulary: Array.isArray(parsed.vocabulary) ? parsed.vocabulary : [],
-        };
-      }
-
-      // Legacy Read Mode format (summary + translation)
-      if (parsed.summary && parsed.translation) {
+      // Read Mode unified format: {translation, summary?, vocabulary?}
+      if (parsed.translation) {
+        const hasVocab = Array.isArray(parsed.vocabulary) && parsed.vocabulary.length > 0;
+        const hasSummary = typeof parsed.summary === "string" && parsed.summary.trim().length > 0;
+        const layout = hasSummary ? "withSummary" : hasVocab ? "withVocab" : "simple";
         return {
           ...empty,
-          readModeType: "long",
-          readSummary: String(parsed.summary),
+          readLayout: layout,
           readTranslation: String(parsed.translation),
+          readSummary: hasSummary ? String(parsed.summary) : "",
+          readVocabulary: hasVocab ? parsed.vocabulary : [],
         };
       }
 
-      // Write Mode format
+      // Legacy Read Mode format with "mode" field (backward compat)
+      if (parsed.mode) {
+        const hasSummary = typeof parsed.summary === "string" && parsed.summary.trim().length > 0;
+        const hasVocab = Array.isArray(parsed.vocabulary) && parsed.vocabulary.length > 0;
+        const layout = hasSummary ? "withSummary" : hasVocab ? "withVocab" : "simple";
+        return {
+          ...empty,
+          readLayout: layout,
+          readTranslation: String(parsed.translation || ""),
+          readSummary: hasSummary ? String(parsed.summary) : "",
+          readVocabulary: hasVocab ? parsed.vocabulary : [],
+        };
+      }
+
+      // Legacy Write Mode JSON format (backward compat)
       if (parsed.reorganized && parsed.translated) {
         return {
           ...empty,
@@ -246,7 +260,7 @@ const Popup: FC<PopupProps> = ({ selection }) => {
         };
       }
     } catch {
-      // JSON parse failed — fallback: try "---" divider (Write Mode only)
+      // JSON parse failed — try legacy "---" divider (Write Mode fallback)
       if (!isReadMode) {
         const dividerMatch = text.match(/\n---\n/);
         if (dividerMatch && dividerMatch.index !== undefined) {
@@ -260,7 +274,7 @@ const Popup: FC<PopupProps> = ({ selection }) => {
     }
     // No structure found — treat entire text as the main result
     if (isReadMode) {
-      return { ...empty, readModeType: "simple", readTranslation: text };
+      return { ...empty, readLayout: "simple", readTranslation: text };
     }
     return { ...empty, translated: text };
   }, [result?.result, isReadMode]);
@@ -291,60 +305,67 @@ const Popup: FC<PopupProps> = ({ selection }) => {
     return marked.parse(readTranslation) as string;
   }, [readTranslation]);
 
-  const readExplanationHtml = useMemo(() => {
-    if (!readExplanation) return "";
-    marked.setOptions({ breaks: true, gfm: true });
-    return marked.parse(readExplanation) as string;
-  }, [readExplanation]);
-
   // Extract displayable content from streaming text.
-  // The LLM often returns JSON (Write Mode: {"reorganized":"...","translated":"..."},
-  // Read Mode: {"mode":"...","translation":"...","vocabulary":[...]}). During streaming
-  // the JSON is incomplete, so we extract values incrementally.
+  // Write Mode: separator format "[reorganized]\n---TRANSLATED---\n[translated]"
+  //   - Before separator appears: phase = "reorganized" (show as thinking)
+  //   - After separator: phase = "translated" (show translated part)
+  // Read Mode: JSON {"translation":"...","vocabulary":[...],"summary":"..."}
+  //   - Incrementally extract values from partial JSON
   const streamingParsed = useMemo(() => {
-    const empty = { text: "", vocabulary: [] as { term: string; meaning: string; usage: string }[] };
+    const empty = { text: "", vocabulary: [] as { term: string; meaning: string }[], phase: "translated" as "reorganized" | "translated" };
     if (!streamingText) return empty;
     const raw = streamingText.trim();
 
-    // If it doesn't look like JSON, render as-is (plain text modes like Translate/Polish)
-    if (!raw.startsWith("{")) return { ...empty, text: raw };
-
-    // Priority order of text keys to extract (last found wins — the one currently streaming)
-    const keys = ["reorganized", "translated", "summary", "explanation", "translation"];
-    let bestContent = "";
-    for (const key of keys) {
-      const extracted = extractJsonStringValue(raw, key);
-      if (extracted !== null) bestContent = extracted;
+    // Check for separator format (Write Mode TranslateAndPolish)
+    const SEP = "---TRANSLATED---";
+    const sepIdx = raw.indexOf(SEP);
+    if (sepIdx !== -1) {
+      const translated = raw.slice(sepIdx + SEP.length).trim();
+      return { text: translated || "...", vocabulary: [], phase: "translated" as const };
     }
 
-    // Try to extract vocabulary entries from partial JSON
-    const vocabulary: { term: string; meaning: string; usage: string }[] = [];
-    const vocabIdx = raw.indexOf('"vocabulary"');
-    if (vocabIdx !== -1) {
-      const afterVocab = raw.substring(vocabIdx);
-      const arrStart = afterVocab.indexOf("[");
-      if (arrStart !== -1) {
-        const arrContent = afterVocab.substring(arrStart + 1);
-        // Extract complete objects {...} from the array
-        const objRegex = /\{[^}]*\}/g;
-        let match;
-        while ((match = objRegex.exec(arrContent)) !== null) {
-          try {
-            const obj = JSON.parse(match[0]);
-            if (obj.term) {
-              vocabulary.push({
-                term: String(obj.term || ""),
-                meaning: String(obj.meaning || ""),
-                usage: String(obj.usage || ""),
-              });
-            }
-          } catch { /* partial object, skip */ }
+    // JSON (Read Mode) — extract values incrementally from partial JSON
+    if (raw.startsWith("{")) {
+      const keys = ["translation", "summary"];
+      let bestContent = "";
+      for (const key of keys) {
+        const extracted = extractJsonStringValue(raw, key);
+        if (extracted !== null) bestContent = extracted;
+      }
+
+      // Try to extract vocabulary entries from partial JSON
+      const vocabulary: { term: string; meaning: string }[] = [];
+      const vocabIdx = raw.indexOf('"vocabulary"');
+      if (vocabIdx !== -1) {
+        const afterVocab = raw.substring(vocabIdx);
+        const arrStart = afterVocab.indexOf("[");
+        if (arrStart !== -1) {
+          const arrContent = afterVocab.substring(arrStart + 1);
+          const objRegex = /\{[^}]*\}/g;
+          let match;
+          while ((match = objRegex.exec(arrContent)) !== null) {
+            try {
+              const obj = JSON.parse(match[0]);
+              if (obj.term) {
+                vocabulary.push({
+                  term: String(obj.term || ""),
+                  meaning: String(obj.meaning || ""),
+                });
+              }
+            } catch { /* partial object, skip */ }
+          }
         }
       }
+
+      return { text: bestContent || raw, vocabulary, phase: "translated" as const };
     }
 
-    // Also try to extract examples array for "word" mode
-    return { text: bestContent || raw, vocabulary };
+    // Plain text — could be Translate/Polish (no separator needed) or
+    // pre-separator reorganized section of TranslateAndPolish
+    // We can't distinguish without more context, so we show as-is.
+    // If the text looks like it might be the reorganized section (Write Mode),
+    // mark phase as "reorganized" so UI can show a subtle indicator.
+    return { text: raw, vocabulary: [], phase: "reorganized" as const };
   }, [streamingText]);
 
   // Streaming markdown — render extracted content as markdown
@@ -357,10 +378,10 @@ const Popup: FC<PopupProps> = ({ selection }) => {
   // The text to use for Replace/Copy
   // Write Mode: translated text; Read Mode: all relevant content
   const outputText = isReadMode
-    ? (readSummary || readTranslation || readExplanation || result?.result || "")
+    ? (readSummary || readTranslation || result?.result || "")
     : (translated || result?.result || "");
   const outputHtml = isReadMode
-    ? (readSummaryHtml || readTranslationHtml || readExplanationHtml)
+    ? (readSummaryHtml || readTranslationHtml)
     : translatedHtml;
 
   // Dismiss on Escape; close replace menu on outside click
@@ -427,7 +448,7 @@ const Popup: FC<PopupProps> = ({ selection }) => {
       }
     }, state === "streaming" ? 200 : 50);
     return () => clearTimeout(timer);
-  }, [state, streamingText, translatedHtml, reorganizedHtml, readSummaryHtml, readTranslationHtml, readExplanationHtml, readModeType]);
+  }, [state, streamingText, translatedHtml, reorganizedHtml, readSummaryHtml, readTranslationHtml, readLayout]);
 
   const handleIconClick = useCallback(async () => {
     // Show spinner immediately — don't wait for auth/settings checks
@@ -696,8 +717,15 @@ const Popup: FC<PopupProps> = ({ selection }) => {
           }}
         >
           <div className="flex-1 min-h-0 overflow-auto px-5 pt-5 pb-3" style={{ userSelect: "text", WebkitUserSelect: "text" }}>
+            {/* Phase indicator for "thinking" (reorganized section before separator) */}
+            {streamingParsed.phase === "reorganized" && !isReadMode && (
+              <div className="text-[10px] font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-2 flex items-center gap-1.5">
+                <div className="h-1.5 w-1.5 rounded-full bg-amber-400 animate-pulse" />
+                Thinking...
+              </div>
+            )}
             <div
-              className="markdown-body text-[13.5px] leading-[1.7] streaming-content"
+              className={`markdown-body text-[13.5px] leading-[1.7] streaming-content ${streamingParsed.phase === "reorganized" && !isReadMode ? "opacity-60" : ""}`}
               style={{ background: "transparent" }}
               dangerouslySetInnerHTML={{ __html: streamingHtml }}
             />
@@ -709,7 +737,6 @@ const Popup: FC<PopupProps> = ({ selection }) => {
                   <div key={i} className="pl-3 border-l-2 border-purple-200 dark:border-purple-800">
                     <span className="text-[12.5px] font-semibold text-purple-600 dark:text-purple-400">{v.term}</span>
                     <span className="text-[12px] text-gray-600 dark:text-gray-400"> — {v.meaning}</span>
-                    {v.usage && <div className="text-[11.5px] text-gray-400 dark:text-gray-500 italic mt-0.5">{v.usage}</div>}
                   </div>
                 ))}
               </div>
@@ -808,46 +835,23 @@ const Popup: FC<PopupProps> = ({ selection }) => {
         }}
       >
         {isReadMode ? (
-          /* ── Read Mode Content — 4 smart modes ── */
+          /* ── Read Mode Content — layout derived from field presence ── */
           <>
             {!showOriginal && (
               <div className="flex-1 min-h-0 overflow-auto px-5 pt-5 pb-3" style={{ userSelect: "text", WebkitUserSelect: "text" }}>
 
-                {/* Word mode: translation + explanation + examples */}
-                {readModeType === "word" && (
-                  <div className="space-y-3">
-                    {/* Translation */}
-                    <div className="text-[15px] font-semibold text-gray-800 dark:text-gray-200">
-                      {readTranslation}
-                    </div>
-                    {/* Explanation */}
-                    {readExplanation && (
-                      showRaw ? (
-                        <pre className="text-[12px] leading-[1.6] text-gray-600 dark:text-gray-400 whitespace-pre-wrap break-words font-mono">{readExplanation}</pre>
-                      ) : (
-                        <div
-                          className="markdown-body text-[13px] leading-[1.65] text-gray-600 dark:text-gray-400"
-                          style={{ background: "transparent" }}
-                          dangerouslySetInnerHTML={{ __html: readExplanationHtml }}
-                        />
-                      )
-                    )}
-                    {/* Examples */}
-                    {readExamples.length > 0 && (
-                      <div className="space-y-1.5 border-t border-gray-100 dark:border-gray-700 pt-2">
-                        <div className="text-[11px] font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wide">Examples</div>
-                        {readExamples.map((ex: string, i: number) => (
-                          <div key={i} className="text-[12.5px] leading-[1.6] text-gray-600 dark:text-gray-400 pl-3 border-l-2 border-blue-200 dark:border-blue-800">
-                            {ex}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* Simple mode: just the translation */}
-                {readModeType === "simple" && (
+                {/* Main content: summary (for withSummary) or translation (for simple/withVocab) */}
+                {readLayout === "withSummary" && readSummary ? (
+                  showRaw ? (
+                    <pre className="text-[12px] leading-[1.6] text-gray-700 dark:text-gray-300 whitespace-pre-wrap break-words font-mono">{readSummary}</pre>
+                  ) : (
+                    <div
+                      className="markdown-body text-[13.5px] leading-[1.7]"
+                      style={{ background: "transparent" }}
+                      dangerouslySetInnerHTML={{ __html: readSummaryHtml }}
+                    />
+                  )
+                ) : (
                   showRaw ? (
                     <pre className="text-[12px] leading-[1.6] text-gray-700 dark:text-gray-300 whitespace-pre-wrap break-words font-mono">{readTranslation}</pre>
                   ) : (
@@ -859,63 +863,23 @@ const Popup: FC<PopupProps> = ({ selection }) => {
                   )
                 )}
 
-                {/* Complex mode: translation + vocabulary highlights */}
-                {readModeType === "complex" && (
-                  <div className="space-y-3">
-                    {showRaw ? (
-                      <pre className="text-[12px] leading-[1.6] text-gray-700 dark:text-gray-300 whitespace-pre-wrap break-words font-mono">{readTranslation}</pre>
-                    ) : (
-                      <div
-                        className="markdown-body text-[13.5px] leading-[1.7]"
-                        style={{ background: "transparent" }}
-                        dangerouslySetInnerHTML={{ __html: readTranslationHtml }}
-                      />
-                    )}
-                    {readVocabulary.length > 0 && (
-                      <div className="space-y-2 border-t border-gray-100 dark:border-gray-700 pt-2">
-                        <div className="text-[11px] font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wide">📚 Vocabulary</div>
-                        {readVocabulary.map((v: { term: string; meaning: string; usage: string }, i: number) => (
-                          <div key={i} className="pl-3 border-l-2 border-purple-200 dark:border-purple-800">
-                            <span className="text-[12.5px] font-semibold text-purple-600 dark:text-purple-400">{v.term}</span>
-                            <span className="text-[12px] text-gray-600 dark:text-gray-400"> — {v.meaning}</span>
-                            {v.usage && <div className="text-[11.5px] text-gray-400 dark:text-gray-500 italic mt-0.5">{v.usage}</div>}
-                          </div>
-                        ))}
+                {/* Vocabulary section (for withVocab layout) */}
+                {readVocabulary.length > 0 && (
+                  <div className="space-y-2 border-t border-gray-100 dark:border-gray-700 pt-2 mt-3">
+                    <div className="text-[11px] font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wide">📚 Vocabulary</div>
+                    {readVocabulary.map((v: { term: string; meaning: string }, i: number) => (
+                      <div key={i} className="pl-3 border-l-2 border-purple-200 dark:border-purple-800">
+                        <span className="text-[12.5px] font-semibold text-purple-600 dark:text-purple-400">{v.term}</span>
+                        <span className="text-[12px] text-gray-600 dark:text-gray-400"> — {v.meaning}</span>
                       </div>
-                    )}
+                    ))}
                   </div>
-                )}
-
-                {/* Long mode: summary as main content */}
-                {readModeType === "long" && (
-                  showRaw ? (
-                    <pre className="text-[12px] leading-[1.6] text-gray-700 dark:text-gray-300 whitespace-pre-wrap break-words font-mono">{readSummary || readTranslation}</pre>
-                  ) : (
-                    <div
-                      className="markdown-body text-[13.5px] leading-[1.7]"
-                      style={{ background: "transparent" }}
-                      dangerouslySetInnerHTML={{ __html: readSummaryHtml || readTranslationHtml }}
-                    />
-                  )
-                )}
-
-                {/* Fallback: if mode is unrecognized */}
-                {!["word", "simple", "complex", "long"].includes(readModeType) && readTranslation && (
-                  showRaw ? (
-                    <pre className="text-[12px] leading-[1.6] text-gray-700 dark:text-gray-300 whitespace-pre-wrap break-words font-mono">{readTranslation}</pre>
-                  ) : (
-                    <div
-                      className="markdown-body text-[13.5px] leading-[1.7]"
-                      style={{ background: "transparent" }}
-                      dangerouslySetInnerHTML={{ __html: readTranslationHtml }}
-                    />
-                  )
                 )}
               </div>
             )}
 
-            {/* Collapsible section: full translation (only in long mode) */}
-            {showOriginal && readModeType === "long" && readTranslation && (
+            {/* Collapsible section: full translation (only in withSummary layout) */}
+            {showOriginal && readLayout === "withSummary" && readTranslation && (
               <div className="flex-1 min-h-0 overflow-auto px-5 pt-5 pb-3" style={{ userSelect: "text", WebkitUserSelect: "text" }}>
                 {showRaw ? (
                   <pre className="text-[12px] leading-[1.6] text-gray-500 dark:text-gray-400 whitespace-pre-wrap break-words font-mono">{readTranslation}</pre>
@@ -927,8 +891,8 @@ const Popup: FC<PopupProps> = ({ selection }) => {
               </div>
             )}
 
-            {/* Toggle bar — only in long mode when we have both summary and translation */}
-            {readModeType === "long" && readSummary && readTranslation && (
+            {/* Toggle bar — only in withSummary layout when we have both summary and translation */}
+            {readLayout === "withSummary" && readSummary && readTranslation && (
               <div className="flex-shrink-0 px-5 border-t border-gray-100 dark:border-gray-700">
                 <button
                   onClick={() => {
@@ -944,7 +908,7 @@ const Popup: FC<PopupProps> = ({ selection }) => {
                   >
                     <path d="M4.5 2l5 4-5 4V2z" />
                   </svg>
-                  <span className="font-medium tracking-wide uppercase">{(readTargetLang || readModeSettings.native_language).split(/[\s(]/)[0]} (Full Translation)</span>
+                  <span className="font-medium tracking-wide uppercase">{readModeSettings.native_language.split(/[\s(]/)[0]} (Full Translation)</span>
                 </button>
               </div>
             )}
@@ -1045,10 +1009,10 @@ const Popup: FC<PopupProps> = ({ selection }) => {
                 </svg>
               </button>
             )}
-            {/* Read Mode indicator with mode type */}
+            {/* Read Mode indicator with layout type */}
             {isReadMode && (
               <span className="text-[10px] text-emerald-500 dark:text-emerald-400 font-medium px-1.5 py-0.5 bg-emerald-50 dark:bg-emerald-900/30 rounded">
-                {readModeType === "word" ? "📖 Word" : readModeType === "simple" ? "💬 Translate" : readModeType === "complex" ? "📚 Translate" : readModeType === "long" ? "📋 Summary" : "Read"}
+                {readLayout === "withSummary" ? "📋 Summary" : readLayout === "withVocab" ? "📚 Translate" : "💬 Translate"}
               </span>
             )}
             <button

@@ -42,8 +42,8 @@ const LINE_HEIGHT_PX: f64 = 18.0;
 const CHARS_PER_LINE: f64 = 50.0;
 
 /// Offset from cursor position
-const POPUP_OFFSET_X: f64 = 8.0;
-const POPUP_OFFSET_Y: f64 = 16.0;
+const POPUP_OFFSET_X: f64 = 12.0;
+const POPUP_OFFSET_Y: f64 = 20.0;
 
 /// Stored popup position (logical coordinates) and DPI scale — set once, reused across state transitions
 static POPUP_POS: Mutex<(f64, f64, f64)> = Mutex::new((0.0, 0.0, 1.0));
