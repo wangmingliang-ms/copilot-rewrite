@@ -147,6 +147,68 @@ export function extractVocabulary(text: string): { term: string; meaning: string
   return vocabulary;
 }
 
+const VOCAB_SEP = "---VOCABULARY---";
+const SUMMARY_SEP = "---SUMMARY---";
+
+/** Parse vocabulary lines in "term: explanation" format. */
+export function parseVocabularyLines(text: string): { term: string; meaning: string }[] {
+  const vocabulary: { term: string; meaning: string }[] = [];
+  for (const line of text.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const colonIdx = trimmed.indexOf(":");
+    if (colonIdx > 0) {
+      const term = trimmed.slice(0, colonIdx).trim();
+      const meaning = trimmed.slice(colonIdx + 1).trim();
+      if (term && meaning) {
+        vocabulary.push({ term, meaning });
+      }
+    }
+  }
+  return vocabulary;
+}
+
+/** Parse Read Mode separator format:
+ *  [translation]
+ *  ---VOCABULARY---
+ *  term1: explanation1
+ *  ---SUMMARY---
+ *  summary text
+ *
+ *  Both ---VOCABULARY--- and ---SUMMARY--- sections are optional.
+ *  Works for both complete text (final result) and partial text (streaming). */
+export function parseReadModeSeparator(text: string): ParsedReadResult {
+  let translation = text;
+  let summary = "";
+  let vocabulary: { term: string; meaning: string }[] = [];
+
+  // Extract summary section (if present) — always at the end
+  const summaryIdx = translation.indexOf(SUMMARY_SEP);
+  if (summaryIdx !== -1) {
+    summary = translation.slice(summaryIdx + SUMMARY_SEP.length).trim();
+    translation = translation.slice(0, summaryIdx).trim();
+  }
+
+  // Extract vocabulary section (if present) — between translation and summary
+  const vocabIdx = translation.indexOf(VOCAB_SEP);
+  if (vocabIdx !== -1) {
+    const vocabText = translation.slice(vocabIdx + VOCAB_SEP.length).trim();
+    translation = translation.slice(0, vocabIdx).trim();
+    vocabulary = parseVocabularyLines(vocabText);
+  }
+
+  const hasVocab = vocabulary.length > 0;
+  const hasSummary = summary.trim().length > 0;
+  const layout = hasSummary ? "withSummary" : hasVocab ? "withVocab" : "simple";
+
+  return {
+    readLayout: layout as ParsedReadResult["readLayout"],
+    readTranslation: translation,
+    readSummary: hasSummary ? summary : "",
+    readVocabulary: vocabulary,
+  };
+}
+
 export interface ParsedReadResult {
   readLayout: "simple" | "withVocab" | "withSummary" | "";
   readTranslation: string;

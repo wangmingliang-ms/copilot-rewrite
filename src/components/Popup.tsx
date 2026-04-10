@@ -5,7 +5,7 @@ import { marked } from "marked";
 import "github-markdown-css/github-markdown-light.css";
 import iconImg from "../assets/icon-48.png";
 import { SelectionInfo, ProcessResponse } from "../hooks/useSelection";
-import { extractJsonStringValue, stripCodeFences, extractVocabulary } from "../utils/jsonParser";
+import { extractJsonStringValue, stripCodeFences, extractVocabulary, parseReadModeSeparator } from "../utils/jsonParser";
 
 type PopupState = "icon" | "spinning" | "streaming" | "expanded" | "error";
 
@@ -175,12 +175,13 @@ const Popup: FC<PopupProps> = ({ selection }) => {
 
   // Parse result — handles both Write Mode and Read Mode formats
   // Write Mode: "[reorganized]\n---TRANSLATED---\n[translated]" (separator format)
-  // Read Mode: {"translation": "...", "summary": "...", "vocabulary": [...]} (JSON)
+  // Parse final LLM result into structured fields.
+  // Write Mode uses ---TRANSLATED--- separator. Read Mode uses ---VOCABULARY---/---SUMMARY--- separators.
+  // JSON parsing is kept as legacy fallback only.
   const { reorganized, translated, readLayout, readTranslation, readSummary, readVocabulary } = useMemo(() => {
     const empty = { reorganized: "", translated: "", readLayout: "" as string, readTranslation: "", readSummary: "", readVocabulary: [] as { term: string; meaning: string }[] };
     if (!result?.result) return empty;
     const text = result.result.trim();
-    console.log("[Popup] Final result text (first 300 chars):", JSON.stringify(text.slice(0, 300)));
 
     // Write Mode: check for separator format first
     const SEP = "---TRANSLATED---";
@@ -193,7 +194,13 @@ const Popup: FC<PopupProps> = ({ selection }) => {
       };
     }
 
-    // Try JSON parse (Read Mode, or legacy Write Mode fallback)
+    // Read Mode: separator format (---VOCABULARY--- / ---SUMMARY---)
+    if (isReadMode) {
+      const parsed = parseReadModeSeparator(text);
+      return { ...empty, ...parsed };
+    }
+
+    // Legacy fallback: Try JSON parse (for older Read Mode responses)
     try {
       const cleaned = stripCodeFences(text);
       let parsed: Record<string, unknown> | null = null;
@@ -338,8 +345,8 @@ const Popup: FC<PopupProps> = ({ selection }) => {
   // Write Mode: separator format "[reorganized]\n---TRANSLATED---\n[translated]"
   //   - Before separator appears: phase = "reorganized" (show as thinking)
   //   - After separator: phase = "translated" (show translated part)
-  // Read Mode: JSON {"translation":"...","vocabulary":[...],"summary":"..."}
-  //   - Incrementally extract values from partial JSON
+  // Read Mode: separator format (---VOCABULARY--- / ---SUMMARY---)
+  //   - Translation streams first, vocabulary/summary append as they arrive
   const streamingParsed = useMemo(() => {
     const empty = { text: "", vocabulary: [] as { term: string; meaning: string }[], phase: "translated" as "reorganized" | "translated" };
     if (!streamingText) return empty;
@@ -353,7 +360,13 @@ const Popup: FC<PopupProps> = ({ selection }) => {
       return { text: translated || "...", vocabulary: [], phase: "translated" as const };
     }
 
-    // JSON (Read Mode) — extract values incrementally from partial JSON
+    // Read Mode: separator-based streaming
+    if (isReadMode) {
+      const parsed = parseReadModeSeparator(raw);
+      return { text: parsed.readTranslation || raw, vocabulary: parsed.readVocabulary, phase: "translated" as const };
+    }
+
+    // Legacy: JSON (Read Mode) — extract values incrementally from partial JSON
     // Strip code fences if LLM wraps JSON in ```json ... ```
     const stripped = stripCodeFences(raw);
     if (stripped.startsWith("{")) {
