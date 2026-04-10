@@ -221,7 +221,36 @@ const Popup: FC<PopupProps> = ({ selection }) => {
     // Try JSON parse (Read Mode, or legacy Write Mode fallback)
     try {
       const cleaned = text.replace(/^```(?:json)?\s*\n?/i, "").replace(/\n?```\s*$/, "");
-      const parsed = JSON.parse(cleaned);
+      let parsed: Record<string, unknown>;
+      try {
+        parsed = JSON.parse(cleaned);
+      } catch {
+        // LLM sometimes emits literal newlines inside JSON string values,
+        // which breaks JSON.parse. Fix: walk through the string tracking
+        // whether we're inside a JSON string value, and escape newlines there.
+        let fixed = "";
+        let inString = false;
+        for (let i = 0; i < cleaned.length; i++) {
+          const ch = cleaned[i];
+          if (ch === '\\' && inString) {
+            fixed += ch + (cleaned[i + 1] || "");
+            i++; // skip escaped char
+            continue;
+          }
+          if (ch === '"') {
+            inString = !inString;
+            fixed += ch;
+            continue;
+          }
+          if ((ch === '\n' || ch === '\r') && inString) {
+            if (ch === '\r' && cleaned[i + 1] === '\n') i++; // skip \r\n
+            fixed += "\\n";
+            continue;
+          }
+          fixed += ch;
+        }
+        parsed = JSON.parse(fixed);
+      }
 
       // Read Mode unified format: {translation, summary?, vocabulary?}
       if (parsed.translation) {
@@ -233,7 +262,7 @@ const Popup: FC<PopupProps> = ({ selection }) => {
           readLayout: layout,
           readTranslation: String(parsed.translation),
           readSummary: hasSummary ? String(parsed.summary) : "",
-          readVocabulary: hasVocab ? parsed.vocabulary : [],
+          readVocabulary: hasVocab ? (parsed.vocabulary as { term: string; meaning: string }[]) : [],
         };
       }
 
@@ -247,7 +276,7 @@ const Popup: FC<PopupProps> = ({ selection }) => {
           readLayout: layout,
           readTranslation: String(parsed.translation || ""),
           readSummary: hasSummary ? String(parsed.summary) : "",
-          readVocabulary: hasVocab ? parsed.vocabulary : [],
+          readVocabulary: hasVocab ? (parsed.vocabulary as { term: string; meaning: string }[]) : [],
         };
       }
 
