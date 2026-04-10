@@ -389,7 +389,8 @@ pub struct CopilotClient {
 impl CopilotClient {
     pub fn new() -> Self {
         let http = Client::builder()
-            .timeout(Duration::from_secs(30))
+            .connect_timeout(Duration::from_secs(15))
+            .read_timeout(Duration::from_secs(60))
             .build()
             .expect("Failed to build HTTP client");
 
@@ -558,7 +559,8 @@ impl CopilotClient {
 
             // Stream SSE chunks incrementally
             let mut stream = response.bytes_stream();
-            let mut buffer = String::new(); // incomplete SSE line buffer
+            let mut byte_buf = Vec::<u8>::new(); // raw byte buffer for UTF-8 safety
+            let mut buffer = String::new(); // complete SSE line buffer
             let mut result = String::new(); // accumulated LLM output
             let mut actual_model_logged = false;
             let mut done = false;
@@ -576,7 +578,27 @@ impl CopilotClient {
                 }
 
                 let bytes = chunk_result.context("Stream read error")?;
-                buffer.push_str(&String::from_utf8_lossy(&bytes));
+                byte_buf.extend_from_slice(&bytes);
+
+                // Decode as much valid UTF-8 as possible, leaving incomplete
+                // multi-byte sequences (e.g. partial Chinese chars) in byte_buf
+                let valid_up_to = match std::str::from_utf8(&byte_buf) {
+                    Ok(s) => {
+                        buffer.push_str(s);
+                        byte_buf.len()
+                    }
+                    Err(e) => {
+                        let valid_len = e.valid_up_to();
+                        if valid_len > 0 {
+                            // Safety: from_utf8 confirmed these bytes are valid
+                            buffer.push_str(unsafe {
+                                std::str::from_utf8_unchecked(&byte_buf[..valid_len])
+                            });
+                        }
+                        valid_len
+                    }
+                };
+                byte_buf.drain(..valid_up_to);
 
                 // Process all complete lines in the buffer
                 while let Some(pos) = buffer.find('\n') {

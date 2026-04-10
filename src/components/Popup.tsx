@@ -17,6 +17,15 @@ interface PopupProps {
   selection: SelectionInfo | null;
 }
 
+/** Find the index of the first unescaped double-quote in a string. Returns -1 if not found. */
+function findUnescapedQuote(s: string): number {
+  for (let i = 0; i < s.length; i++) {
+    if (s[i] === '\\') { i++; continue; } // skip escaped char
+    if (s[i] === '"') return i;
+  }
+  return -1;
+}
+
 const Popup: FC<PopupProps> = ({ selection }) => {
   const [state, setState] = useState<PopupState>("icon");
   const stateRef = useRef<PopupState>("icon");
@@ -270,12 +279,56 @@ const Popup: FC<PopupProps> = ({ selection }) => {
     return marked.parse(readExplanation) as string;
   }, [readExplanation]);
 
-  // Streaming markdown — render accumulated text as raw markdown (skip JSON parsing since partial JSON is unparsable)
-  const streamingHtml = useMemo(() => {
+  // Extract displayable text from streaming content.
+  // The LLM often returns JSON (Write Mode: {"reorganized":"...","translated":"..."},
+  // Read Mode: {"mode":"...","translation":"..."}). During streaming the JSON is incomplete,
+  // so we extract the last string value being written to show meaningful content.
+  const streamingDisplayText = useMemo(() => {
     if (!streamingText) return "";
-    marked.setOptions({ breaks: true, gfm: true });
-    return marked.parse(streamingText) as string;
+    const text = streamingText.trim();
+
+    // If it doesn't look like JSON, render as-is (plain text modes like Translate/Polish)
+    if (!text.startsWith("{")) return text;
+
+    // Try to extract content from partial JSON.
+    // Strategy: find the last key-value pair being written and extract its string value.
+    // For Write Mode: we want "translated" (or "reorganized" if "translated" hasn't started)
+    // For Read Mode: we want "translation" (or "summary", "explanation")
+
+    // Priority order of keys to extract (last wins — we want the one currently streaming)
+    const keys = ["reorganized", "translated", "summary", "explanation", "translation"];
+    let bestContent = "";
+    for (const key of keys) {
+      const marker = `"${key}"`;
+      const idx = text.indexOf(marker);
+      if (idx === -1) continue;
+      // Find the start of the string value after the key
+      const afterKey = text.substring(idx + marker.length);
+      // Skip :\s*"
+      const valMatch = afterKey.match(/^\s*:\s*"/);
+      if (!valMatch) continue;
+      const valueStart = idx + marker.length + valMatch[0].length;
+      // Extract everything from valueStart to end, handling escaped quotes
+      let raw = text.substring(valueStart);
+      // If the value is properly closed, trim the closing quote
+      // Otherwise take everything (it's still being streamed)
+      const closingIdx = findUnescapedQuote(raw);
+      if (closingIdx !== -1) {
+        raw = raw.substring(0, closingIdx);
+      }
+      // Unescape JSON string escapes
+      bestContent = raw.replace(/\\n/g, "\n").replace(/\\"/g, '"').replace(/\\\\/g, "\\");
+    }
+
+    return bestContent || text; // Fallback to raw text if no key found
   }, [streamingText]);
+
+  // Streaming markdown — render extracted content as markdown
+  const streamingHtml = useMemo(() => {
+    if (!streamingDisplayText) return "";
+    marked.setOptions({ breaks: true, gfm: true });
+    return marked.parse(streamingDisplayText) as string;
+  }, [streamingDisplayText]);
 
   // The text to use for Replace/Copy
   // Write Mode: translated text; Read Mode: all relevant content

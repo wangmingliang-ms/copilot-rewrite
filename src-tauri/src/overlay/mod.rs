@@ -28,6 +28,8 @@ const ICON_SIZE: f64 = 48.0;
 const EXPANDED_WIDTH: f64 = 400.0;
 const EXPANDED_MIN_HEIGHT: f64 = 120.0;
 const EXPANDED_MAX_HEIGHT: f64 = 400.0;
+/// Default height for initial streaming expand (before content is measured)
+const EXPANDED_STREAMING_HEIGHT: f64 = 250.0;
 /// Shadow margin (logical px) — extra space around content for CSS box-shadow
 const SHADOW_MARGIN: f64 = 20.0;
 /// Button bar height
@@ -291,6 +293,78 @@ pub fn expand_popup(app_handle: &AppHandle, text: &str) {
 
         info!(
             "Popup expanded to {:.0}x{:.0} (content {:.0}x{:.0}) at ({:.0}, {:.0}), bottom={:.0}",
+            win_w, win_h, w_logical, height, win_x, win_y, content_bottom
+        );
+    }
+}
+
+/// Expand popup for streaming — uses a fixed default height instead of estimating from text.
+/// The frontend resize effect will adjust the height as content grows.
+pub fn expand_popup_streaming(app_handle: &AppHandle) {
+    if let Some(window) = app_handle.get_webview_window("popup") {
+        let height = EXPANDED_STREAMING_HEIGHT;
+        let (screen_w, screen_h, _) = get_primary_screen_info(app_handle);
+
+        let (x, y, w_logical) = {
+            let stored_input = *INPUT_RECT.lock();
+
+            let w = if let Some((_rx, ry, rw, _rh)) = stored_input {
+                let scale = get_scale_at(0, ry);
+                let elem_w = rw as f64 / scale;
+                elem_w.max(EXPANDED_WIDTH).min(screen_w - 16.0)
+            } else {
+                EXPANDED_WIDTH
+            };
+
+            if let Some((sx, sy, _sw, sh)) = stored_input {
+                let scale = get_scale_at(sx, sy);
+                let sel_x = sx as f64 / scale;
+                let sel_y = sy as f64 / scale;
+                let sel_h = sh as f64 / scale;
+
+                let mut py = sel_y - height - 12.0;
+                let mut px = sel_x;
+
+                if py < 0.0 {
+                    py = sel_y + sel_h + 12.0;
+                }
+                if py + height > screen_h {
+                    py = screen_h - height - 8.0;
+                }
+                if px + w > screen_w {
+                    px = screen_w - w - 8.0;
+                }
+                if px < 0.0 { px = 8.0; }
+                if py < 0.0 { py = 8.0; }
+
+                (px, py, w)
+            } else {
+                let (stored_x, stored_y, _) = *POPUP_POS.lock();
+                let mut x = stored_x;
+                let mut y = stored_y;
+                if x + w > screen_w { x = screen_w - w - 8.0; }
+                if y + height > screen_h { y = screen_h - height - 8.0; }
+                if x < 0.0 { x = 8.0; }
+                if y < 0.0 { y = 8.0; }
+                (x, y, w)
+            }
+        };
+
+        set_noactivate(app_handle, false);
+
+        let win_w = w_logical + SHADOW_MARGIN * 2.0;
+        let win_h = height + SHADOW_MARGIN * 2.0;
+        let win_x = x - SHADOW_MARGIN;
+        let win_y = y - SHADOW_MARGIN;
+
+        let content_bottom = y + height;
+        *POPUP_BOTTOM.lock() = content_bottom;
+
+        let _ = window.set_size(LogicalSize::new(win_w, win_h));
+        let _ = window.set_position(Position::Logical(LogicalPosition::new(win_x, win_y)));
+
+        info!(
+            "Popup streaming expand to {:.0}x{:.0} (content {:.0}x{:.0}) at ({:.0}, {:.0}), bottom={:.0}",
             win_w, win_h, w_logical, height, win_x, win_y, content_bottom
         );
     }

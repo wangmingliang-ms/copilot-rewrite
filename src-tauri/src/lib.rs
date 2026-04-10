@@ -373,10 +373,10 @@ async fn process_and_show_preview(
     let expanded_clone = expanded.clone();
     let app_clone = app.clone();
     let chunk_callback = move |accumulated: &str| {
-        // Expand popup on first chunk (unless refreshing)
+        // Expand popup on first chunk (unless refreshing) — use streaming height
         if !is_refresh && !expanded_clone.load(Ordering::Relaxed) {
             expanded_clone.store(true, Ordering::Relaxed);
-            overlay::expand_popup(&app_clone, accumulated);
+            overlay::expand_popup_streaming(&app_clone);
         }
         let _ = app_clone.emit("show-preview-chunk", accumulated);
     };
