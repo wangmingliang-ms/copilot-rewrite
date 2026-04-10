@@ -12,6 +12,7 @@ pub mod tray;
 use log::{info, warn, LevelFilter};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tauri::{Emitter, Manager};
 
@@ -291,6 +292,8 @@ async fn process_text(
                     &settings.target_language,
                     &settings.api_token,
                     &settings.model,
+                    None,
+                    None,
                 )
                 .await
                 .map_err(|e| format!("Copilot API error: {}", e))?
@@ -307,6 +310,8 @@ async fn process_text(
                     &settings.model,
                     settings.beast_mode,
                     "",
+                    None,
+                    None,
                 )
                 .await
                 .map_err(|e| format!("Copilot API error: {}", e))?
@@ -362,18 +367,36 @@ async fn process_and_show_preview(
     let native_lang = settings.native_language.clone();
     let target_lang = settings.target_language.clone();
 
-    let process_fut: std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<String>> + Send>> = match &request.action {
+    // Build chunk callback that emits streaming events and expands popup on first chunk
+    let expanded = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let is_refresh = request.is_refresh;
+    let expanded_clone = expanded.clone();
+    let app_clone = app.clone();
+    let chunk_callback = move |accumulated: &str| {
+        // Expand popup on first chunk (unless refreshing)
+        if !is_refresh && !expanded_clone.load(Ordering::Relaxed) {
+            expanded_clone.store(true, Ordering::Relaxed);
+            overlay::expand_popup(&app_clone, accumulated);
+        }
+        let _ = app_clone.emit("show-preview-chunk", accumulated);
+    };
+
+    info!("[PERF] +{}ms — LLM call starting with streaming...", t0.elapsed().as_millis());
+
+    let process_result: anyhow::Result<String> = match &request.action {
         RewriteAction::ReadModeTranslate => {
-            Box::pin(state.copilot_client.process_read_mode(
+            state.copilot_client.process_read_mode(
                 &request.text,
                 &native_lang,
                 &target_lang,
                 &settings.api_token,
                 &settings.model,
-            ))
+                Some(&chunk_callback),
+                Some(&cancel_token),
+            ).await
         }
         _ => {
-            Box::pin(state.copilot_client.process(
+            state.copilot_client.process(
                 &request.text,
                 &request.action,
                 &native_lang,
@@ -382,46 +405,47 @@ async fn process_and_show_preview(
                 &settings.model,
                 settings.beast_mode,
                 &app_context,
-            ))
+                Some(&chunk_callback),
+                Some(&cancel_token),
+            ).await
         }
     };
-    info!("[PERF] +{}ms — LLM future created, awaiting...", t0.elapsed().as_millis());
 
-    tokio::select! {
-        result = process_fut => {
-            let llm_ms = t0.elapsed().as_millis();
-            match result {
-                Ok(result) => {
-                    info!("[PERF] +{}ms — LLM response received ({} chars)", llm_ms, result.len());
-                    if !request.is_refresh {
-                        overlay::expand_popup(&app, &result);
-                    }
-                    info!("[PERF] +{}ms — popup expanded", t0.elapsed().as_millis());
-
-                    let response = ProcessResponse {
-                        original: request.text,
-                        result,
-                        action: request.action,
-                    };
-                    app.emit("show-preview-result", &response)
-                        .map_err(|e| e.to_string())?;
-                    info!("[PERF] +{}ms — emitted show-preview-result, DONE", t0.elapsed().as_millis());
-                    Ok(())
-                }
-                Err(e) => {
-                    let err_msg = format!("Copilot API error: {}", e);
-                    warn!("[PERF] +{}ms — LLM ERROR: {}", llm_ms, err_msg);
-                    *state.preview_visible.lock() = false;
-                    let _ = app.emit("show-preview-error", &err_msg);
-                    Err(err_msg)
-                }
+    let llm_ms = t0.elapsed().as_millis();
+    match process_result {
+        Ok(result_text) => {
+            info!("[PERF] +{}ms — LLM response received ({} chars)", llm_ms, result_text.len());
+            // If we didn't expand yet (e.g. very short response or refresh), expand now
+            if !request.is_refresh && !expanded.load(Ordering::Relaxed) {
+                overlay::expand_popup(&app, &result_text);
             }
+            info!("[PERF] +{}ms — popup expanded", t0.elapsed().as_millis());
+
+            let response = ProcessResponse {
+                original: request.text,
+                result: result_text,
+                action: request.action,
+            };
+            app.emit("show-preview-result", &response)
+                .map_err(|e| e.to_string())?;
+            info!("[PERF] +{}ms — emitted show-preview-result, DONE", t0.elapsed().as_millis());
+            Ok(())
         }
-        _ = cancel_token.cancelled() => {
-            info!("[PERF] +{}ms — Request cancelled by user", t0.elapsed().as_millis());
-            *state.preview_visible.lock() = false;
-            let _ = app.emit("request-cancelled", ());
-            Err("Request cancelled".to_string())
+        Err(e) => {
+            let err_msg = format!("{}", e);
+            // Check if this was a cancellation
+            if err_msg.contains("cancelled") {
+                info!("[PERF] +{}ms — Request cancelled by user", llm_ms);
+                *state.preview_visible.lock() = false;
+                let _ = app.emit("request-cancelled", ());
+                Err("Request cancelled".to_string())
+            } else {
+                let err_msg = format!("Copilot API error: {}", e);
+                warn!("[PERF] +{}ms — LLM ERROR: {}", llm_ms, err_msg);
+                *state.preview_visible.lock() = false;
+                let _ = app.emit("show-preview-error", &err_msg);
+                Err(err_msg)
+            }
         }
     }
 }

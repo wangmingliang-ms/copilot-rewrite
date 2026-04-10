@@ -576,6 +576,7 @@ dependencies = [
  "clipboard-win",
  "dirs 5.0.1",
  "env_logger",
+ "futures-util",
  "log",
  "once_cell",
  "parking_lot",

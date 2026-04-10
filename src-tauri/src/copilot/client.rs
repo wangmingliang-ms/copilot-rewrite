@@ -5,6 +5,7 @@
 
 use crate::RewriteAction;
 use anyhow::{Context, Result};
+use futures_util::StreamExt;
 use log::{debug, info, warn};
 use parking_lot::Mutex;
 use reqwest::Client;
@@ -464,12 +465,18 @@ impl CopilotClient {
     ///
     /// Handles token exchange, HTTP request, 401 token-expired retry (once),
     /// and SSE stream parsing. Both `process()` and `process_read_mode()` delegate here.
+    ///
+    /// When `on_chunk` is provided, it is called with the accumulated result text
+    /// after each SSE delta is appended, enabling incremental streaming to the frontend.
+    /// When `cancel_token` is provided, cancellation is checked between SSE chunks.
     async fn call_chat_completion(
         &self,
         github_token: &str,
         model: &str,
         system_prompt: String,
         user_text: &str,
+        on_chunk: Option<&(dyn Fn(&str) + Send + Sync)>,
+        cancel_token: Option<&tokio_util::sync::CancellationToken>,
     ) -> Result<String> {
         let t0 = Instant::now();
 
@@ -549,43 +556,69 @@ impl CopilotClient {
                 );
             }
 
-            // Parse SSE stream response
-            let body = response
-                .text()
-                .await
-                .context("Failed to read response body")?;
-            info!(
-                "[PERF-LLM] +{}ms — response body read ({} bytes)",
-                t0.elapsed().as_millis(),
-                body.len()
-            );
-
-            let mut result = String::new();
+            // Stream SSE chunks incrementally
+            let mut stream = response.bytes_stream();
+            let mut buffer = String::new(); // incomplete SSE line buffer
+            let mut result = String::new(); // accumulated LLM output
             let mut actual_model_logged = false;
+            let mut done = false;
 
-            for line in body.lines() {
-                let line = line.trim();
-                if let Some(data) = line.strip_prefix("data: ") {
-                    if data == "[DONE]" {
-                        break;
+            while let Some(chunk_result) = stream.next().await {
+                if done {
+                    break;
+                }
+
+                // Check cancellation between chunks
+                if let Some(ct) = cancel_token {
+                    if ct.is_cancelled() {
+                        anyhow::bail!("Request cancelled");
                     }
-                    if let Ok(chunk) = serde_json::from_str::<ChatCompletionResponse>(data) {
-                        if !actual_model_logged {
-                            info!(
-                                "API responding with model: {} (requested: {})",
-                                chunk.model.as_deref().unwrap_or("unknown"),
-                                model
-                            );
-                            actual_model_logged = true;
+                }
+
+                let bytes = chunk_result.context("Stream read error")?;
+                buffer.push_str(&String::from_utf8_lossy(&bytes));
+
+                // Process all complete lines in the buffer
+                while let Some(pos) = buffer.find('\n') {
+                    let line = buffer[..pos].trim_end().to_string();
+                    buffer = buffer[pos + 1..].to_string();
+
+                    if line.is_empty() {
+                        continue;
+                    }
+
+                    if let Some(data) = line.strip_prefix("data: ") {
+                        if data == "[DONE]" {
+                            done = true;
+                            break;
                         }
-                        if let Some(choice) = chunk.choices.first() {
-                            if let Some(ref delta) = choice.delta {
-                                if let Some(ref content) = delta.content {
-                                    result.push_str(content);
-                                }
+                        if let Ok(chunk) = serde_json::from_str::<ChatCompletionResponse>(data) {
+                            if !actual_model_logged {
+                                info!(
+                                    "API responding with model: {} (requested: {})",
+                                    chunk.model.as_deref().unwrap_or("unknown"),
+                                    model
+                                );
+                                actual_model_logged = true;
                             }
-                            if let Some(ref message) = choice.message {
-                                result.push_str(&message.content);
+                            if let Some(choice) = chunk.choices.first() {
+                                let mut appended = false;
+                                if let Some(ref delta) = choice.delta {
+                                    if let Some(ref content) = delta.content {
+                                        result.push_str(content);
+                                        appended = true;
+                                    }
+                                }
+                                if let Some(ref message) = choice.message {
+                                    result.push_str(&message.content);
+                                    appended = true;
+                                }
+                                // Notify callback with accumulated result after each append
+                                if appended {
+                                    if let Some(cb) = on_chunk {
+                                        cb(&result);
+                                    }
+                                }
                             }
                         }
                     }
@@ -615,6 +648,8 @@ impl CopilotClient {
         model: &str,
         beast_mode: bool,
         app_context: &str,
+        on_chunk: Option<&(dyn Fn(&str) + Send + Sync)>,
+        cancel_token: Option<&tokio_util::sync::CancellationToken>,
     ) -> Result<String> {
         if github_token.is_empty() {
             anyhow::bail!("GitHub token is not configured. Please set your GitHub token (with Copilot access) in Settings.");
@@ -664,7 +699,7 @@ impl CopilotClient {
             if app_context.is_empty() { "none" } else { app_context }
         );
 
-        self.call_chat_completion(github_token, model, system_prompt, text)
+        self.call_chat_completion(github_token, model, system_prompt, text, on_chunk, cancel_token)
             .await
     }
 
@@ -677,6 +712,8 @@ impl CopilotClient {
         target_language: &str,
         github_token: &str,
         model: &str,
+        on_chunk: Option<&(dyn Fn(&str) + Send + Sync)>,
+        cancel_token: Option<&tokio_util::sync::CancellationToken>,
     ) -> Result<String> {
         if github_token.is_empty() {
             anyhow::bail!("GitHub token is not configured.");
@@ -692,7 +729,7 @@ impl CopilotClient {
             model
         );
 
-        self.call_chat_completion(github_token, model, system_prompt, text)
+        self.call_chat_completion(github_token, model, system_prompt, text, on_chunk, cancel_token)
             .await
     }
 }

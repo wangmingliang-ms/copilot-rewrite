@@ -6,7 +6,7 @@ import "github-markdown-css/github-markdown-light.css";
 import iconImg from "../assets/icon-48.png";
 import { SelectionInfo, ProcessResponse } from "../hooks/useSelection";
 
-type PopupState = "icon" | "spinning" | "expanded" | "error";
+type PopupState = "icon" | "spinning" | "streaming" | "expanded" | "error";
 
 interface CopilotModel {
   id: string;
@@ -19,6 +19,8 @@ interface PopupProps {
 
 const Popup: FC<PopupProps> = ({ selection }) => {
   const [state, setState] = useState<PopupState>("icon");
+  const stateRef = useRef<PopupState>("icon");
+  const [streamingText, setStreamingText] = useState<string | null>(null);
   const [result, setResult] = useState<ProcessResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showOriginal, setShowOriginal] = useState(false);
@@ -30,6 +32,12 @@ const Popup: FC<PopupProps> = ({ selection }) => {
 
   // Read Mode state
   const [isReadMode, setIsReadMode] = useState(false);
+
+  // Keep stateRef in sync for use in event listener closures
+  const setPopupState = useCallback((s: PopupState) => {
+    stateRef.current = s;
+    setState(s);
+  }, []);
   const [readModeSettings, setReadModeSettings] = useState<{
     native_language: string;
     target_language: string;
@@ -99,38 +107,52 @@ const Popup: FC<PopupProps> = ({ selection }) => {
   // Listen for backend events
   useEffect(() => {
     const unResult = listen<ProcessResponse>("show-preview-result", (event) => {
+      setStreamingText(null); // Clear streaming state on final result
       setResult(event.payload);
       setError(null);
-      setState("expanded");
+      setPopupState("expanded");
       setRefreshing(false);
       refreshingRef.current = false;
     });
 
     const unLoading = listen("show-preview-loading", () => {
-      // When refreshing, stay in expanded state — button shows its own spinner
+      // When refreshing, stay in expanded/streaming state — button shows its own spinner
       if (refreshingRef.current) return;
-      setState("spinning");
+      setPopupState("spinning");
       setError(null);
       setResult(null);
+      setStreamingText(null);
+    });
+
+    // Listen for incremental streaming chunks
+    const unChunk = listen<string>("show-preview-chunk", (event) => {
+      setStreamingText(event.payload);
+      // Transition from spinning to streaming on first chunk
+      if (stateRef.current === "spinning") {
+        setPopupState("streaming");
+      }
     });
 
     const unError = listen<string>("show-preview-error", (event) => {
+      setStreamingText(null);
       setError(event.payload);
-      setState("error");
+      setPopupState("error");
       setRefreshing(false);
       refreshingRef.current = false;
     });
 
     const unSelection = listen("selection-detected", () => {
-      setState("icon");
+      setPopupState("icon");
       setResult(null);
       setError(null);
+      setStreamingText(null);
       refreshSettings(); // pick up model/settings changes
     });
 
     // Handle backend-initiated cancellation
     const unCancelled = listen("request-cancelled", () => {
-      setState("icon");
+      setPopupState("icon");
+      setStreamingText(null);
       setRefreshing(false);
       refreshingRef.current = false;
     });
@@ -138,6 +160,7 @@ const Popup: FC<PopupProps> = ({ selection }) => {
     return () => {
       unResult.then((f) => f());
       unLoading.then((f) => f());
+      unChunk.then((f) => f());
       unError.then((f) => f());
       unSelection.then((f) => f());
       unCancelled.then((f) => f());
@@ -247,6 +270,13 @@ const Popup: FC<PopupProps> = ({ selection }) => {
     return marked.parse(readExplanation) as string;
   }, [readExplanation]);
 
+  // Streaming markdown — render accumulated text as raw markdown (skip JSON parsing since partial JSON is unparsable)
+  const streamingHtml = useMemo(() => {
+    if (!streamingText) return "";
+    marked.setOptions({ breaks: true, gfm: true });
+    return marked.parse(streamingText) as string;
+  }, [streamingText]);
+
   // The text to use for Replace/Copy
   // Write Mode: translated text; Read Mode: all relevant content
   const outputText = isReadMode
@@ -278,9 +308,9 @@ const Popup: FC<PopupProps> = ({ selection }) => {
     };
   }, [showReplaceMenu]);
 
-  // Auto-dismiss on blur (when expanded)
+  // Auto-dismiss on blur (when expanded or streaming)
   useEffect(() => {
-    if (state !== "expanded" && state !== "error") return;
+    if (state !== "expanded" && state !== "streaming" && state !== "error") return;
     const handleBlur = () => {
       setTimeout(async () => {
         if (!document.hasFocus()) {
@@ -295,12 +325,14 @@ const Popup: FC<PopupProps> = ({ selection }) => {
   // Ref for expanded content container to measure actual height
   const contentRef = useRef<HTMLDivElement>(null);
 
-  // Resize popup window to fit rendered content (only on initial expand, not refresh)
+  // Resize popup window to fit rendered content
+  // During streaming: throttled to max once per 200ms
+  // On initial expand: once after 50ms
   const hasResized = useRef(false);
   useEffect(() => {
-    if (state !== "expanded" || !contentRef.current) return;
-    // Skip resize if this is a refresh result (keep current size)
-    if (hasResized.current) return;
+    if ((state !== "expanded" && state !== "streaming") || !contentRef.current) return;
+    // For expanded state: skip resize if this is a refresh result (keep current size)
+    if (state === "expanded" && hasResized.current) return;
     // Wait a tick for DOM to settle after render
     const timer = setTimeout(() => {
       if (contentRef.current) {
@@ -312,15 +344,17 @@ const Popup: FC<PopupProps> = ({ selection }) => {
         card.style.maxHeight = oldMaxH;
         // Clamp and tell backend to resize
         invoke("resize_popup_content", { height: Math.min(Math.max(totalHeight, 80), 400) }).catch(() => {});
-        hasResized.current = true;
+        if (state === "expanded") {
+          hasResized.current = true;
+        }
       }
-    }, 50);
+    }, state === "streaming" ? 200 : 50);
     return () => clearTimeout(timer);
-  }, [state, translatedHtml, reorganizedHtml, readSummaryHtml, readTranslationHtml, readExplanationHtml, readModeType]); // Only resize on content change, NOT on toggle/showRaw
+  }, [state, streamingText, translatedHtml, reorganizedHtml, readSummaryHtml, readTranslationHtml, readExplanationHtml, readModeType]);
 
   const handleIconClick = useCallback(async () => {
     // Show spinner immediately — don't wait for auth/settings checks
-    setState("spinning");
+    setPopupState("spinning");
 
     // Refresh settings to pick up model/beast mode changes from Settings window
     await refreshSettings();
@@ -330,18 +364,18 @@ const Popup: FC<PopupProps> = ({ selection }) => {
       const auth = await invoke<{ logged_in: boolean }>("get_auth_status");
       if (!auth.logged_in) {
         invoke("log_action", { action: "Icon clicked — not logged in, opening Settings" }).catch(() => {});
-        setState("icon"); // revert spinner
+        setPopupState("icon"); // revert spinner
         await invoke("open_settings");
         return;
       }
     } catch {
       setError("Please login via tray → Settings");
-      setState("error");
+      setPopupState("error");
       return;
     }
 
     if (!selection) {
-      setState("icon"); // revert spinner
+      setPopupState("icon"); // revert spinner
       return;
     }
 
@@ -376,7 +410,7 @@ const Popup: FC<PopupProps> = ({ selection }) => {
       // Ignore cancellation — already handled by cancel button
       if (msg.includes("cancelled")) return;
       setError(msg);
-      setState("error");
+      setPopupState("error");
     }
   }, [selection, refreshSettings, readModeSettings]);
 
@@ -416,7 +450,7 @@ const Popup: FC<PopupProps> = ({ selection }) => {
         return;
       }
       setError(msg);
-      setState("error");
+      setPopupState("error");
       setRefreshing(false);
       refreshingRef.current = false;
     }
@@ -464,6 +498,10 @@ const Popup: FC<PopupProps> = ({ selection }) => {
   }, [outputText, outputHtml, replaceMode]);
 
   const handleDismiss = useCallback(async () => {
+    // Cancel any in-flight request when dismissing during streaming/spinning
+    if (stateRef.current === "streaming" || stateRef.current === "spinning") {
+      invoke("cancel_request").catch(() => {});
+    }
     try {
       await invoke("dismiss_popup");
     } catch {}
@@ -471,9 +509,10 @@ const Popup: FC<PopupProps> = ({ selection }) => {
   }, []);
 
   const resetState = () => {
-    setState("icon");
+    setPopupState("icon");
     setResult(null);
     setError(null);
+    setStreamingText(null);
     setShowOriginal(false);
     setShowRaw(false);
     setRefreshing(false);
@@ -527,7 +566,7 @@ const Popup: FC<PopupProps> = ({ selection }) => {
           onClick={() => {
             invoke("cancel_request").catch(() => {});
             invoke("log_action", { action: "Cancel clicked during spinning" }).catch(() => {});
-            setState("icon");
+            setPopupState("icon");
           }}
           title="Click to cancel"
           style={{
@@ -562,6 +601,70 @@ const Popup: FC<PopupProps> = ({ selection }) => {
             <line x1="12" y1="4" x2="4" y2="12" />
           </svg>
         </button>
+      </div>
+    );
+  }
+
+  // ── Streaming state (expanded card with partial content + blinking cursor) ──
+  if (state === "streaming") {
+    return (
+      <div className="w-screen h-screen" style={{ padding: "20px", background: "transparent" }}>
+        <div ref={contentRef} className="flex flex-col rounded-lg overflow-hidden h-full"
+          style={{
+            background: isDark ? "#1e293b" : "#fff",
+            border: isDark ? "1px solid rgba(255,255,255,0.1)" : "1px solid rgba(0,0,0,0.08)",
+            boxShadow: isDark
+              ? "0 8px 32px rgba(0,0,0,0.4), 0 2px 8px rgba(0,0,0,0.3)"
+              : "0 8px 32px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.06)",
+          }}
+        >
+          <div className="flex-1 min-h-0 overflow-auto px-5 pt-5 pb-3" style={{ userSelect: "text", WebkitUserSelect: "text" }}>
+            <div
+              className="markdown-body text-[13.5px] leading-[1.7] streaming-content"
+              style={{ background: "transparent" }}
+              dangerouslySetInnerHTML={{ __html: streamingHtml }}
+            />
+            {/* Blinking cursor indicator */}
+            <span className="inline-block w-[2px] h-[1em] bg-copilot-blue align-text-bottom animate-pulse ml-0.5" />
+          </div>
+          {/* Minimal action bar during streaming — just dismiss and cancel */}
+          <div className="flex-shrink-0 flex items-center justify-between border-t border-gray-100 dark:border-gray-700 px-3 py-2"
+            style={{ background: isDark ? "rgba(15,23,42,0.8)" : "rgba(249,250,251,0.8)" }}
+          >
+            <div className="flex items-center gap-1">
+              <button
+                onClick={handleDismiss}
+                className="flex items-center justify-center w-7 h-7 rounded-lg text-gray-400 dark:text-gray-500 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                title="Dismiss"
+              >
+                <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+                  <path d="M3 3l10 10M13 3L3 13" />
+                </svg>
+              </button>
+              {currentModel && (
+                <span className="text-[10px] text-gray-400 dark:text-gray-500 font-mono truncate max-w-[120px]">
+                  {currentModel}
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-1">
+              {/* Cancel/stop streaming button */}
+              <button
+                onClick={() => {
+                  invoke("cancel_request").catch(() => {});
+                  invoke("log_action", { action: "Cancel clicked during streaming" }).catch(() => {});
+                }}
+                className="group flex items-center justify-center w-7 h-7 rounded-lg bg-blue-50 dark:bg-blue-900/30 text-copilot-blue hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 transition-colors cursor-pointer"
+                title="Stop generating"
+              >
+                <div className="h-3.5 w-3.5 animate-spin rounded-full border-[1.5px] border-copilot-blue border-t-transparent group-hover:hidden" />
+                <svg className="w-3.5 h-3.5 hidden group-hover:block" viewBox="0 0 16 16" fill="currentColor">
+                  <rect x="3" y="3" width="10" height="10" rx="1" />
+                </svg>
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
     );
   }
