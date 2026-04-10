@@ -5,6 +5,7 @@ import { marked } from "marked";
 import "github-markdown-css/github-markdown-light.css";
 import iconImg from "../assets/icon-48.png";
 import { SelectionInfo, ProcessResponse } from "../hooks/useSelection";
+import { extractJsonStringValue, stripCodeFences, extractVocabulary } from "../utils/jsonParser";
 
 type PopupState = "icon" | "spinning" | "streaming" | "expanded" | "error";
 
@@ -15,33 +16,6 @@ interface CopilotModel {
 
 interface PopupProps {
   selection: SelectionInfo | null;
-}
-
-/** Find the index of the first unescaped double-quote in a string. Returns -1 if not found. */
-function findUnescapedQuote(s: string): number {
-  for (let i = 0; i < s.length; i++) {
-    if (s[i] === '\\') { i++; continue; } // skip escaped char
-    if (s[i] === '"') return i;
-  }
-  return -1;
-}
-
-/** Extract a JSON string value for a given key from potentially partial JSON.
- *  Returns the unescaped string content, or null if the key is not found. */
-function extractJsonStringValue(json: string, key: string): string | null {
-  const marker = `"${key}"`;
-  const idx = json.indexOf(marker);
-  if (idx === -1) return null;
-  const afterKey = json.substring(idx + marker.length);
-  const valMatch = afterKey.match(/^\s*:\s*"/);
-  if (!valMatch) return null;
-  const valueStart = idx + marker.length + valMatch[0].length;
-  let raw = json.substring(valueStart);
-  const closingIdx = findUnescapedQuote(raw);
-  if (closingIdx !== -1) {
-    raw = raw.substring(0, closingIdx);
-  }
-  return raw.replace(/\\n/g, "\n").replace(/\\"/g, '"').replace(/\\\\/g, "\\");
 }
 
 const Popup: FC<PopupProps> = ({ selection }) => {
@@ -206,6 +180,7 @@ const Popup: FC<PopupProps> = ({ selection }) => {
     const empty = { reorganized: "", translated: "", readLayout: "" as string, readTranslation: "", readSummary: "", readVocabulary: [] as { term: string; meaning: string }[] };
     if (!result?.result) return empty;
     const text = result.result.trim();
+    console.log("[Popup] Final result text (first 300 chars):", JSON.stringify(text.slice(0, 300)));
 
     // Write Mode: check for separator format first
     const SEP = "---TRANSLATED---";
@@ -220,8 +195,8 @@ const Popup: FC<PopupProps> = ({ selection }) => {
 
     // Try JSON parse (Read Mode, or legacy Write Mode fallback)
     try {
-      const cleaned = text.replace(/^```(?:json)?\s*\n?/i, "").replace(/\n?```\s*$/, "");
-      let parsed: Record<string, unknown>;
+      const cleaned = stripCodeFences(text);
+      let parsed: Record<string, unknown> | null = null;
       try {
         parsed = JSON.parse(cleaned);
       } catch {
@@ -249,46 +224,69 @@ const Popup: FC<PopupProps> = ({ selection }) => {
           }
           fixed += ch;
         }
-        parsed = JSON.parse(fixed);
+        try {
+          parsed = JSON.parse(fixed);
+        } catch {
+          // JSON.parse still fails (e.g. LLM emitted unescaped quotes like "修改" in values).
+          // Fall back to extractJsonStringValue — same approach streaming uses.
+          const translation = extractJsonStringValue(cleaned, "translation");
+          if (translation) {
+            const summary = extractJsonStringValue(cleaned, "summary") || "";
+            const vocabulary = extractVocabulary(cleaned);
+            const hasVocab = vocabulary.length > 0;
+            const hasSummary = summary.trim().length > 0;
+            const layout = hasSummary ? "withSummary" : hasVocab ? "withVocab" : "simple";
+            return {
+              ...empty,
+              readLayout: layout,
+              readTranslation: translation,
+              readSummary: summary,
+              readVocabulary: vocabulary,
+            };
+          }
+        }
       }
 
-      // Read Mode unified format: {translation, summary?, vocabulary?}
-      if (parsed.translation) {
-        const hasVocab = Array.isArray(parsed.vocabulary) && parsed.vocabulary.length > 0;
-        const hasSummary = typeof parsed.summary === "string" && parsed.summary.trim().length > 0;
-        const layout = hasSummary ? "withSummary" : hasVocab ? "withVocab" : "simple";
-        return {
-          ...empty,
-          readLayout: layout,
-          readTranslation: String(parsed.translation),
-          readSummary: hasSummary ? String(parsed.summary) : "",
-          readVocabulary: hasVocab ? (parsed.vocabulary as { term: string; meaning: string }[]) : [],
-        };
-      }
+      if (parsed) {
+        // Read Mode unified format: {translation, summary?, vocabulary?}
+        if (parsed.translation) {
+          const hasVocab = Array.isArray(parsed.vocabulary) && parsed.vocabulary.length > 0;
+          const hasSummary = typeof parsed.summary === "string" && parsed.summary.trim().length > 0;
+          const layout = hasSummary ? "withSummary" : hasVocab ? "withVocab" : "simple";
+          return {
+            ...empty,
+            readLayout: layout,
+            readTranslation: String(parsed.translation),
+            readSummary: hasSummary ? String(parsed.summary) : "",
+            readVocabulary: hasVocab ? (parsed.vocabulary as { term: string; meaning: string }[]) : [],
+          };
+        }
 
-      // Legacy Read Mode format with "mode" field (backward compat)
-      if (parsed.mode) {
-        const hasSummary = typeof parsed.summary === "string" && parsed.summary.trim().length > 0;
-        const hasVocab = Array.isArray(parsed.vocabulary) && parsed.vocabulary.length > 0;
-        const layout = hasSummary ? "withSummary" : hasVocab ? "withVocab" : "simple";
-        return {
-          ...empty,
-          readLayout: layout,
-          readTranslation: String(parsed.translation || ""),
-          readSummary: hasSummary ? String(parsed.summary) : "",
-          readVocabulary: hasVocab ? (parsed.vocabulary as { term: string; meaning: string }[]) : [],
-        };
-      }
+        // Legacy Read Mode format with "mode" field (backward compat)
+        if (parsed.mode) {
+          const hasSummary = typeof parsed.summary === "string" && parsed.summary.trim().length > 0;
+          const hasVocab = Array.isArray(parsed.vocabulary) && parsed.vocabulary.length > 0;
+          const layout = hasSummary ? "withSummary" : hasVocab ? "withVocab" : "simple";
+          return {
+            ...empty,
+            readLayout: layout,
+            readTranslation: String(parsed.translation || ""),
+            readSummary: hasSummary ? String(parsed.summary) : "",
+            readVocabulary: hasVocab ? (parsed.vocabulary as { term: string; meaning: string }[]) : [],
+          };
+        }
 
-      // Legacy Write Mode JSON format (backward compat)
-      if (parsed.reorganized && parsed.translated) {
-        return {
-          ...empty,
-          reorganized: String(parsed.reorganized),
-          translated: String(parsed.translated),
-        };
+        // Legacy Write Mode JSON format (backward compat)
+        if (parsed.reorganized && parsed.translated) {
+          return {
+            ...empty,
+            reorganized: String(parsed.reorganized),
+            translated: String(parsed.translated),
+          };
+        }
       }
-    } catch {
+    } catch (e) {
+      console.warn("[Popup] JSON parse failed even after newline fix:", e, "\nRaw text:", text.slice(0, 200));
       // JSON parse failed — try legacy "---" divider (Write Mode fallback)
       if (!isReadMode) {
         const dividerMatch = text.match(/\n---\n/);
@@ -302,10 +300,12 @@ const Popup: FC<PopupProps> = ({ selection }) => {
       }
     }
     // No structure found — treat entire text as the main result
+    // Strip code fences so raw JSON doesn't render as a code block
+    const fallbackText = stripCodeFences(text);
     if (isReadMode) {
-      return { ...empty, readLayout: "simple", readTranslation: text };
+      return { ...empty, readLayout: "simple", readTranslation: fallbackText };
     }
-    return { ...empty, translated: text };
+    return { ...empty, translated: fallbackText };
   }, [result?.result, isReadMode]);
 
   // Render markdown
@@ -354,39 +354,19 @@ const Popup: FC<PopupProps> = ({ selection }) => {
     }
 
     // JSON (Read Mode) — extract values incrementally from partial JSON
-    if (raw.startsWith("{")) {
+    // Strip code fences if LLM wraps JSON in ```json ... ```
+    const stripped = stripCodeFences(raw);
+    if (stripped.startsWith("{")) {
       const keys = ["translation", "summary"];
       let bestContent = "";
       for (const key of keys) {
-        const extracted = extractJsonStringValue(raw, key);
+        const extracted = extractJsonStringValue(stripped, key);
         if (extracted !== null) bestContent = extracted;
       }
 
-      // Try to extract vocabulary entries from partial JSON
-      const vocabulary: { term: string; meaning: string }[] = [];
-      const vocabIdx = raw.indexOf('"vocabulary"');
-      if (vocabIdx !== -1) {
-        const afterVocab = raw.substring(vocabIdx);
-        const arrStart = afterVocab.indexOf("[");
-        if (arrStart !== -1) {
-          const arrContent = afterVocab.substring(arrStart + 1);
-          const objRegex = /\{[^}]*\}/g;
-          let match;
-          while ((match = objRegex.exec(arrContent)) !== null) {
-            try {
-              const obj = JSON.parse(match[0]);
-              if (obj.term) {
-                vocabulary.push({
-                  term: String(obj.term || ""),
-                  meaning: String(obj.meaning || ""),
-                });
-              }
-            } catch { /* partial object, skip */ }
-          }
-        }
-      }
+      const vocabulary = extractVocabulary(stripped);
 
-      return { text: bestContent || raw, vocabulary, phase: "translated" as const };
+      return { text: bestContent || stripped, vocabulary, phase: "translated" as const };
     }
 
     // Plain text — could be Translate/Polish (no separator needed) or
