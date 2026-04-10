@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.10.0] - 2026-04-10
+
+### ⚡ Performance
+
+- **SSE streaming for real-time token delivery** — The Copilot API response is now streamed incrementally via SSE chunks instead of buffering the entire response. Text appears token-by-token as the LLM generates it, reducing perceived latency from 2-8s to ~200ms time-to-first-token.
+- **Dramatically simplified system prompts** — All 7 prompts (6 write + 1 read) reduced to ~40-50% of original size. Removed verbose multi-step thinking chains, detailed structure/formatting sections, and unnecessary instructions. Shorter prompts = faster TTFT.
+- **Write Mode: dropped JSON output format** — Switched from `{"reorganized":"...","translated":"..."}` JSON to a plain-text `---TRANSLATED---` separator format. The model can now start streaming immediately without planning JSON structure first.
+- **Read Mode: dropped 4-mode auto-detection** — Previously the model had to reason about which mode to use (word/simple/complex/long) before outputting anything. Now always returns a fixed `{translation, summary?, vocabulary?}` shape — frontend decides layout from field presence.
+
+### ✨ Features
+
+- **Streaming "Thinking" phase** — In Write Mode (TranslateAndPolish), the reorganized/polished text streams first with a dimmed "Thinking..." indicator, then the translated text appears normally after the separator. Similar to the "thinking" display in AI chat interfaces.
+- **Streaming vocabulary display** — Vocabulary entries in Read Mode now appear incrementally during streaming, not just after the full response completes.
+- **UTF-8 safe streaming** — Raw byte buffer correctly handles multi-byte character boundaries (e.g. Chinese characters split across SSE chunks), eliminating garbled text during streaming.
+
+### 🔧 Improvements
+
+- **Stronger anti-answer constraint** — All prompts now include a prominent "CRITICAL" instruction at the top that explicitly prevents the LLM from answering questions, executing tasks, or responding to content in the selected text. The user text is always treated as text to be translated/polished, never as a prompt.
+- **Increased popup offset from selection** — Popup icon now appears 4px further from the selected text (X: 8→12px, Y: 16→20px) to reduce accidental clicks when right-clicking.
+- **Simplified Read Mode UI** — Removed the 4-mode rendering (word/simple/complex/long). Now uses 3 clean layouts derived from response content: simple (translation only), withVocab (translation + vocabulary), withSummary (summary + collapsible full translation).
+
+### 🐛 Bug Fixes
+
+- **Fixed stream timeout after ~30s** — Replaced the blanket 30s `timeout()` on the HTTP client with `connect_timeout(15s)` + `read_timeout(60s)`, so long-running streams no longer get killed mid-flight.
+- **Fixed popup height too small during streaming** — First streaming chunk no longer determines popup height. Uses a fixed 250px streaming height, then resizes to fit final content.
+
 ## [0.9.2] - 2026-04-08
 
 ### 🐛 Bug Fixes
