@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.14.0] - 2026-04-11
+
+### ✨ Features
+
+- **Inline model dropdown in popup toolbar** — The model name in the popup toolbar is now a full Radix Select dropdown with vendor-grouped items (matching the Settings page). Switch models without leaving the popup — selecting a different model automatically triggers regeneration.
+- **Result history with pagination** — Every regeneration result is saved in memory. Navigate between previous and current results using `< 1 of N >` pagination controls in the bottom toolbar. Copy and Replace always operate on the currently displayed result.
+- **Tab-based content layout** — Replaced collapsible panels with a clean tab UI. Read Mode shows Summary / Translation / Vocabulary tabs; Write Mode shows Translated / Polished tabs. Tabs only appear when multiple sections are available.
+
+### 🔧 Improvements
+
+- **Restructured toolbar layout** — Top toolbar: Mode dropdown → Model dropdown → Settings gear → Dismiss. Bottom toolbar: Regenerate/Stop → Pagination → Copy → Replace. Cleaner separation of navigation and actions.
+- **Tab bar above content** — Tab bar moved from below the content area to above it for more natural navigation.
+- **Sparkles icon repositioned** — "More Creative" dropdown item now shows the sparkles icon after the label text instead of before.
+
+### 🐛 Bug Fixes
+
+- **Fixed popup window growing on each regenerate** — Added `sizeLockedForRegenerate` ref that locks popup dimensions after the first successful expansion. Only a new text selection resets the lock.
+- **Fixed mode dropdown triggering unnecessary regeneration** — Opening the mode dropdown and clicking the already-selected mode no longer triggers a redundant regeneration. Early-return guards added to both write and read action handlers.
+- **Improved prompt formatting** — Tuned system prompts to prefer structured Markdown formatting for clearer, more readable output.
+
 ## [0.13.0] - 2026-04-11
 
 ### ✨ Features
