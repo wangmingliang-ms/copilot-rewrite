@@ -681,8 +681,8 @@ const Popup: FC<PopupProps> = ({ selection }) => {
                       onClick={() => handleReadActionChange(a.value)}
                       className={`w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 ${currentReadAction === a.value ? "text-copilot-blue font-medium" : "text-gray-700 dark:text-gray-300"}`}
                     >
-                      {currentReadAction === a.value && <span>✓</span>}
-                      <span className={currentReadAction !== a.value ? "ml-5" : ""}>{a.label}</span>
+                      <span className="w-3 inline-block text-center flex-shrink-0">{currentReadAction === a.value ? "✓" : ""}</span>
+                      <span>{a.label}</span>
                     </button>
                   ))
                 : WRITE_ACTIONS.map((a) => (
@@ -691,8 +691,8 @@ const Popup: FC<PopupProps> = ({ selection }) => {
                       onClick={() => handleWriteActionChange(a.value)}
                       className={`w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 ${currentWriteAction === a.value ? "text-copilot-blue font-medium" : "text-gray-700 dark:text-gray-300"}`}
                     >
-                      {currentWriteAction === a.value && <span>✓</span>}
-                      <span className={currentWriteAction !== a.value ? "ml-5" : ""}>{a.label}</span>
+                      <span className="w-3 inline-block text-center flex-shrink-0">{currentWriteAction === a.value ? "✓" : ""}</span>
+                      <span>{a.label}</span>
                     </button>
                   ))}
             </div>
@@ -727,6 +727,10 @@ const Popup: FC<PopupProps> = ({ selection }) => {
                 </svg>
               )}
             </div>
+            <svg className="w-3.5 h-3.5 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z" />
+              <path d="M20 3v4" /><path d="M22 5h-4" />
+            </svg>
             <span>More Creative</span>
           </label>
         )}
@@ -847,7 +851,7 @@ const Popup: FC<PopupProps> = ({ selection }) => {
                     onClick={(e) => { e.stopPropagation(); switchReplaceMode("rendered"); }}
                     className={`w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 ${replaceMode === "rendered" ? "text-copilot-blue font-medium" : "text-gray-700 dark:text-gray-300"}`}
                   >
-                    {replaceMode === "rendered" ? <span>✓</span> : <span className="w-3" />}
+                    <span className="w-3 inline-block text-center flex-shrink-0">{replaceMode === "rendered" ? "✓" : ""}</span>
                     <svg className="w-3.5 h-3.5 flex-shrink-0" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                       <rect x="2" y="1.5" width="12" height="13" rx="1.5" />
                       <path d="M5 5h6M5 8h6M5 11h3" />
@@ -858,7 +862,7 @@ const Popup: FC<PopupProps> = ({ selection }) => {
                     onClick={(e) => { e.stopPropagation(); switchReplaceMode("markdown"); }}
                     className={`w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 ${replaceMode === "markdown" ? "text-copilot-blue font-medium" : "text-gray-700 dark:text-gray-300"}`}
                   >
-                    {replaceMode === "markdown" ? <span>✓</span> : <span className="w-3" />}
+                    <span className="w-3 inline-block text-center flex-shrink-0">{replaceMode === "markdown" ? "✓" : ""}</span>
                     <svg className="w-3.5 h-3.5 flex-shrink-0" viewBox="0 0 16 10" fill="currentColor">
                       <path d="M1 1.5A1.5 1.5 0 0 1 2.5 0h11A1.5 1.5 0 0 1 15 1.5v7a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 1 8.5v-7zM2.5 7V3l1.5 2L5.5 3v4h1V1.5h-1L4 3.5 2.5 1.5h-1V7h1zm7-1h1.5L9 9V6H8V1.5h1V6z" />
                     </svg>
