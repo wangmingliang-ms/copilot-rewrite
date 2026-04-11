@@ -553,6 +553,7 @@ const Popup: FC<PopupProps> = ({ selection }) => {
 
   // ── Action dropdown change → persist + auto-regenerate ──
   const handleWriteActionChange = useCallback(async (action: WriteAction) => {
+    if (action === currentWriteAction) return;
     setCurrentWriteAction(action);
     setShowActionMenu(false);
     invoke("log_action", { action: `Write action changed to: ${action}` }).catch(() => {});
@@ -571,9 +572,10 @@ const Popup: FC<PopupProps> = ({ selection }) => {
     setRefreshing(true);
     refreshingRef.current = true;
     await invokeProcess({ action, isRefresh: true });
-  }, [invokeProcess]);
+  }, [currentWriteAction, invokeProcess]);
 
   const handleReadActionChange = useCallback(async (action: ReadAction) => {
+    if (action === currentReadAction) return;
     setCurrentReadAction(action);
     setShowActionMenu(false);
     invoke("log_action", { action: `Read action changed to: ${action}` }).catch(() => {});
@@ -591,7 +593,7 @@ const Popup: FC<PopupProps> = ({ selection }) => {
     setRefreshing(true);
     refreshingRef.current = true;
     await invokeProcess({ readAction: action, isRefresh: true });
-  }, [invokeProcess]);
+  }, [currentReadAction, invokeProcess]);
 
   // ── Creative mode toggle → persist + auto-regenerate ──
   const handleCreativeToggle = useCallback(async () => {
