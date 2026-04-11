@@ -72,8 +72,8 @@ Mode is determined by `SelectionInfo.is_input_element` (set by `UiaEngine::is_ed
 | Trigger | Input fields | Webpage text, PDFs |
 | Action | `TranslateAndPolish` | `ReadModeTranslate` |
 | LLM response | JSON `{"reorganized": "...", "translated": "..."}` | JSON `{"summary": "...", "translation": "..."}` or plain text |
-| Popup buttons | Replace, Copy, Refresh, Markdown toggle, Beast icon | Copy, Refresh, Dismiss (no Replace) |
-| Sub-modes | Normal / Beast Mode | Translate+Summarize / Simple Translate |
+| Popup buttons | Replace, Copy, Refresh, Markdown toggle, Creative mode | Copy, Refresh, Dismiss (no Replace) |
+| Sub-modes | Normal / Creative Mode | Translate+Summarize / Simple Translate |
 | Collapsible section | "Original (reorganized)" | "Full Translation" (when summarize mode) |
 
 Read Mode is toggled via `Settings.read_mode_enabled`. Its sub-mode (`translate_summarize` or `simple_translate`) is in `Settings.read_mode_sub`.
@@ -111,7 +111,7 @@ Session tokens are cached in memory with expiry tracking. The GitHub token is ob
 The Copilot client has **three prompt tiers** in `copilot/client.rs`:
 
 - **Normal mode** (Write): translate, polish, or translate+polish. The translate+polish mode returns JSON `{"reorganized": "...", "translated": "..."}`.
-- **Beast mode** (Write): same three actions but with full creative rewrite freedom. Toggled via settings.
+- **Creative mode** (Write): same three actions but with full creative rewrite freedom. Toggled via popup toolbar.
 - **Read mode**: `read_mode_translate_prompt` (faithful translation, plain text output) and `read_mode_translate_summarize_prompt` (returns JSON `{"summary": "...", "translation": "..."}`).
 
 ### Text Replacement
@@ -137,7 +137,7 @@ All cross-module state lives in `Arc<AppState>` using `parking_lot::Mutex`:
 
 All config files go under `%APPDATA%/copilot-rewrite/`:
 
-- `settings.json` — user settings (model, languages, beast_mode, read_mode_enabled, read_mode_sub, etc.)
+- `settings.json` — user settings (model, languages, creative_mode, read_mode_enabled, read_mode_sub, etc.)
 - `auth.json` — saved GitHub token + username
 - `logs/YYYY-MM-DD.log` — date-rotated log files (INFO+ level)
 - `replace-debug.log` — detailed replacement engine debug log

@@ -7,7 +7,24 @@ import iconImg from "../assets/icon-48.png";
 import { SelectionInfo, ProcessResponse } from "../hooks/useSelection";
 import { extractJsonStringValue, stripCodeFences, extractVocabulary, parseReadModeSeparator } from "../utils/jsonParser";
 
-type PopupState = "icon" | "spinning" | "streaming" | "expanded" | "error";
+// ── State machine ──
+// icon (48×48) → loading (expanded, spinner) → streaming (expanded, text flowing) → expanded (final) | error
+type PopupState = "icon" | "loading" | "streaming" | "expanded" | "error";
+
+// Write Mode actions
+type WriteAction = "TranslateAndPolish" | "Translate" | "Polish";
+const WRITE_ACTIONS: { value: WriteAction; label: string }[] = [
+  { value: "TranslateAndPolish", label: "Translate + Polish" },
+  { value: "Translate", label: "Only Translate" },
+  { value: "Polish", label: "Only Polish" },
+];
+
+// Read Mode actions
+type ReadAction = "translate_summarize" | "simple_translate";
+const READ_ACTIONS: { value: ReadAction; label: string }[] = [
+  { value: "translate_summarize", label: "Summarize + Translate" },
+  { value: "simple_translate", label: "Only Translate" },
+];
 
 interface CopilotModel {
   id: string;
@@ -27,12 +44,20 @@ const Popup: FC<PopupProps> = ({ selection }) => {
   const [showOriginal, setShowOriginal] = useState(false);
   const [showRaw, setShowRaw] = useState(false);
   const [currentModel, setCurrentModel] = useState<string>("");
-  const [beastMode, setBeastMode] = useState<boolean>(false);
+  const [creativeMode, setCreativeMode] = useState<boolean>(false);
   const [replaceMode, setReplaceMode] = useState<"rendered" | "markdown">("rendered");
   const [showReplaceMenu, setShowReplaceMenu] = useState(false);
 
   // Read Mode state
   const [isReadMode, setIsReadMode] = useState(false);
+
+  // Top toolbar state — action selection
+  const [currentWriteAction, setCurrentWriteAction] = useState<WriteAction>("TranslateAndPolish");
+  const [currentReadAction, setCurrentReadAction] = useState<ReadAction>("translate_summarize");
+  const [showActionMenu, setShowActionMenu] = useState(false);
+
+  // Derived: is generating
+  const isGenerating = state === "loading" || state === "streaming";
 
   // Keep stateRef in sync for use in event listener closures
   const setPopupState = useCallback((s: PopupState) => {
@@ -54,7 +79,6 @@ const Popup: FC<PopupProps> = ({ selection }) => {
     } else if (t === "light") {
       resolved = "light";
     } else {
-      // "system" — detect OS preference
       try {
         const sys = await invoke<string>("get_system_theme");
         resolved = sys === "dark" ? "dark" : "light";
@@ -79,21 +103,29 @@ const Popup: FC<PopupProps> = ({ selection }) => {
     return () => observer.disconnect();
   }, []);
 
-  // Refresh settings (model name + beast mode + theme + read mode) from backend
+  // Refresh settings (model name + creative mode + theme + read mode + write action) from backend
   const refreshSettings = useCallback(async () => {
     try {
       const s = await invoke<{
-        model: string; beast_mode: boolean; replace_mode: string; theme?: string;
+        model: string; creative_mode: boolean; replace_mode: string; theme?: string;
         native_language?: string; target_language?: string; read_mode_enabled?: boolean; read_mode_sub?: string;
+        write_action?: string;
       }>("get_settings");
-      setBeastMode(s.beast_mode || false);
+      setCreativeMode(s.creative_mode || false);
       applyTheme(s.theme);
       setReplaceMode((s.replace_mode === "markdown" ? "markdown" : "rendered") as "rendered" | "markdown");
-      setReadModeSettings({
+      // Restore write action
+      const wa = s.write_action || "TranslateAndPolish";
+      if (wa === "TranslateAndPolish" || wa === "Translate" || wa === "Polish") {
+        setCurrentWriteAction(wa as WriteAction);
+      }
+      const rms = {
         native_language: s.native_language || "Chinese (Simplified)",
         target_language: s.target_language || "English",
         read_mode_sub: s.read_mode_sub || "translate_summarize",
-      });
+      };
+      setReadModeSettings(rms);
+      setCurrentReadAction(rms.read_mode_sub === "simple_translate" ? "simple_translate" : "translate_summarize");
       if (!s.model) { setCurrentModel(""); return; }
       try {
         const models = await invoke<CopilotModel[]>("list_models");
@@ -108,7 +140,7 @@ const Popup: FC<PopupProps> = ({ selection }) => {
   // Listen for backend events
   useEffect(() => {
     const unResult = listen<ProcessResponse>("show-preview-result", (event) => {
-      setStreamingText(null); // Clear streaming state on final result
+      setStreamingText(null);
       setResult(event.payload);
       setError(null);
       setPopupState("expanded");
@@ -117,9 +149,7 @@ const Popup: FC<PopupProps> = ({ selection }) => {
     });
 
     const unLoading = listen("show-preview-loading", () => {
-      // When refreshing, stay in expanded/streaming state — button shows its own spinner
-      if (refreshingRef.current) return;
-      setPopupState("spinning");
+      setPopupState("loading");
       setError(null);
       setResult(null);
       setStreamingText(null);
@@ -128,8 +158,8 @@ const Popup: FC<PopupProps> = ({ selection }) => {
     // Listen for incremental streaming chunks
     const unChunk = listen<string>("show-preview-chunk", (event) => {
       setStreamingText(event.payload);
-      // Transition from spinning to streaming on first chunk
-      if (stateRef.current === "spinning") {
+      // Transition from loading to streaming on first chunk
+      if (stateRef.current === "loading") {
         setPopupState("streaming");
       }
     });
@@ -147,10 +177,9 @@ const Popup: FC<PopupProps> = ({ selection }) => {
       setResult(null);
       setError(null);
       setStreamingText(null);
-      refreshSettings(); // pick up model/settings changes
+      refreshSettings();
     });
 
-    // Handle backend-initiated cancellation
     const unCancelled = listen("request-cancelled", () => {
       setPopupState("icon");
       setStreamingText(null);
@@ -173,232 +202,117 @@ const Popup: FC<PopupProps> = ({ selection }) => {
     refreshSettings();
   }, [refreshSettings]);
 
-  // Parse result — handles both Write Mode and Read Mode formats
-  // Write Mode: "[reorganized]\n---TRANSLATED---\n[translated]" (separator format)
-  // Parse final LLM result into structured fields.
-  // Write Mode uses ---TRANSLATED--- separator. Read Mode uses ---VOCABULARY---/---SUMMARY--- separators.
-  // JSON parsing is kept as legacy fallback only.
+  // ── Parse result ──
   const { reorganized, translated, readLayout, readTranslation, readSummary, readVocabulary } = useMemo(() => {
     const empty = { reorganized: "", translated: "", readLayout: "" as string, readTranslation: "", readSummary: "", readVocabulary: [] as { term: string; meaning: string }[] };
     if (!result?.result) return empty;
     const text = result.result.trim();
 
-    // Write Mode: check for separator format first
+    // Write Mode: separator format
     const SEP = "---TRANSLATED---";
     const sepIdx = text.indexOf(SEP);
     if (sepIdx !== -1) {
-      return {
-        ...empty,
-        reorganized: text.slice(0, sepIdx).trim(),
-        translated: text.slice(sepIdx + SEP.length).trim(),
-      };
+      return { ...empty, reorganized: text.slice(0, sepIdx).trim(), translated: text.slice(sepIdx + SEP.length).trim() };
     }
 
-    // Read Mode: separator format (---VOCABULARY--- / ---SUMMARY---)
+    // Read Mode: separator format
     if (isReadMode) {
       const parsed = parseReadModeSeparator(text);
       return { ...empty, ...parsed };
     }
 
-    // Legacy fallback: Try JSON parse (for older Read Mode responses)
+    // Legacy fallback: JSON parse
     try {
       const cleaned = stripCodeFences(text);
       let parsed: Record<string, unknown> | null = null;
       try {
         parsed = JSON.parse(cleaned);
       } catch {
-        // LLM sometimes emits literal newlines inside JSON string values,
-        // which breaks JSON.parse. Fix: walk through the string tracking
-        // whether we're inside a JSON string value, and escape newlines there.
         let fixed = "";
         let inString = false;
         for (let i = 0; i < cleaned.length; i++) {
           const ch = cleaned[i];
-          if (ch === '\\' && inString) {
-            fixed += ch + (cleaned[i + 1] || "");
-            i++; // skip escaped char
-            continue;
-          }
-          if (ch === '"') {
-            inString = !inString;
-            fixed += ch;
-            continue;
-          }
-          if ((ch === '\n' || ch === '\r') && inString) {
-            if (ch === '\r' && cleaned[i + 1] === '\n') i++; // skip \r\n
-            fixed += "\\n";
-            continue;
-          }
+          if (ch === '\\' && inString) { fixed += ch + (cleaned[i + 1] || ""); i++; continue; }
+          if (ch === '"') { inString = !inString; fixed += ch; continue; }
+          if ((ch === '\n' || ch === '\r') && inString) { if (ch === '\r' && cleaned[i + 1] === '\n') i++; fixed += "\\n"; continue; }
           fixed += ch;
         }
-        try {
-          parsed = JSON.parse(fixed);
-        } catch {
-          // JSON.parse still fails (e.g. LLM emitted unescaped quotes like "修改" in values).
-          // Fall back to extractJsonStringValue — same approach streaming uses.
+        try { parsed = JSON.parse(fixed); } catch {
           const translation = extractJsonStringValue(cleaned, "translation");
           if (translation) {
             const summary = extractJsonStringValue(cleaned, "summary") || "";
             const vocabulary = extractVocabulary(cleaned);
-            const hasVocab = vocabulary.length > 0;
-            const hasSummary = summary.trim().length > 0;
-            const layout = hasSummary ? "withSummary" : hasVocab ? "withVocab" : "simple";
-            return {
-              ...empty,
-              readLayout: layout,
-              readTranslation: translation,
-              readSummary: summary,
-              readVocabulary: vocabulary,
-            };
+            const layout = summary.trim() ? "withSummary" : vocabulary.length > 0 ? "withVocab" : "simple";
+            return { ...empty, readLayout: layout, readTranslation: translation, readSummary: summary, readVocabulary: vocabulary };
           }
         }
       }
-
       if (parsed) {
-        // Read Mode unified format: {translation, summary?, vocabulary?}
         if (parsed.translation) {
           const hasVocab = Array.isArray(parsed.vocabulary) && parsed.vocabulary.length > 0;
           const hasSummary = typeof parsed.summary === "string" && parsed.summary.trim().length > 0;
           const layout = hasSummary ? "withSummary" : hasVocab ? "withVocab" : "simple";
-          return {
-            ...empty,
-            readLayout: layout,
-            readTranslation: String(parsed.translation),
-            readSummary: hasSummary ? String(parsed.summary) : "",
-            readVocabulary: hasVocab ? (parsed.vocabulary as { term: string; meaning: string }[]) : [],
-          };
+          return { ...empty, readLayout: layout, readTranslation: String(parsed.translation), readSummary: hasSummary ? String(parsed.summary) : "", readVocabulary: hasVocab ? (parsed.vocabulary as { term: string; meaning: string }[]) : [] };
         }
-
-        // Legacy Read Mode format with "mode" field (backward compat)
         if (parsed.mode) {
           const hasSummary = typeof parsed.summary === "string" && parsed.summary.trim().length > 0;
           const hasVocab = Array.isArray(parsed.vocabulary) && parsed.vocabulary.length > 0;
           const layout = hasSummary ? "withSummary" : hasVocab ? "withVocab" : "simple";
-          return {
-            ...empty,
-            readLayout: layout,
-            readTranslation: String(parsed.translation || ""),
-            readSummary: hasSummary ? String(parsed.summary) : "",
-            readVocabulary: hasVocab ? (parsed.vocabulary as { term: string; meaning: string }[]) : [],
-          };
+          return { ...empty, readLayout: layout, readTranslation: String(parsed.translation || ""), readSummary: hasSummary ? String(parsed.summary) : "", readVocabulary: hasVocab ? (parsed.vocabulary as { term: string; meaning: string }[]) : [] };
         }
-
-        // Legacy Write Mode JSON format (backward compat)
         if (parsed.reorganized && parsed.translated) {
-          return {
-            ...empty,
-            reorganized: String(parsed.reorganized),
-            translated: String(parsed.translated),
-          };
+          return { ...empty, reorganized: String(parsed.reorganized), translated: String(parsed.translated) };
         }
       }
-    } catch (e) {
-      console.warn("[Popup] JSON parse failed even after newline fix:", e, "\nRaw text:", text.slice(0, 200));
-      // JSON parse failed — try legacy "---" divider (Write Mode fallback)
+    } catch {
       if (!isReadMode) {
         const dividerMatch = text.match(/\n---\n/);
         if (dividerMatch && dividerMatch.index !== undefined) {
-          return {
-            ...empty,
-            reorganized: text.slice(0, dividerMatch.index).trim(),
-            translated: text.slice(dividerMatch.index + dividerMatch[0].length).trim(),
-          };
+          return { ...empty, reorganized: text.slice(0, dividerMatch.index).trim(), translated: text.slice(dividerMatch.index + dividerMatch[0].length).trim() };
         }
       }
     }
-    // No structure found — treat entire text as the main result
-    // Strip code fences so raw JSON doesn't render as a code block
     const fallbackText = stripCodeFences(text);
-    if (isReadMode) {
-      return { ...empty, readLayout: "simple", readTranslation: fallbackText };
-    }
+    if (isReadMode) return { ...empty, readLayout: "simple", readTranslation: fallbackText };
     return { ...empty, translated: fallbackText };
   }, [result?.result, isReadMode]);
 
   // Render markdown
-  const reorganizedHtml = useMemo(() => {
-    if (!reorganized) return "";
-    marked.setOptions({ breaks: true, gfm: true });
-    return marked.parse(reorganized) as string;
-  }, [reorganized]);
+  const reorganizedHtml = useMemo(() => { if (!reorganized) return ""; marked.setOptions({ breaks: true, gfm: true }); return marked.parse(reorganized) as string; }, [reorganized]);
+  const translatedHtml = useMemo(() => { if (!translated) return ""; marked.setOptions({ breaks: true, gfm: true }); return marked.parse(translated) as string; }, [translated]);
+  const readSummaryHtml = useMemo(() => { if (!readSummary) return ""; marked.setOptions({ breaks: true, gfm: true }); return marked.parse(readSummary) as string; }, [readSummary]);
+  const readTranslationHtml = useMemo(() => { if (!readTranslation) return ""; marked.setOptions({ breaks: true, gfm: true }); return marked.parse(readTranslation) as string; }, [readTranslation]);
 
-  const translatedHtml = useMemo(() => {
-    if (!translated) return "";
-    marked.setOptions({ breaks: true, gfm: true });
-    return marked.parse(translated) as string;
-  }, [translated]);
-
-  // Read Mode markdown
-  const readSummaryHtml = useMemo(() => {
-    if (!readSummary) return "";
-    marked.setOptions({ breaks: true, gfm: true });
-    return marked.parse(readSummary) as string;
-  }, [readSummary]);
-
-  const readTranslationHtml = useMemo(() => {
-    if (!readTranslation) return "";
-    marked.setOptions({ breaks: true, gfm: true });
-    return marked.parse(readTranslation) as string;
-  }, [readTranslation]);
-
-  // Extract displayable content from streaming text.
-  // Write Mode: separator format "[reorganized]\n---TRANSLATED---\n[translated]"
-  //   - Before separator appears: phase = "reorganized" (show as thinking)
-  //   - After separator: phase = "translated" (show translated part)
-  // Read Mode: separator format (---VOCABULARY--- / ---SUMMARY---)
-  //   - Translation streams first, vocabulary/summary append as they arrive
+  // Streaming parse
   const streamingParsed = useMemo(() => {
     const empty = { text: "", vocabulary: [] as { term: string; meaning: string }[], phase: "translated" as "reorganized" | "translated" };
     if (!streamingText) return empty;
     const raw = streamingText.trim();
-
-    // Check for separator format (Write Mode TranslateAndPolish)
     const SEP = "---TRANSLATED---";
     const sepIdx = raw.indexOf(SEP);
-    if (sepIdx !== -1) {
-      const translated = raw.slice(sepIdx + SEP.length).trim();
-      return { text: translated || "...", vocabulary: [], phase: "translated" as const };
-    }
-
-    // Read Mode: separator-based streaming
+    if (sepIdx !== -1) return { text: raw.slice(sepIdx + SEP.length).trim() || "...", vocabulary: [], phase: "translated" as const };
     if (isReadMode) {
       const parsed = parseReadModeSeparator(raw);
       return { text: parsed.readTranslation || raw, vocabulary: parsed.readVocabulary, phase: "translated" as const };
     }
-
-    // Legacy: JSON (Read Mode) — extract values incrementally from partial JSON
-    // Strip code fences if LLM wraps JSON in ```json ... ```
     const stripped = stripCodeFences(raw);
     if (stripped.startsWith("{")) {
       const keys = ["translation", "summary"];
       let bestContent = "";
-      for (const key of keys) {
-        const extracted = extractJsonStringValue(stripped, key);
-        if (extracted !== null) bestContent = extracted;
-      }
-
+      for (const key of keys) { const extracted = extractJsonStringValue(stripped, key); if (extracted !== null) bestContent = extracted; }
       const vocabulary = extractVocabulary(stripped);
-
       return { text: bestContent || stripped, vocabulary, phase: "translated" as const };
     }
-
-    // Plain text — could be Translate/Polish (no separator needed) or
-    // pre-separator reorganized section of TranslateAndPolish
-    // We can't distinguish without more context, so we show as-is.
-    // If the text looks like it might be the reorganized section (Write Mode),
-    // mark phase as "reorganized" so UI can show a subtle indicator.
     return { text: raw, vocabulary: [], phase: "reorganized" as const };
   }, [streamingText]);
 
-  // Streaming markdown — render extracted content as markdown
   const streamingHtml = useMemo(() => {
     if (!streamingParsed.text) return "";
     marked.setOptions({ breaks: true, gfm: true });
     return marked.parse(streamingParsed.text) as string;
   }, [streamingParsed.text]);
 
-  // The text to use for Replace/Copy
-  // Write Mode: translated text; Read Mode: all relevant content
+  // Output text for Replace/Copy
   const outputText = isReadMode
     ? (readSummary || readTranslation || result?.result || "")
     : (translated || result?.result || "");
@@ -406,85 +320,116 @@ const Popup: FC<PopupProps> = ({ selection }) => {
     ? (readSummaryHtml || readTranslationHtml)
     : translatedHtml;
 
-  // Dismiss on Escape; close replace menu on outside click
+  // Close menus on outside click / Escape
   const replaceMenuRef = useRef<HTMLDivElement>(null);
+  const actionMenuRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         if (showReplaceMenu) { setShowReplaceMenu(false); return; }
+        if (showActionMenu) { setShowActionMenu(false); return; }
         handleDismiss();
       }
     };
     const handleClick = (e: MouseEvent) => {
-      if (showReplaceMenu && replaceMenuRef.current && !replaceMenuRef.current.contains(e.target as Node)) {
-        setShowReplaceMenu(false);
-      }
+      if (showReplaceMenu && replaceMenuRef.current && !replaceMenuRef.current.contains(e.target as Node)) setShowReplaceMenu(false);
+      if (showActionMenu && actionMenuRef.current && !actionMenuRef.current.contains(e.target as Node)) setShowActionMenu(false);
     };
     window.addEventListener("keydown", handleKeyDown);
     window.addEventListener("mousedown", handleClick);
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-      window.removeEventListener("mousedown", handleClick);
-    };
-  }, [showReplaceMenu]);
+    return () => { window.removeEventListener("keydown", handleKeyDown); window.removeEventListener("mousedown", handleClick); };
+  }, [showReplaceMenu, showActionMenu]);
 
-  // Auto-dismiss on blur (when expanded or streaming)
+  // Auto-dismiss on blur
   useEffect(() => {
-    if (state !== "expanded" && state !== "streaming" && state !== "error") return;
+    if (state !== "expanded" && state !== "streaming" && state !== "loading" && state !== "error") return;
     const handleBlur = () => {
-      setTimeout(async () => {
-        if (!document.hasFocus()) {
-          handleDismiss();
-        }
-      }, 100);
+      setTimeout(async () => { if (!document.hasFocus()) handleDismiss(); }, 100);
     };
     window.addEventListener("blur", handleBlur);
     return () => window.removeEventListener("blur", handleBlur);
   }, [state]);
 
-  // Ref for expanded content container to measure actual height
+  // Resize popup to fit content
   const contentRef = useRef<HTMLDivElement>(null);
-
-  // Resize popup window to fit rendered content
-  // During streaming: throttled to max once per 200ms
-  // On initial expand: once after 50ms
   const hasResized = useRef(false);
   useEffect(() => {
     if ((state !== "expanded" && state !== "streaming") || !contentRef.current) return;
-    // For expanded state: skip resize if this is a refresh result (keep current size)
     if (state === "expanded" && hasResized.current) return;
-    // Wait a tick for DOM to settle after render
     const timer = setTimeout(() => {
       if (contentRef.current) {
-        // Temporarily remove maxHeight to measure natural content height
         const card = contentRef.current;
         const oldMaxH = card.style.maxHeight;
         card.style.maxHeight = "none";
         const totalHeight = card.scrollHeight;
         card.style.maxHeight = oldMaxH;
-        // Clamp and tell backend to resize
         invoke("resize_popup_content", { height: Math.min(Math.max(totalHeight, 80), 400) }).catch(() => {});
-        if (state === "expanded") {
-          hasResized.current = true;
-        }
+        if (state === "expanded") hasResized.current = true;
       }
     }, state === "streaming" ? 200 : 50);
     return () => clearTimeout(timer);
   }, [state, streamingText, translatedHtml, reorganizedHtml, readSummaryHtml, readTranslationHtml, readLayout]);
 
-  const handleIconClick = useCallback(async () => {
-    // Show spinner immediately — don't wait for auth/settings checks
-    setPopupState("spinning");
+  // ── Process invocation helper ──
+  // Accept explicit readMode override to avoid stale closure issues
+  // (setIsReadMode is async, so the closure may not reflect the latest value)
+  const invokeProcess = useCallback(async (opts: {
+    action?: WriteAction;
+    readAction?: ReadAction;
+    creative?: boolean;
+    isRefresh?: boolean;
+    readMode?: boolean;
+  } = {}) => {
+    if (!selection) return;
+    const writeAction = opts.action ?? currentWriteAction;
+    const readAction = opts.readAction ?? currentReadAction;
+    const creative = opts.creative ?? creativeMode;
+    const isRefresh = opts.isRefresh ?? false;
+    const effectiveReadMode = opts.readMode ?? isReadMode;
 
-    // Refresh settings to pick up model/beast mode changes from Settings window
+    try {
+      if (effectiveReadMode) {
+        const summarize = readAction === "translate_summarize";
+        await invoke("process_and_show_preview", {
+          request: {
+            text: selection.text,
+            action: "ReadModeTranslate",
+            creative_mode: creative,
+            is_refresh: isRefresh,
+            read_target_language: readModeSettings.native_language,
+            read_summarize: summarize,
+          },
+        });
+      } else {
+        await invoke("process_and_show_preview", {
+          request: {
+            text: selection.text,
+            action: writeAction,
+            creative_mode: creative,
+            is_refresh: isRefresh,
+          },
+        });
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes("cancelled")) return;
+      setError(msg);
+      setPopupState("error");
+      setRefreshing(false);
+      refreshingRef.current = false;
+    }
+  }, [selection, currentWriteAction, currentReadAction, creativeMode, isReadMode, readModeSettings]);
+
+  // ── Icon click handler ──
+  const handleIconClick = useCallback(async () => {
+    setPopupState("loading");
     await refreshSettings();
 
-    // Check auth status fresh on every click — picks up login done in Settings
     try {
       const auth = await invoke<{ logged_in: boolean }>("get_auth_status");
       if (!auth.logged_in) {
         invoke("log_action", { action: "Icon clicked — not logged in, opening Settings" }).catch(() => {});
-        setPopupState("icon"); // revert spinner
+        setPopupState("icon");
         await invoke("open_settings");
         return;
       }
@@ -494,87 +439,102 @@ const Popup: FC<PopupProps> = ({ selection }) => {
       return;
     }
 
-    if (!selection) {
-      setPopupState("icon"); // revert spinner
-      return;
-    }
+    if (!selection) { setPopupState("icon"); return; }
 
-    // Detect Read Mode vs Write Mode based on selection source
     const readMode = selection.is_input_element === false;
     setIsReadMode(readMode);
-
     invoke("log_action", { action: `Icon clicked — ${readMode ? "Read" : "Write"} Mode (${selection.text.length} chars)` }).catch(() => {});
+    await invokeProcess({ readMode });
+  }, [selection, refreshSettings, invokeProcess]);
 
-    try {
-      if (readMode) {
-        // Read Mode: determine translation direction
-        // If selected text != native language → translate to native; if == native → translate to target
-        // We send both options and let the frontend pass the resolved language
-        const summarize = readModeSettings.read_mode_sub === "translate_summarize";
-        await invoke("process_and_show_preview", {
-          request: {
-            text: selection.text,
-            action: "ReadModeTranslate",
-            read_target_language: readModeSettings.native_language,
-            read_summarize: summarize,
-          },
-        });
-      } else {
-        // Write Mode: existing behavior
-        await invoke("process_and_show_preview", {
-          request: { text: selection.text, action: "TranslateAndPolish" },
-        });
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      // Ignore cancellation — already handled by cancel button
-      if (msg.includes("cancelled")) return;
-      setError(msg);
-      setPopupState("error");
-    }
-  }, [selection, refreshSettings, readModeSettings]);
-
-  const [refreshing, setRefreshing] = useState(false);
+  const [, setRefreshing] = useState(false);
   const [copyToast, setCopyToast] = useState(false);
   const refreshingRef = useRef(false);
 
-  const handleRefresh = useCallback(async () => {
-    if (!selection || refreshing) return;
-    invoke("log_action", { action: "Refresh clicked" }).catch(() => {});
+  // ── Regenerate / Refresh ──
+  const handleRegenerate = useCallback(async () => {
+    if (!selection || isGenerating) return;
+    invoke("log_action", { action: "Regenerate clicked" }).catch(() => {});
+    setPopupState("loading");
+    setError(null);
+    setResult(null);
+    setStreamingText(null);
+    hasResized.current = false;
+    await invokeProcess({ isRefresh: true });
+  }, [selection, isGenerating, invokeProcess]);
+
+  // ── Stop generating ──
+  const handleStop = useCallback(() => {
+    invoke("cancel_request").catch(() => {});
+    invoke("log_action", { action: "Stop generating clicked" }).catch(() => {});
+  }, []);
+
+  // ── Action dropdown change → persist + auto-regenerate ──
+  const handleWriteActionChange = useCallback(async (action: WriteAction) => {
+    setCurrentWriteAction(action);
+    setShowActionMenu(false);
+    invoke("log_action", { action: `Write action changed to: ${action}` }).catch(() => {});
+
+    // Persist to settings
+    try {
+      const s = await invoke<Record<string, unknown>>("get_settings");
+      await invoke("update_settings", { settings: { ...s, write_action: action } });
+    } catch { /* non-critical */ }
+
+    // Auto-regenerate
+    await invoke("cancel_request").catch(() => {});
+    setPopupState("loading");
+    setStreamingText(null);
+    setResult(null);
+    hasResized.current = false;
     setRefreshing(true);
     refreshingRef.current = true;
-    setError(null);
+    await invokeProcess({ action, isRefresh: true });
+  }, [invokeProcess]);
+
+  const handleReadActionChange = useCallback(async (action: ReadAction) => {
+    setCurrentReadAction(action);
+    setShowActionMenu(false);
+    invoke("log_action", { action: `Read action changed to: ${action}` }).catch(() => {});
+
+    // Persist to settings
     try {
-      if (isReadMode) {
-        const summarize = readModeSettings.read_mode_sub === "translate_summarize";
-        await invoke("process_and_show_preview", {
-          request: {
-            text: selection.text,
-            action: "ReadModeTranslate",
-            is_refresh: true,
-            read_target_language: readModeSettings.native_language,
-            read_summarize: summarize,
-          },
-        });
-      } else {
-        await invoke("process_and_show_preview", {
-          request: { text: selection.text, action: "TranslateAndPolish", is_refresh: true },
-        });
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      // Ignore cancellation — already handled by cancel button
-      if (msg.includes("cancelled")) {
-        setRefreshing(false);
-        refreshingRef.current = false;
-        return;
-      }
-      setError(msg);
-      setPopupState("error");
-      setRefreshing(false);
-      refreshingRef.current = false;
-    }
-  }, [selection, refreshing, isReadMode, readModeSettings]);
+      const s = await invoke<Record<string, unknown>>("get_settings");
+      await invoke("update_settings", { settings: { ...s, read_mode_sub: action } });
+    } catch { /* non-critical */ }
+
+    await invoke("cancel_request").catch(() => {});
+    setPopupState("loading");
+    setStreamingText(null);
+    setResult(null);
+    hasResized.current = false;
+    setRefreshing(true);
+    refreshingRef.current = true;
+    await invokeProcess({ readAction: action, isRefresh: true });
+  }, [invokeProcess]);
+
+  // ── Creative mode toggle → persist + auto-regenerate ──
+  const handleCreativeToggle = useCallback(async () => {
+    const newCreative = !creativeMode;
+    setCreativeMode(newCreative);
+    invoke("log_action", { action: `Creative mode toggled: ${newCreative}` }).catch(() => {});
+
+    // Persist
+    try {
+      const s = await invoke<Record<string, unknown>>("get_settings");
+      await invoke("update_settings", { settings: { ...s, creative_mode: newCreative } });
+    } catch { /* non-critical */ }
+
+    // Auto-regenerate
+    await invoke("cancel_request").catch(() => {});
+    setPopupState("loading");
+    setStreamingText(null);
+    setResult(null);
+    hasResized.current = false;
+    setRefreshing(true);
+    refreshingRef.current = true;
+    await invokeProcess({ creative: newCreative, isRefresh: true });
+  }, [creativeMode, invokeProcess]);
 
   const handleReplace = useCallback(async () => {
     if (!outputText) return;
@@ -593,7 +553,6 @@ const Popup: FC<PopupProps> = ({ selection }) => {
     setReplaceMode(mode);
     setShowReplaceMenu(false);
     await invoke("log_action", { action: `Replace mode changed to: ${mode}` }).catch(() => {});
-    // Persist the setting
     try {
       const s = await invoke<Record<string, unknown>>("get_settings");
       await invoke("update_settings", { settings: { ...s, replace_mode: mode } });
@@ -618,13 +577,10 @@ const Popup: FC<PopupProps> = ({ selection }) => {
   }, [outputText, outputHtml, replaceMode]);
 
   const handleDismiss = useCallback(async () => {
-    // Cancel any in-flight request when dismissing during streaming/spinning
-    if (stateRef.current === "streaming" || stateRef.current === "spinning") {
+    if (stateRef.current === "streaming" || stateRef.current === "loading") {
       invoke("cancel_request").catch(() => {});
     }
-    try {
-      await invoke("dismiss_popup");
-    } catch {}
+    try { await invoke("dismiss_popup"); } catch {}
     resetState();
   }, []);
 
@@ -639,7 +595,287 @@ const Popup: FC<PopupProps> = ({ selection }) => {
     refreshingRef.current = false;
     hasResized.current = false;
     setIsReadMode(false);
+    setShowActionMenu(false);
+    setShowReplaceMenu(false);
   };
+
+  // ── Shared card style — elevated card with border + layered shadows ──
+  const cardStyle = {
+    background: isDark ? "#1e293b" : "#ffffff",
+    border: isDark ? "1px solid rgba(255,255,255,0.12)" : "1px solid #d1d5db",
+    borderRadius: "12px",
+    boxShadow: isDark
+      ? "0 1px 3px rgba(0,0,0,0.4), 0 6px 16px rgba(0,0,0,0.35), 0 16px 48px rgba(0,0,0,0.45)"
+      : "0 1px 3px rgba(0,0,0,0.08), 0 8px 24px rgba(0,0,0,0.12), 0 24px 48px rgba(0,0,0,0.08)",
+  };
+
+  // Inner content card style
+  const contentCardClass = "border border-gray-200 dark:border-gray-600 rounded-lg shadow-[inset_0_1px_3px_rgba(0,0,0,0.06)] dark:shadow-[inset_0_1px_3px_rgba(0,0,0,0.2)]";
+
+  // ══════════════════════════════════════════════════════════
+  // ── Top Toolbar ──
+  // ══════════════════════════════════════════════════════════
+  // Shared button style for toolbar buttons — bordered, subtle shadow
+  const toolbarBtnClass = "border border-gray-200 dark:border-gray-600 shadow-sm";
+
+  const renderTopToolbar = () => {
+    const disabledClass = isGenerating ? "opacity-50 pointer-events-none" : "";
+
+    return (
+      <div
+        className="flex-shrink-0 flex items-center gap-1.5 px-4 py-2.5 border-b border-gray-200 dark:border-gray-600"
+        style={{ background: isDark ? "rgba(15,23,42,0.6)" : "rgba(249,250,251,0.8)" }}
+      >
+        {/* Regenerate / Generating / Stop button */}
+        {isGenerating ? (
+          <button
+            onClick={handleStop}
+            className={`group flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-blue-50 dark:bg-blue-900/30 text-copilot-blue hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 transition-colors ${toolbarBtnClass}`}
+            title="Stop generating"
+          >
+            {/* Spinner — visible by default */}
+            <div className="h-3.5 w-3.5 animate-spin rounded-full border-[1.5px] border-copilot-blue border-t-transparent group-hover:hidden" />
+            {/* Stop icon — visible on hover */}
+            <svg className="w-3.5 h-3.5 hidden group-hover:block" viewBox="0 0 16 16" fill="currentColor">
+              <rect x="3" y="3" width="10" height="10" rx="1" />
+            </svg>
+            <span className="group-hover:hidden">Generating...</span>
+            <span className="hidden group-hover:inline">Stop</span>
+          </button>
+        ) : (
+          <button
+            onClick={handleRegenerate}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors ${toolbarBtnClass}`}
+            title="Regenerate"
+          >
+            <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M2.5 8a5.5 5.5 0 0 1 9.3-4" />
+              <path d="M13.5 8a5.5 5.5 0 0 1-9.3 4" />
+              <path d="M11.5 1.5v3h3" />
+              <path d="M4.5 14.5v-3h-3" />
+            </svg>
+            Regenerate
+          </button>
+        )}
+
+        {/* Action dropdown */}
+        <div className={`relative ${disabledClass}`} ref={actionMenuRef}>
+          <button
+            onClick={() => setShowActionMenu(!showActionMenu)}
+            className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors ${toolbarBtnClass}`}
+            disabled={isGenerating}
+          >
+            {isReadMode
+              ? READ_ACTIONS.find((a) => a.value === currentReadAction)?.label
+              : WRITE_ACTIONS.find((a) => a.value === currentWriteAction)?.label}
+            <svg className="w-2.5 h-2.5 ml-0.5" viewBox="0 0 10 10" fill="currentColor">
+              <path d="M2 3.5L5 6.5L8 3.5" />
+            </svg>
+          </button>
+          {showActionMenu && (
+            <div className="absolute top-full left-0 mt-1 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 py-1 min-w-[180px] z-50">
+              {isReadMode
+                ? READ_ACTIONS.map((a) => (
+                    <button
+                      key={a.value}
+                      onClick={() => handleReadActionChange(a.value)}
+                      className={`w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 ${currentReadAction === a.value ? "text-copilot-blue font-medium" : "text-gray-700 dark:text-gray-300"}`}
+                    >
+                      {currentReadAction === a.value && <span>✓</span>}
+                      <span className={currentReadAction !== a.value ? "ml-5" : ""}>{a.label}</span>
+                    </button>
+                  ))
+                : WRITE_ACTIONS.map((a) => (
+                    <button
+                      key={a.value}
+                      onClick={() => handleWriteActionChange(a.value)}
+                      className={`w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 ${currentWriteAction === a.value ? "text-copilot-blue font-medium" : "text-gray-700 dark:text-gray-300"}`}
+                    >
+                      {currentWriteAction === a.value && <span>✓</span>}
+                      <span className={currentWriteAction !== a.value ? "ml-5" : ""}>{a.label}</span>
+                    </button>
+                  ))}
+            </div>
+          )}
+        </div>
+
+        {/* More Creative toggle — Write Mode only */}
+        {!isReadMode && (
+          <label
+            className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium cursor-pointer select-none transition-colors ${toolbarBtnClass} ${
+              creativeMode
+                ? "text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30 !border-blue-300 dark:!border-blue-700"
+                : "text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/60"
+            } ${disabledClass}`}
+            title={creativeMode ? "More Creative ON — full creative rewrite" : "More Creative OFF — conservative rewrite"}
+          >
+            <input
+              type="checkbox"
+              checked={creativeMode}
+              onChange={handleCreativeToggle}
+              disabled={isGenerating}
+              className="sr-only"
+            />
+            <div className={`w-3.5 h-3.5 rounded border-[1.5px] flex items-center justify-center transition-colors ${
+              creativeMode
+                ? "bg-blue-500 border-blue-500"
+                : "border-gray-400 dark:border-gray-500"
+            }`}>
+              {creativeMode && (
+                <svg className="w-2.5 h-2.5 text-white" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M2 6l3 3 5-6" />
+                </svg>
+              )}
+            </div>
+            <span>More Creative</span>
+          </label>
+        )}
+
+        <div className="flex-1" />
+
+        {/* Dismiss */}
+        <button
+          onClick={handleDismiss}
+          className="flex items-center justify-center w-6 h-6 rounded-md text-gray-400 dark:text-gray-500 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+          title="Dismiss"
+        >
+          <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+            <path d="M3 3l10 10M13 3L3 13" />
+          </svg>
+        </button>
+      </div>
+    );
+  };
+
+  // ══════════════════════════════════════════════════════════
+  // ── Bottom Action Bar ──
+  // ══════════════════════════════════════════════════════════
+  const renderBottomBar = () => {
+    const disabledActions = isGenerating ? "opacity-50 pointer-events-none" : "";
+
+    return (
+      <div
+        className="flex-shrink-0 flex items-center gap-1.5 border-t border-gray-200 dark:border-gray-600 px-4 py-2.5"
+        style={{ background: isDark ? "rgba(15,23,42,0.8)" : "rgba(249,250,251,0.8)" }}
+      >
+        {/* Settings gear */}
+        <button
+          onClick={() => { invoke("log_action", { action: "Settings button clicked" }).catch(() => {}); invoke("open_settings").catch(() => {}); }}
+          className={`flex items-center justify-center w-6 h-6 rounded-md text-gray-400 dark:text-gray-500 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 hover:text-gray-600 dark:hover:text-gray-300 transition-colors border border-gray-200 dark:border-gray-600 shadow-sm ${disabledActions}`}
+          title="Settings"
+        >
+          <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="8" cy="8" r="2.5" />
+            <path d="M13.5 8a5.5 5.5 0 0 0-.1-.9l1.4-1.1-1.2-2-1.7.6a5.3 5.3 0 0 0-1.6-.9L10 2H8L7.7 3.7a5.3 5.3 0 0 0-1.6.9l-1.7-.6-1.2 2 1.4 1.1a5.6 5.6 0 0 0 0 1.8l-1.4 1.1 1.2 2 1.7-.6c.5.4 1 .7 1.6.9L8 14h2l.3-1.7c.6-.2 1.1-.5 1.6-.9l1.7.6 1.2-2-1.4-1.1a5.5 5.5 0 0 0 .1-.9z" />
+          </svg>
+        </button>
+
+        {/* Model name */}
+        {currentModel && (
+          <button
+            onClick={() => { invoke("log_action", { action: "Model name clicked — opening Settings" }).catch(() => {}); invoke("open_settings").catch(() => {}); }}
+            className={`text-[10px] text-gray-400 dark:text-gray-500 font-mono truncate max-w-[120px] hover:text-copilot-blue transition-colors cursor-pointer ${disabledActions}`}
+            title={`${currentModel} — Click to change model`}
+          >
+            {currentModel}
+          </button>
+        )}
+
+        <div className="flex-1" />
+
+        <div className={`flex items-center gap-1 ${disabledActions}`}>
+          {/* Markdown toggle — Write Mode only */}
+          {!isReadMode && (
+            <button
+              onClick={() => { const next = !showRaw; setShowRaw(next); invoke("log_action", { action: `Markdown view ${next ? "ON" : "OFF"}` }).catch(() => {}); }}
+              className={`flex items-center justify-center w-6 h-6 rounded-md transition-colors border shadow-sm ${showRaw ? "text-blue-500 bg-blue-50 dark:bg-blue-900/30 border-blue-300 dark:border-blue-700 hover:bg-blue-100 dark:hover:bg-blue-900/50" : "text-gray-400 dark:text-gray-500 border-gray-200 dark:border-gray-600 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 hover:text-gray-600 dark:hover:text-gray-300"}`}
+              title={showRaw ? "Show preview" : "Show markdown"}
+            >
+              <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M2.5 3A1.5 1.5 0 0 0 1 4.5v7A1.5 1.5 0 0 0 2.5 13h11a1.5 1.5 0 0 0 1.5-1.5v-7A1.5 1.5 0 0 0 13.5 3h-11zM3 9V7l1.5 2L6 7v2h1V5H6L4.5 7.5 3 5H2v4h1zm7-1h1.5L9.5 11V8H8V5h1v3z" />
+              </svg>
+            </button>
+          )}
+
+          {/* Copy button */}
+          <button
+            onClick={handleCopy}
+            className="flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-gray-600 shadow-sm hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors"
+            title="Copy"
+          >
+            <svg className="w-3 h-3" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="5" y="5" width="9" height="9" rx="1.5" />
+              <path d="M11 5V3.5A1.5 1.5 0 0 0 9.5 2h-6A1.5 1.5 0 0 0 2 3.5v6A1.5 1.5 0 0 0 3.5 11H5" />
+            </svg>
+            Copy
+          </button>
+
+          {/* Replace split-button — Write Mode only */}
+          {!isReadMode && (
+            <div className="relative flex shadow-sm rounded-md" ref={replaceMenuRef}>
+              <button
+                onClick={handleReplace}
+                className="flex items-center gap-1.5 rounded-l-md bg-copilot-blue px-2.5 py-1 text-xs font-medium text-white hover:bg-copilot-blue-hover transition-colors"
+                title={replaceMode === "rendered" ? "Replace with rendered text" : "Replace with markdown"}
+              >
+                {replaceMode === "rendered" ? (
+                  /* Rendered text icon — document with lines */
+                  <svg className="w-3 h-3" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="2" y="1.5" width="12" height="13" rx="1.5" />
+                    <path d="M5 5h6M5 8h6M5 11h3" />
+                  </svg>
+                ) : (
+                  /* Markdown icon — Md */
+                  <svg className="w-3.5 h-3" viewBox="0 0 16 10" fill="currentColor">
+                    <path d="M1 1.5A1.5 1.5 0 0 1 2.5 0h11A1.5 1.5 0 0 1 15 1.5v7a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 1 8.5v-7zM2.5 7V3l1.5 2L5.5 3v4h1V1.5h-1L4 3.5 2.5 1.5h-1V7h1zm7-1h1.5L9 9V6H8V1.5h1V6z" />
+                  </svg>
+                )}
+                Replace
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); setShowReplaceMenu(!showReplaceMenu); }}
+                className="flex items-center rounded-r-md bg-copilot-blue px-1.5 py-1 text-white hover:bg-copilot-blue-hover transition-colors border-l border-white/20"
+                title="Replace options"
+              >
+                <svg className="w-2.5 h-2.5" viewBox="0 0 10 10" fill="currentColor">
+                  <path d="M2 3.5L5 6.5L8 3.5" />
+                </svg>
+              </button>
+              {showReplaceMenu && (
+                <div className="absolute bottom-full right-0 mb-1 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 py-1 min-w-[180px] z-50">
+                  <button
+                    onClick={(e) => { e.stopPropagation(); switchReplaceMode("rendered"); }}
+                    className={`w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 ${replaceMode === "rendered" ? "text-copilot-blue font-medium" : "text-gray-700 dark:text-gray-300"}`}
+                  >
+                    {replaceMode === "rendered" ? <span>✓</span> : <span className="w-3" />}
+                    <svg className="w-3.5 h-3.5 flex-shrink-0" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="2" y="1.5" width="12" height="13" rx="1.5" />
+                      <path d="M5 5h6M5 8h6M5 11h3" />
+                    </svg>
+                    Rendered text
+                  </button>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); switchReplaceMode("markdown"); }}
+                    className={`w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 ${replaceMode === "markdown" ? "text-copilot-blue font-medium" : "text-gray-700 dark:text-gray-300"}`}
+                  >
+                    {replaceMode === "markdown" ? <span>✓</span> : <span className="w-3" />}
+                    <svg className="w-3.5 h-3.5 flex-shrink-0" viewBox="0 0 16 10" fill="currentColor">
+                      <path d="M1 1.5A1.5 1.5 0 0 1 2.5 0h11A1.5 1.5 0 0 1 15 1.5v7a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 1 8.5v-7zM2.5 7V3l1.5 2L5.5 3v4h1V1.5h-1L4 3.5 2.5 1.5h-1V7h1zm7-1h1.5L9 9V6H8V1.5h1V6z" />
+                    </svg>
+                    Markdown
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  // ══════════════════════════════════════════════════════════
+  // ── Render States ──
+  // ══════════════════════════════════════════════════════════
 
   // ── Icon state (48×48) ──
   if (state === "icon") {
@@ -652,9 +888,7 @@ const Popup: FC<PopupProps> = ({ selection }) => {
               ? "linear-gradient(135deg, #1e293b 0%, #0f172a 100%)"
               : "linear-gradient(135deg, #fff 0%, #f0f4ff 100%)",
             borderRadius: "50%",
-            border: isDark
-              ? "1px solid rgba(96,165,250,0.25)"
-              : "1px solid rgba(0,120,212,0.15)",
+            border: isDark ? "1px solid rgba(96,165,250,0.25)" : "1px solid rgba(0,120,212,0.15)",
             boxShadow: isDark
               ? "0 4px 16px rgba(0,0,0,0.4), 0 1px 3px rgba(0,0,0,0.3)"
               : "0 4px 16px rgba(0,120,212,0.12), 0 1px 3px rgba(0,0,0,0.08)",
@@ -666,81 +900,38 @@ const Popup: FC<PopupProps> = ({ selection }) => {
             style={{ cursor: "pointer", borderRadius: "50%" }}
             title="Polish & Translate"
           >
-            <img
-              src={iconImg}
-              alt="Translate"
-              className="w-7 h-7 transition-transform group-hover:scale-110"
-              draggable={false}
-            />
+            <img src={iconImg} alt="Translate" className="w-7 h-7 transition-transform group-hover:scale-110" draggable={false} />
           </button>
         </div>
       </div>
     );
   }
 
-  // ── Spinning state (48×48 with spinner — click to cancel) ──
-  if (state === "spinning") {
+  // ── Loading state (expanded UI with centered spinner) ──
+  if (state === "loading") {
     return (
-      <div className="w-screen h-screen flex items-center justify-center" style={{ padding: "20px", background: "transparent", pointerEvents: "none" }}>
-        <button
-          className="w-full h-full flex items-center justify-center group"
-          onClick={() => {
-            invoke("cancel_request").catch(() => {});
-            invoke("log_action", { action: "Cancel clicked during spinning" }).catch(() => {});
-            setPopupState("icon");
-          }}
-          title="Click to cancel"
-          style={{
-            pointerEvents: "auto",
-            background: isDark
-              ? "linear-gradient(135deg, #1e293b 0%, #0f172a 100%)"
-              : "linear-gradient(135deg, #fff 0%, #f0f4ff 100%)",
-            borderRadius: "50%",
-            border: isDark
-              ? "1px solid rgba(96,165,250,0.25)"
-              : "1px solid rgba(0,120,212,0.15)",
-            boxShadow: isDark
-              ? "0 4px 16px rgba(0,0,0,0.4), 0 1px 3px rgba(0,0,0,0.3)"
-              : "0 4px 16px rgba(0,120,212,0.12), 0 1px 3px rgba(0,0,0,0.08)",
-            cursor: "pointer",
-            transition: "all 0.15s ease",
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.borderColor = "rgba(239,68,68,0.5)";
-            e.currentTarget.style.boxShadow = "0 4px 16px rgba(239,68,68,0.15), 0 1px 3px rgba(0,0,0,0.08)";
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.borderColor = isDark ? "rgba(96,165,250,0.25)" : "rgba(0,120,212,0.15)";
-            e.currentTarget.style.boxShadow = isDark
-              ? "0 4px 16px rgba(0,0,0,0.4), 0 1px 3px rgba(0,0,0,0.3)"
-              : "0 4px 16px rgba(0,120,212,0.12), 0 1px 3px rgba(0,0,0,0.08)";
-          }}
-        >
-          <div className="h-5 w-5 animate-spin rounded-full border-2 border-copilot-blue border-t-transparent group-hover:hidden" />
-          {/* Show X icon on hover */}
-          <svg className="h-4 w-4 text-red-500 hidden group-hover:block" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-            <line x1="4" y1="4" x2="12" y2="12" />
-            <line x1="12" y1="4" x2="4" y2="12" />
-          </svg>
-        </button>
+      <div className="w-screen h-screen" style={{ padding: "20px", background: "transparent" }}>
+        <div ref={contentRef} className="flex flex-col rounded-lg overflow-hidden h-full" style={cardStyle}>
+          {renderTopToolbar()}
+          <div className={`flex-1 flex items-center justify-center mx-4 my-2 ${contentCardClass}`}>
+            <div className="flex flex-col items-center gap-3">
+              <div className="h-6 w-6 animate-spin rounded-full border-2 border-copilot-blue border-t-transparent" />
+              <span className="text-sm text-gray-400 dark:text-gray-500">Generating...</span>
+            </div>
+          </div>
+          {renderBottomBar()}
+        </div>
       </div>
     );
   }
 
-  // ── Streaming state (expanded card with partial content + blinking cursor) ──
+  // ── Streaming state (expanded UI with flowing text) ──
   if (state === "streaming") {
     return (
       <div className="w-screen h-screen" style={{ padding: "20px", background: "transparent" }}>
-        <div ref={contentRef} className="flex flex-col rounded-lg overflow-hidden h-full"
-          style={{
-            background: isDark ? "#1e293b" : "#fff",
-            border: isDark ? "1px solid rgba(255,255,255,0.1)" : "1px solid rgba(0,0,0,0.08)",
-            boxShadow: isDark
-              ? "0 8px 32px rgba(0,0,0,0.4), 0 2px 8px rgba(0,0,0,0.3)"
-              : "0 8px 32px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.06)",
-          }}
-        >
-          <div className="flex-1 min-h-0 overflow-auto px-5 pt-5 pb-3" style={{ userSelect: "text", WebkitUserSelect: "text" }}>
+        <div ref={contentRef} className="flex flex-col rounded-lg overflow-hidden h-full" style={cardStyle}>
+          {renderTopToolbar()}
+          <div className={`flex-1 min-h-0 overflow-auto px-5 pt-4 pb-3 mx-4 my-2 ${contentCardClass}`} style={{ userSelect: "text", WebkitUserSelect: "text" }}>
             {/* Phase indicator for "thinking" (reorganized section before separator) */}
             {streamingParsed.phase === "reorganized" && !isReadMode && (
               <div className="text-[10px] font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-2 flex items-center gap-1.5">
@@ -753,7 +944,7 @@ const Popup: FC<PopupProps> = ({ selection }) => {
               style={{ background: "transparent" }}
               dangerouslySetInnerHTML={{ __html: streamingHtml }}
             />
-            {/* Vocabulary entries extracted during streaming */}
+            {/* Vocabulary entries during streaming */}
             {streamingParsed.vocabulary.length > 0 && (
               <div className="space-y-2 border-t border-gray-100 dark:border-gray-700 pt-2 mt-3">
                 <div className="text-[11px] font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wide">Vocabulary</div>
@@ -768,43 +959,7 @@ const Popup: FC<PopupProps> = ({ selection }) => {
             {/* Blinking cursor indicator */}
             <span className="inline-block w-[2px] h-[1em] bg-copilot-blue align-text-bottom animate-pulse ml-0.5" />
           </div>
-          {/* Minimal action bar during streaming — just dismiss and cancel */}
-          <div className="flex-shrink-0 flex items-center justify-between border-t border-gray-100 dark:border-gray-700 px-3 py-2"
-            style={{ background: isDark ? "rgba(15,23,42,0.8)" : "rgba(249,250,251,0.8)" }}
-          >
-            <div className="flex items-center gap-1">
-              <button
-                onClick={handleDismiss}
-                className="flex items-center justify-center w-7 h-7 rounded-lg text-gray-400 dark:text-gray-500 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
-                title="Dismiss"
-              >
-                <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
-                  <path d="M3 3l10 10M13 3L3 13" />
-                </svg>
-              </button>
-              {currentModel && (
-                <span className="text-[10px] text-gray-400 dark:text-gray-500 font-mono truncate max-w-[120px]">
-                  {currentModel}
-                </span>
-              )}
-            </div>
-            <div className="flex items-center gap-1">
-              {/* Cancel/stop streaming button */}
-              <button
-                onClick={() => {
-                  invoke("cancel_request").catch(() => {});
-                  invoke("log_action", { action: "Cancel clicked during streaming" }).catch(() => {});
-                }}
-                className="group flex items-center justify-center w-7 h-7 rounded-lg bg-blue-50 dark:bg-blue-900/30 text-copilot-blue hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 transition-colors cursor-pointer"
-                title="Stop generating"
-              >
-                <div className="h-3.5 w-3.5 animate-spin rounded-full border-[1.5px] border-copilot-blue border-t-transparent group-hover:hidden" />
-                <svg className="w-3.5 h-3.5 hidden group-hover:block" viewBox="0 0 16 16" fill="currentColor">
-                  <rect x="3" y="3" width="10" height="10" rx="1" />
-                </svg>
-              </button>
-            </div>
-          </div>
+          {renderBottomBar()}
         </div>
       </div>
     );
@@ -814,16 +969,9 @@ const Popup: FC<PopupProps> = ({ selection }) => {
   if (state === "error") {
     return (
       <div className="w-screen h-screen" style={{ padding: "20px", background: "transparent" }}>
-        <div className="flex flex-col rounded-lg h-full overflow-hidden"
-          style={{
-            background: isDark ? "#1e293b" : "#fff",
-            border: isDark ? "1px solid rgba(255,255,255,0.1)" : "1px solid rgba(0,0,0,0.08)",
-            boxShadow: isDark
-              ? "0 8px 32px rgba(0,0,0,0.4), 0 2px 8px rgba(0,0,0,0.3)"
-              : "0 8px 32px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.06)",
-          }}
-        >
-          <div className="px-5 py-4 flex items-start gap-2.5">
+        <div className="flex flex-col rounded-lg h-full overflow-hidden" style={cardStyle}>
+          {renderTopToolbar()}
+          <div className={`flex-1 px-5 py-4 flex items-start gap-2.5 mx-4 my-2 ${contentCardClass}`}>
             <div className="flex-shrink-0 w-5 h-5 rounded-full bg-red-50 dark:bg-red-900/30 flex items-center justify-center mt-0.5">
               <svg className="w-3 h-3 text-red-500" viewBox="0 0 12 12" fill="currentColor">
                 <path d="M6 0a6 6 0 100 12A6 6 0 006 0zm.75 9h-1.5V7.5h1.5V9zm0-3h-1.5V3h1.5v3z"/>
@@ -831,66 +979,39 @@ const Popup: FC<PopupProps> = ({ selection }) => {
             </div>
             <p className="text-[13px] leading-[1.5] text-red-600 dark:text-red-400">{error}</p>
           </div>
-          <div className="flex justify-end border-t border-gray-100 dark:border-gray-700 px-3 py-2"
-            style={{ background: isDark ? "rgba(15,23,42,0.8)" : "rgba(249,250,251,0.8)" }}
-          >
-            <button
-              onClick={handleDismiss}
-              className="rounded-lg px-3 py-1.5 text-xs font-medium text-gray-500 dark:text-gray-400 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 transition-colors"
-            >
-              Close
-            </button>
-          </div>
+          {renderBottomBar()}
         </div>
       </div>
     );
   }
 
-  // ── Expanded state (auto-sized with result) ──
+  // ── Expanded state (final result) ──
   return (
     <div className="w-screen h-screen" style={{ padding: "20px", background: "transparent" }}>
-      <div ref={contentRef} className="flex flex-col rounded-lg overflow-hidden h-full"
-        style={{
-          background: isDark ? "#1e293b" : "#fff",
-          border: isDark ? "1px solid rgba(255,255,255,0.1)" : "1px solid rgba(0,0,0,0.08)",
-          boxShadow: isDark
-            ? "0 8px 32px rgba(0,0,0,0.4), 0 2px 8px rgba(0,0,0,0.3)"
-            : "0 8px 32px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.06)",
-        }}
-      >
+      <div ref={contentRef} className="flex flex-col rounded-lg overflow-hidden h-full" style={cardStyle}>
+        {renderTopToolbar()}
+
         {isReadMode ? (
-          /* ── Read Mode Content — layout derived from field presence ── */
+          /* ── Read Mode Content ── */
           <>
             {!showOriginal && (
-              <div className="flex-1 min-h-0 overflow-auto px-5 pt-5 pb-3" style={{ userSelect: "text", WebkitUserSelect: "text" }}>
-
-                {/* Main content: summary (for withSummary) or translation (for simple/withVocab) */}
+              <div className={`flex-1 min-h-0 overflow-auto px-5 pt-4 pb-3 mx-4 my-2 ${contentCardClass}`} style={{ userSelect: "text", WebkitUserSelect: "text" }}>
                 {readLayout === "withSummary" && readSummary ? (
                   showRaw ? (
                     <pre className="text-[12px] leading-[1.6] text-gray-700 dark:text-gray-300 whitespace-pre-wrap break-words font-mono">{readSummary}</pre>
                   ) : (
-                    <div
-                      className="markdown-body text-[13.5px] leading-[1.7]"
-                      style={{ background: "transparent" }}
-                      dangerouslySetInnerHTML={{ __html: readSummaryHtml }}
-                    />
+                    <div className="markdown-body text-[13.5px] leading-[1.7]" style={{ background: "transparent" }} dangerouslySetInnerHTML={{ __html: readSummaryHtml }} />
                   )
                 ) : (
                   showRaw ? (
                     <pre className="text-[12px] leading-[1.6] text-gray-700 dark:text-gray-300 whitespace-pre-wrap break-words font-mono">{readTranslation}</pre>
                   ) : (
-                    <div
-                      className="markdown-body text-[13.5px] leading-[1.7]"
-                      style={{ background: "transparent" }}
-                      dangerouslySetInnerHTML={{ __html: readTranslationHtml }}
-                    />
+                    <div className="markdown-body text-[13.5px] leading-[1.7]" style={{ background: "transparent" }} dangerouslySetInnerHTML={{ __html: readTranslationHtml }} />
                   )
                 )}
-
-                {/* Vocabulary section (for withVocab layout) */}
                 {readVocabulary.length > 0 && (
                   <div className="space-y-2 border-t border-gray-100 dark:border-gray-700 pt-2 mt-3">
-                    <div className="text-[11px] font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wide">📚 Vocabulary</div>
+                    <div className="text-[11px] font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wide">Vocabulary</div>
                     {readVocabulary.map((v: { term: string; meaning: string }, i: number) => (
                       <div key={i} className="pl-3 border-l-2 border-purple-200 dark:border-purple-800">
                         <span className="text-[12.5px] font-semibold text-purple-600 dark:text-purple-400">{v.term}</span>
@@ -901,10 +1022,8 @@ const Popup: FC<PopupProps> = ({ selection }) => {
                 )}
               </div>
             )}
-
-            {/* Collapsible section: full translation (only in withSummary layout) */}
             {showOriginal && readLayout === "withSummary" && readTranslation && (
-              <div className="flex-1 min-h-0 overflow-auto px-5 pt-5 pb-3" style={{ userSelect: "text", WebkitUserSelect: "text" }}>
+              <div className={`flex-1 min-h-0 overflow-auto px-5 pt-4 pb-3 mx-4 my-2 ${contentCardClass}`} style={{ userSelect: "text", WebkitUserSelect: "text" }}>
                 {showRaw ? (
                   <pre className="text-[12px] leading-[1.6] text-gray-500 dark:text-gray-400 whitespace-pre-wrap break-words font-mono">{readTranslation}</pre>
                 ) : (
@@ -914,22 +1033,13 @@ const Popup: FC<PopupProps> = ({ selection }) => {
                 )}
               </div>
             )}
-
-            {/* Toggle bar — only in withSummary layout when we have both summary and translation */}
             {readLayout === "withSummary" && readSummary && readTranslation && (
-              <div className="flex-shrink-0 px-5 border-t border-gray-100 dark:border-gray-700">
+              <div className="flex-shrink-0 px-4 border-t border-gray-200 dark:border-gray-600">
                 <button
-                  onClick={() => {
-                    const next = !showOriginal;
-                    setShowOriginal(next);
-                    invoke("log_action", { action: `Full translation ${next ? "expanded" : "collapsed"}` }).catch(() => {});
-                  }}
+                  onClick={() => { const next = !showOriginal; setShowOriginal(next); invoke("log_action", { action: `Full translation ${next ? "expanded" : "collapsed"}` }).catch(() => {}); }}
                   className="flex items-center gap-1 text-[11px] text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors py-2 w-full"
                 >
-                  <svg
-                    className={`w-3 h-3 transition-transform ${showOriginal ? "rotate-90" : ""}`}
-                    viewBox="0 0 12 12" fill="currentColor"
-                  >
+                  <svg className={`w-3 h-3 transition-transform ${showOriginal ? "rotate-90" : ""}`} viewBox="0 0 12 12" fill="currentColor">
                     <path d="M4.5 2l5 4-5 4V2z" />
                   </svg>
                   <span className="font-medium tracking-wide uppercase">{readModeSettings.native_language.split(/[\s(]/)[0]} (Full Translation)</span>
@@ -938,26 +1048,19 @@ const Popup: FC<PopupProps> = ({ selection }) => {
             )}
           </>
         ) : (
-          /* ── Write Mode Content (existing) ── */
+          /* ── Write Mode Content ── */
           <>
-            {/* Layer 1: Translation (visible when original is collapsed) */}
             {!showOriginal && (
-              <div className="flex-1 min-h-0 overflow-auto px-5 pt-5 pb-3" style={{ userSelect: "text", WebkitUserSelect: "text" }}>
+              <div className={`flex-1 min-h-0 overflow-auto px-5 pt-4 pb-3 mx-4 my-2 ${contentCardClass}`} style={{ userSelect: "text", WebkitUserSelect: "text" }}>
                 {showRaw ? (
                   <pre className="text-[12px] leading-[1.6] text-gray-700 dark:text-gray-300 whitespace-pre-wrap break-words font-mono">{translated}</pre>
                 ) : (
-                  <div
-                    className="markdown-body text-[13.5px] leading-[1.7]"
-                    style={{ background: "transparent" }}
-                    dangerouslySetInnerHTML={{ __html: translatedHtml }}
-                  />
+                  <div className="markdown-body text-[13.5px] leading-[1.7]" style={{ background: "transparent" }} dangerouslySetInnerHTML={{ __html: translatedHtml }} />
                 )}
               </div>
             )}
-
-            {/* Layer 2: Original expanded (fills entire content area when open) */}
             {showOriginal && (
-              <div className="flex-1 min-h-0 overflow-auto px-5 pt-5 pb-3" style={{ userSelect: "text", WebkitUserSelect: "text" }}>
+              <div className={`flex-1 min-h-0 overflow-auto px-5 pt-4 pb-3 mx-4 my-2 ${contentCardClass}`} style={{ userSelect: "text", WebkitUserSelect: "text" }}>
                 {showRaw ? (
                   <pre className="text-[12px] leading-[1.6] text-gray-500 dark:text-gray-400 whitespace-pre-wrap break-words font-mono">{reorganized}</pre>
                 ) : (
@@ -967,22 +1070,13 @@ const Popup: FC<PopupProps> = ({ selection }) => {
                 )}
               </div>
             )}
-
-            {/* Toggle bar — always visible between content and action bar */}
             {reorganizedHtml && (
-              <div className="flex-shrink-0 px-5 border-t border-gray-100 dark:border-gray-700">
+              <div className="flex-shrink-0 px-4 border-t border-gray-200 dark:border-gray-600">
                 <button
-                  onClick={() => {
-                    const next = !showOriginal;
-                    setShowOriginal(next);
-                    invoke("log_action", { action: `Original section ${next ? "expanded" : "collapsed"}` }).catch(() => {});
-                  }}
+                  onClick={() => { const next = !showOriginal; setShowOriginal(next); invoke("log_action", { action: `Original section ${next ? "expanded" : "collapsed"}` }).catch(() => {}); }}
                   className="flex items-center gap-1 text-[11px] text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors py-2 w-full"
                 >
-                  <svg
-                    className={`w-3 h-3 transition-transform ${showOriginal ? "rotate-90" : ""}`}
-                    viewBox="0 0 12 12" fill="currentColor"
-                  >
+                  <svg className={`w-3 h-3 transition-transform ${showOriginal ? "rotate-90" : ""}`} viewBox="0 0 12 12" fill="currentColor">
                     <path d="M4.5 2l5 4-5 4V2z" />
                   </svg>
                   <span className="font-medium tracking-wide uppercase">{readModeSettings.native_language.split(' ')[0]} (Polished)</span>
@@ -992,180 +1086,9 @@ const Popup: FC<PopupProps> = ({ selection }) => {
           </>
         )}
 
-        {/* Action bar — always visible at bottom */}
-        <div className="flex-shrink-0 flex items-center justify-between border-t border-gray-100 dark:border-gray-700 px-3 py-2"
-          style={{ background: isDark ? "rgba(15,23,42,0.8)" : "rgba(249,250,251,0.8)" }}
-        >
-          <div className="flex items-center gap-1">
-            <button
-              onClick={handleDismiss}
-              className="flex items-center justify-center w-7 h-7 rounded-lg text-gray-400 dark:text-gray-500 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
-              title="Dismiss"
-            >
-              <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
-                <path d="M3 3l10 10M13 3L3 13" />
-              </svg>
-            </button>
-            {currentModel && (
-              <button
-                onClick={() => {
-                  invoke("log_action", { action: "Model name clicked — opening Settings" }).catch(() => {});
-                  invoke("open_settings").catch(() => {});
-                }}
-                className="text-[10px] text-gray-400 dark:text-gray-500 font-mono truncate max-w-[120px] hover:text-copilot-blue transition-colors cursor-pointer"
-                title={`${currentModel} — Click to change model`}
-              >
-                {currentModel}
-              </button>
-            )}
-            {/* Beast Mode icon — Write Mode only */}
-            {!isReadMode && beastMode && (
-              <button
-                onClick={() => {
-                  invoke("log_action", { action: "Beast icon clicked — opening Settings" }).catch(() => {});
-                  invoke("open_settings").catch(() => {});
-                }}
-                className="flex items-center justify-center w-7 h-7 rounded-lg text-blue-500 bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors cursor-pointer"
-                title="Beast Mode: ON — Click to change in Settings"
-              >
-                <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="currentColor">
-                  <path d="M1 2.5L3.5 8l-1 2.5C2.5 10.5 4 13 8 14c4-1 5.5-3.5 5.5-3.5L12.5 8 15 2.5 11.5 5 8 1 4.5 5z" />
-                </svg>
-              </button>
-            )}
-            {/* Read Mode indicator with layout type */}
-            {isReadMode && (
-              <span className="text-[10px] text-emerald-500 dark:text-emerald-400 font-medium px-1.5 py-0.5 bg-emerald-50 dark:bg-emerald-900/30 rounded">
-                {readLayout === "withSummary" ? "📋 Summary" : readLayout === "withVocab" ? "📚 Translate" : "💬 Translate"}
-              </span>
-            )}
-            <button
-              onClick={() => {
-                invoke("log_action", { action: "Settings button clicked" }).catch(() => {});
-                invoke("open_settings").catch(() => {});
-              }}
-              className="flex items-center justify-center w-7 h-7 rounded-lg text-gray-400 dark:text-gray-500 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
-              title="Settings"
-            >
-              <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="8" cy="8" r="2.5" />
-                <path d="M13.5 8a5.5 5.5 0 0 0-.1-.9l1.4-1.1-1.2-2-1.7.6a5.3 5.3 0 0 0-1.6-.9L10 2H8L7.7 3.7a5.3 5.3 0 0 0-1.6.9l-1.7-.6-1.2 2 1.4 1.1a5.6 5.6 0 0 0 0 1.8l-1.4 1.1 1.2 2 1.7-.6c.5.4 1 .7 1.6.9L8 14h2l.3-1.7c.6-.2 1.1-.5 1.6-.9l1.7.6 1.2-2-1.4-1.1a5.5 5.5 0 0 0 .1-.9z" />
-              </svg>
-            </button>
-          </div>
-          <div className="flex items-center gap-1">
-            {/* Markdown/Preview toggle — Write Mode only */}
-            {!isReadMode && (
-              <button
-                onClick={() => {
-                  const next = !showRaw;
-                  setShowRaw(next);
-                  invoke("log_action", { action: `Markdown view ${next ? "ON" : "OFF"}` }).catch(() => {});
-                }}
-                className={`flex items-center justify-center w-7 h-7 rounded-lg transition-colors ${showRaw ? "text-blue-500 bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 dark:hover:bg-blue-900/50" : "text-gray-400 dark:text-gray-500 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 hover:text-gray-600 dark:hover:text-gray-300"}`}
-                title={showRaw ? "Show preview" : "Show markdown"}
-              >
-                <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="currentColor">
-                  <path d="M2.5 3A1.5 1.5 0 0 0 1 4.5v7A1.5 1.5 0 0 0 2.5 13h11a1.5 1.5 0 0 0 1.5-1.5v-7A1.5 1.5 0 0 0 13.5 3h-11zM3 9V7l1.5 2L6 7v2h1V5H6L4.5 7.5 3 5H2v4h1zm7-1h1.5L9.5 11V8H8V5h1v3z" />
-                </svg>
-              </button>
-            )}
-            <button
-              onClick={refreshing ? () => {
-                invoke("cancel_request").catch(() => {});
-                invoke("log_action", { action: "Cancel clicked during refresh" }).catch(() => {});
-                setRefreshing(false);
-                refreshingRef.current = false;
-              } : handleRefresh}
-              className={`group flex items-center justify-center w-7 h-7 rounded-lg transition-colors ${refreshing ? "bg-blue-50 dark:bg-blue-900/30 text-copilot-blue hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 cursor-pointer" : "text-gray-500 dark:text-gray-400 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 hover:text-gray-700 dark:hover:text-gray-300"}`}
-              title={refreshing ? "Cancel" : "Regenerate"}
-            >
-              {refreshing ? (
-                <>
-                  {/* Spinner — visible by default, hidden on hover */}
-                  <div className="h-3.5 w-3.5 animate-spin rounded-full border-[1.5px] border-copilot-blue border-t-transparent group-hover:hidden" />
-                  {/* Stop square — hidden by default, visible on hover */}
-                  <svg className="w-3.5 h-3.5 hidden group-hover:block" viewBox="0 0 16 16" fill="currentColor">
-                    <rect x="3" y="3" width="10" height="10" rx="1" />
-                  </svg>
-                </>
-              ) : (
-                <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M2.5 8a5.5 5.5 0 0 1 9.3-4" />
-                  <path d="M13.5 8a5.5 5.5 0 0 1-9.3 4" />
-                  <path d="M11.5 1.5v3h3" />
-                  <path d="M4.5 14.5v-3h-3" />
-                </svg>
-              )}
-            </button>
-            <button
-              onClick={handleCopy}
-              className="flex items-center justify-center w-7 h-7 rounded-lg text-gray-500 dark:text-gray-400 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
-              title="Copy"
-            >
-              <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="5" y="5" width="9" height="9" rx="1.5" />
-                <path d="M11 5V3.5A1.5 1.5 0 0 0 9.5 2h-6A1.5 1.5 0 0 0 2 3.5v6A1.5 1.5 0 0 0 3.5 11H5" />
-              </svg>
-            </button>
-            {/* Replace button — Write Mode only (in Read Mode, there's nothing to replace in-place) */}
-            {!isReadMode && (
-              <div className="relative ml-1 flex" ref={replaceMenuRef}>
-                <button
-                  onClick={handleReplace}
-                  className="flex items-center gap-1.5 rounded-l-lg bg-copilot-blue px-3 py-1.5 text-xs font-medium text-white hover:bg-copilot-blue-hover transition-colors"
-                  title={replaceMode === "rendered" ? "Replace with rendered text" : "Replace with markdown"}
-                >
-                  {replaceMode === "rendered" ? (
-                    /* Rich text icon — lines with formatting (bold first line) */
-                    <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M2 3h12" strokeWidth="2.2" />
-                      <path d="M2 6.5h9" />
-                      <path d="M2 10h11" />
-                      <path d="M2 13.5h7" />
-                    </svg>
-                  ) : (
-                    /* Markdown icon — "MD" in a rounded box */
-                    <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
-                      <rect x="0.5" y="3" width="15" height="10" rx="2" />
-                      <path d="M3.5 10V6L5.5 8.5 7.5 6v4" />
-                      <path d="M10.5 10V6l2.5 4V6" />
-                    </svg>
-                  )}
-                  Replace
-                </button>
-                <button
-                  onClick={(e) => { e.stopPropagation(); setShowReplaceMenu(!showReplaceMenu); }}
-                  className="flex items-center rounded-r-lg bg-copilot-blue px-1.5 py-1.5 text-white hover:bg-copilot-blue-hover transition-colors border-l border-white/20"
-                  title="Replace options"
-                >
-                  <svg className="w-2.5 h-2.5" viewBox="0 0 10 10" fill="currentColor">
-                    <path d="M2 3.5L5 6.5L8 3.5" />
-                  </svg>
-                </button>
-                {showReplaceMenu && (
-                  <div className="absolute bottom-full right-0 mb-1 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 py-1 min-w-[180px] z-50">
-                    <button
-                      onClick={(e) => { e.stopPropagation(); switchReplaceMode("rendered"); }}
-                      className={`w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 ${replaceMode === "rendered" ? "text-copilot-blue font-medium" : "text-gray-700 dark:text-gray-300"}`}
-                    >
-                      {replaceMode === "rendered" && <span>✓</span>}
-                      <span className={replaceMode !== "rendered" ? "ml-5" : ""}>Rendered text</span>
-                    </button>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); switchReplaceMode("markdown"); }}
-                      className={`w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 ${replaceMode === "markdown" ? "text-copilot-blue font-medium" : "text-gray-700 dark:text-gray-300"}`}
-                    >
-                      {replaceMode === "markdown" && <span>✓</span>}
-                      <span className={replaceMode !== "markdown" ? "ml-5" : ""}>Markdown</span>
-                    </button>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
+        {renderBottomBar()}
       </div>
+
       {/* Copy success toast */}
       {copyToast && (
         <div className="absolute top-3 left-1/2 -translate-x-1/2 px-3 py-1.5 bg-gray-800 dark:bg-gray-200 text-white dark:text-gray-800 text-xs font-medium rounded-lg shadow-lg animate-fade-in-out z-50">

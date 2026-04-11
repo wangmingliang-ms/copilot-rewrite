@@ -26,7 +26,7 @@ interface Settings {
   target_language: string;
   auto_start: boolean;
   poll_interval_ms: number;
-  beast_mode: boolean;
+  creative_mode: boolean;
   model: string;
   theme: string;
   native_language: string;
@@ -56,7 +56,7 @@ const SettingsPanel: FC<{ themeCtx: ThemeCtx }> = ({ themeCtx }) => {
     target_language: "English",
     auto_start: false,
     poll_interval_ms: 100,
-    beast_mode: false,
+    creative_mode: false,
     model: "claude-sonnet-4",
     theme: "system",
     native_language: "Chinese (Simplified)",
@@ -91,7 +91,7 @@ const SettingsPanel: FC<{ themeCtx: ThemeCtx }> = ({ themeCtx }) => {
     if (!initialLoaded) return;
     const timer = setTimeout(() => {
       invoke("update_settings", { settings }).then(() => {
-        invoke("log_action", { action: `Settings saved — model=${settings.model}, lang=${settings.target_language}, beast=${settings.beast_mode}, autoStart=${settings.auto_start}` }).catch(() => {});
+        invoke("log_action", { action: `Settings saved — model=${settings.model}, lang=${settings.target_language}, creative=${settings.creative_mode}, autoStart=${settings.auto_start}` }).catch(() => {});
         setSaved(true);
         setTimeout(() => setSaved(false), 1500);
       }).catch((err) => console.error("Auto-save failed:", err));
@@ -364,22 +364,6 @@ const SettingsPanel: FC<{ themeCtx: ThemeCtx }> = ({ themeCtx }) => {
               </select>
               <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5">Your translated output language. Final polished text will be in this language.</p>
             </div>
-
-            <label className="flex items-center justify-between cursor-pointer pt-1 border-t border-gray-100 dark:border-gray-700">
-              <div>
-                <span className="text-xs font-medium text-gray-600 dark:text-gray-400">🐺 Beast Mode</span>
-                <p className="text-[10px] text-gray-400 dark:text-gray-500">Full creative rewrite — restructure, add examples, best version</p>
-              </div>
-              <input
-                type="checkbox"
-                checked={settings.beast_mode}
-                onChange={(e) => {
-                  invoke("log_action", { action: `Beast mode ${e.target.checked ? "enabled" : "disabled"}` }).catch(() => {});
-                  setSettings({ ...settings, beast_mode: e.target.checked });
-                }}
-                className="w-4 h-4 rounded border-gray-300 text-copilot-blue focus:ring-copilot-blue ml-3 flex-shrink-0"
-              />
-            </label>
           </div>
         </section>
 

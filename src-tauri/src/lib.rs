@@ -12,7 +12,6 @@ pub mod tray;
 use log::{info, warn, LevelFilter};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tauri::{Emitter, Manager};
 
@@ -121,9 +120,9 @@ pub struct Settings {
     pub api_token: String,
     /// Polling interval in milliseconds (50-500)
     pub poll_interval_ms: u64,
-    /// Beast mode — LLM freely rewrites with full creative freedom
+    /// "More Creative" mode — LLM freely rewrites with full creative freedom
     #[serde(default)]
-    pub beast_mode: bool,
+    pub creative_mode: bool,
     /// AI model to use (e.g. "gpt-4o", "claude-3.5-sonnet")
     pub model: String,
     /// Replace mode: "rendered" (rich text) or "markdown" (plain text)
@@ -145,6 +144,9 @@ pub struct Settings {
     /// Values: "top-center", "top-left", "top-right", "bottom-center", "bottom-left", "bottom-right"
     #[serde(default = "default_popup_icon_position")]
     pub popup_icon_position: String,
+    /// Write Mode action: "TranslateAndPolish", "Translate", or "Polish"
+    #[serde(default = "default_write_action")]
+    pub write_action: String,
 }
 
 fn default_replace_mode() -> String {
@@ -165,6 +167,10 @@ fn default_read_mode_sub() -> String {
 
 fn default_popup_icon_position() -> String {
     "top-left".to_string()
+}
+
+fn default_write_action() -> String {
+    "TranslateAndPolish".to_string()
 }
 
 impl Settings {
@@ -216,7 +222,7 @@ impl Default for Settings {
             blacklisted_apps: vec![],
             api_token: String::new(),
             poll_interval_ms: 100,
-            beast_mode: true,
+            creative_mode: true,
             model: "claude-sonnet-4".to_string(),
             replace_mode: "rendered".to_string(),
             theme: "system".to_string(),
@@ -224,6 +230,7 @@ impl Default for Settings {
             read_mode_enabled: true,
             read_mode_sub: "translate_summarize".to_string(),
             popup_icon_position: "top-left".to_string(),
+            write_action: "TranslateAndPolish".to_string(),
         }
     }
 }
@@ -251,6 +258,9 @@ pub struct ProcessRequest {
     /// For ReadModeTranslate: whether to include a summary
     #[serde(default)]
     pub read_summarize: bool,
+    /// Optional creative_mode override per-request ("More Creative" mode)
+    #[serde(default)]
+    pub creative_mode: Option<bool>,
 }
 
 /// Response from the Copilot API processing
@@ -308,7 +318,7 @@ async fn process_text(
                     &settings.target_language,
                     &settings.api_token,
                     &settings.model,
-                    settings.beast_mode,
+                    settings.creative_mode,
                     "",
                     None,
                     None,
@@ -355,29 +365,27 @@ async fn process_and_show_preview(
     *state.preview_visible.lock() = true;
 
     let t0 = std::time::Instant::now();
-    info!("[PERF] process_and_show_preview START (action={:?}, model={}, beast={}, refresh={}, text_len={})",
-        request.action, settings.model, settings.beast_mode, request.is_refresh, request.text.len());
+    let creative_mode = request.creative_mode.unwrap_or(settings.creative_mode);
+    info!("[PERF] process_and_show_preview START (action={:?}, model={}, creative={}, refresh={}, text_len={})",
+        request.action, settings.model, creative_mode, request.is_refresh, request.text.len());
 
-    // Emit loading event (frontend switches to spinning state)
+    // Emit loading event (frontend switches to loading state)
     app.emit("show-preview-loading", ())
         .map_err(|e| e.to_string())?;
-    info!("[PERF] +{}ms — emitted show-preview-loading", t0.elapsed().as_millis());
+
+    // Expand popup immediately so the full UI (toolbar + loading spinner) is visible
+    if !request.is_refresh {
+        overlay::expand_popup_streaming(&app);
+    }
+    info!("[PERF] +{}ms — emitted show-preview-loading, popup expanded", t0.elapsed().as_millis());
 
     // Call Copilot API with cancellation support
     let native_lang = settings.native_language.clone();
     let target_lang = settings.target_language.clone();
 
-    // Build chunk callback that emits streaming events and expands popup on first chunk
-    let expanded = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let is_refresh = request.is_refresh;
-    let expanded_clone = expanded.clone();
+    // Build chunk callback that emits streaming events
     let app_clone = app.clone();
     let chunk_callback = move |accumulated: &str| {
-        // Expand popup on first chunk (unless refreshing) — use streaming height
-        if !is_refresh && !expanded_clone.load(Ordering::Relaxed) {
-            expanded_clone.store(true, Ordering::Relaxed);
-            overlay::expand_popup_streaming(&app_clone);
-        }
         let _ = app_clone.emit("show-preview-chunk", accumulated);
     };
 
@@ -403,7 +411,7 @@ async fn process_and_show_preview(
                 &target_lang,
                 &settings.api_token,
                 &settings.model,
-                settings.beast_mode,
+                creative_mode,
                 &app_context,
                 Some(&chunk_callback),
                 Some(&cancel_token),
@@ -415,8 +423,8 @@ async fn process_and_show_preview(
     match process_result {
         Ok(result_text) => {
             info!("[PERF] +{}ms — LLM response received ({} chars)", llm_ms, result_text.len());
-            // If we didn't expand yet (e.g. very short response or refresh), expand now
-            if !request.is_refresh && !expanded.load(Ordering::Relaxed) {
+            // Expand popup to final size based on result text (for non-refresh requests)
+            if !request.is_refresh {
                 overlay::expand_popup(&app, &result_text);
             }
             info!("[PERF] +{}ms — popup expanded", t0.elapsed().as_millis());
