@@ -198,6 +198,8 @@ const Popup: FC<PopupProps> = ({ selection }) => {
       setResult(null);
       setError(null);
       setStreamingText(null);
+      setHistory([]);
+      setHistoryIndex(-1);
       refreshSettings();
     });
 
