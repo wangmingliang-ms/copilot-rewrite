@@ -722,8 +722,8 @@ const Popup: FC<PopupProps> = ({ selection }) => {
                           <Check size={10} />
                         </DropdownMenu.ItemIndicator>
                         <span className={`flex items-center gap-1.5 ${!creativeMode ? "ml-5" : ""}`}>
-                          <Sparkles size={12} className="flex-shrink-0" />
                           More Creative
+                          <Sparkles size={12} className="flex-shrink-0" />
                         </span>
                       </DropdownMenu.CheckboxItem>
                     </>
