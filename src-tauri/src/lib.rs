@@ -12,7 +12,12 @@ pub mod tray;
 use log::{info, warn, LevelFilter};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+
+/// Global debug mode flag — checked by the log formatter to decide whether
+/// DEBUG-level messages should be written to the log file.
+pub static DEBUG_MODE: AtomicBool = AtomicBool::new(false);
 use tauri::{Emitter, Manager};
 
 /// Global application state shared across all modules
@@ -51,6 +56,9 @@ impl AppState {
                 saved_auth.username
             );
         }
+
+        // Initialize global debug mode flag from settings
+        DEBUG_MODE.store(settings.debug_mode, Ordering::Relaxed);
 
         Self {
             enabled: Mutex::new(true),
@@ -147,6 +155,9 @@ pub struct Settings {
     /// Write Mode action: "TranslateAndPolish", "Translate", or "Polish"
     #[serde(default = "default_write_action")]
     pub write_action: String,
+    /// Debug mode — logs detailed information (LLM prompts, responses) to the log file
+    #[serde(default)]
+    pub debug_mode: bool,
 }
 
 fn default_replace_mode() -> String {
@@ -231,6 +242,7 @@ impl Default for Settings {
             read_mode_sub: "translate_summarize".to_string(),
             popup_icon_position: "top-left".to_string(),
             write_action: "TranslateAndPolish".to_string(),
+            debug_mode: false,
         }
     }
 }
@@ -782,6 +794,8 @@ fn update_settings(
     state: tauri::State<'_, Arc<AppState>>,
     settings: Settings,
 ) -> Result<(), String> {
+    // Sync global debug mode flag
+    DEBUG_MODE.store(settings.debug_mode, Ordering::Relaxed);
     // Save to disk first
     settings.save()?;
     // Then update in-memory state
@@ -876,8 +890,10 @@ pub fn run() {
                 );
                 // Write to stderr (all levels — for terminal debugging)
                 let _ = buf.write_all(line.as_bytes());
-                // Write to date-rotated log file (INFO and above only)
-                if record.level() <= log::Level::Info {
+                // Write to date-rotated log file (INFO+ always, DEBUG when debug mode is on)
+                if record.level() <= log::Level::Info
+                    || (record.level() == log::Level::Debug && DEBUG_MODE.load(Ordering::Relaxed))
+                {
                     let today = now.format("%Y-%m-%d").to_string();
                     let mut guard = cached_log_file.lock();
                     // Re-open if no cached handle or date has changed

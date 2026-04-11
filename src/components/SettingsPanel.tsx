@@ -44,6 +44,7 @@ interface Settings {
   read_mode_enabled: boolean;
   read_mode_sub: string;
   popup_icon_position: string;
+  debug_mode: boolean;
 }
 
 const LANGUAGES = [
@@ -74,6 +75,7 @@ const SettingsPanel: FC<{ themeCtx: ThemeCtx }> = ({ themeCtx }) => {
     read_mode_enabled: true,
     read_mode_sub: "translate_summarize",
     popup_icon_position: "top-left",
+    debug_mode: false,
   });
   const [loginStep, setLoginStep] = useState<"idle" | "loading" | "code" | "waiting" | "error">("idle");
   const [deviceCode, setDeviceCode] = useState<DeviceCodeInfo | null>(null);
@@ -515,6 +517,28 @@ const SettingsPanel: FC<{ themeCtx: ThemeCtx }> = ({ themeCtx }) => {
               }}
               className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${
                 settings.auto_start
+                  ? "bg-copilot-blue border-copilot-blue"
+                  : "border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700"
+              }`}
+            >
+              <Checkbox.Indicator>
+                <Check size={12} className="text-white" />
+              </Checkbox.Indicator>
+            </Checkbox.Root>
+          </label>
+          <label className="flex items-center justify-between cursor-pointer mt-2">
+            <div>
+              <span className="text-sm text-gray-700 dark:text-gray-300">Debug logging</span>
+              <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5">Log LLM prompts and responses to the log file for troubleshooting.</p>
+            </div>
+            <Checkbox.Root
+              checked={settings.debug_mode}
+              onCheckedChange={(checked) => {
+                invoke("log_action", { action: `Debug mode ${checked ? "enabled" : "disabled"}` }).catch(() => {});
+                setSettings({ ...settings, debug_mode: !!checked });
+              }}
+              className={`w-4 h-4 rounded border flex items-center justify-center ml-3 flex-shrink-0 transition-colors ${
+                settings.debug_mode
                   ? "bg-copilot-blue border-copilot-blue"
                   : "border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700"
               }`}
