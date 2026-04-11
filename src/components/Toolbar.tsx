@@ -1,4 +1,5 @@
 import { useEffect, useState, type FC } from "react";
+import { XCircle, Languages } from "lucide-react";
 import { SelectionInfo } from "../hooks/useSelection";
 
 interface ToolbarProps {
@@ -49,10 +50,7 @@ const Toolbar: FC<ToolbarProps> = ({ selection, loading, error, onAction, onDism
           title={error}
           style={{ color: '#ef4444' }}
         >
-          <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <circle cx="12" cy="12" r="10" />
-            <path d="M15 9l-6 6M9 9l6 6" />
-          </svg>
+          <XCircle size={20} />
         </button>
       ) : (
         <button
@@ -62,15 +60,7 @@ const Toolbar: FC<ToolbarProps> = ({ selection, loading, error, onAction, onDism
           style={{ cursor: 'pointer', borderRadius: '24px' }}
           title="Translate & Polish"
         >
-          <svg className="w-7 h-7" viewBox="0 0 24 24" fill="none" stroke="#0078D4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M5 8l4-4 4 4" />
-            <path d="M9 4v8" />
-            <path d="M12 20l3-6 3 6" />
-            <path d="M13.5 17h3" />
-            <path d="M2 16h4" />
-            <path d="M6 12c0 3-2.5 4-2.5 4" />
-            <path d="M6 12c0 0 2 1 4 1" />
-          </svg>
+          <Languages size={28} className="text-[#0078D4]" />
         </button>
       )}
     </div>

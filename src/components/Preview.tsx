@@ -1,4 +1,5 @@
 import { useEffect, type FC } from "react";
+import { Copy, X } from "lucide-react";
 
 export interface ProcessResponse {
   original: string;
@@ -81,13 +82,13 @@ const Preview: FC<PreviewProps> = ({
           onClick={onCancel}
           className="rounded-md px-3 py-1.5 text-xs font-medium text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600"
         >
-          ✕
+          <X size={14} />
         </button>
         <button
           onClick={onCopy}
           className="rounded-md px-3 py-1.5 text-xs font-medium text-gray-600 transition-colors hover:bg-gray-100"
         >
-          📋
+          <Copy size={14} />
         </button>
         <button
           onClick={onReplace}

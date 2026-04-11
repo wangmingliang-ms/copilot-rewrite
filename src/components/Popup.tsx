@@ -6,6 +6,8 @@ import "github-markdown-css/github-markdown-light.css";
 import iconImg from "../assets/icon-48.png";
 import { SelectionInfo, ProcessResponse } from "../hooks/useSelection";
 import { extractJsonStringValue, stripCodeFences, extractVocabulary, parseReadModeSeparator } from "../utils/jsonParser";
+import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
+import { Square, RefreshCw, ChevronDown, Check, Sparkles, X, Settings, Copy, FileText, ChevronRight, AlertCircle, Code } from "lucide-react";
 
 // ── State machine ──
 // icon (48×48) → loading (expanded, spinner) → streaming (expanded, text flowing) → expanded (final) | error
@@ -320,9 +322,7 @@ const Popup: FC<PopupProps> = ({ selection }) => {
     ? (readSummaryHtml || readTranslationHtml)
     : translatedHtml;
 
-  // Close menus on outside click / Escape
-  const replaceMenuRef = useRef<HTMLDivElement>(null);
-  const actionMenuRef = useRef<HTMLDivElement>(null);
+  // Close menus on Escape
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
@@ -331,31 +331,30 @@ const Popup: FC<PopupProps> = ({ selection }) => {
         handleDismiss();
       }
     };
-    const handleClick = (e: MouseEvent) => {
-      if (showReplaceMenu && replaceMenuRef.current && !replaceMenuRef.current.contains(e.target as Node)) setShowReplaceMenu(false);
-      if (showActionMenu && actionMenuRef.current && !actionMenuRef.current.contains(e.target as Node)) setShowActionMenu(false);
-    };
     window.addEventListener("keydown", handleKeyDown);
-    window.addEventListener("mousedown", handleClick);
-    return () => { window.removeEventListener("keydown", handleKeyDown); window.removeEventListener("mousedown", handleClick); };
+    return () => { window.removeEventListener("keydown", handleKeyDown); };
   }, [showReplaceMenu, showActionMenu]);
 
-  // Auto-dismiss on blur
+  // Auto-dismiss on blur (skip when Radix menus are open — their Portal causes transient blur)
   useEffect(() => {
     if (state !== "expanded" && state !== "streaming" && state !== "loading" && state !== "error") return;
     const handleBlur = () => {
-      setTimeout(async () => { if (!document.hasFocus()) handleDismiss(); }, 100);
+      setTimeout(async () => {
+        if (showActionMenu || showReplaceMenu) return;
+        if (!document.hasFocus()) handleDismiss();
+      }, 100);
     };
     window.addEventListener("blur", handleBlur);
     return () => window.removeEventListener("blur", handleBlur);
-  }, [state]);
+  }, [state, showActionMenu, showReplaceMenu]);
 
   // Resize popup to fit content
   const contentRef = useRef<HTMLDivElement>(null);
   const hasResized = useRef(false);
   useEffect(() => {
-    if ((state !== "expanded" && state !== "streaming") || !contentRef.current) return;
+    if ((state !== "expanded" && state !== "streaming" && state !== "loading") || !contentRef.current) return;
     if (state === "expanded" && hasResized.current) return;
+    const delay = state === "streaming" ? 200 : state === "loading" ? 150 : 50;
     const timer = setTimeout(() => {
       if (contentRef.current) {
         const card = contentRef.current;
@@ -364,9 +363,22 @@ const Popup: FC<PopupProps> = ({ selection }) => {
         const totalHeight = card.scrollHeight;
         card.style.maxHeight = oldMaxH;
         invoke("resize_popup_content", { height: Math.min(Math.max(totalHeight, 80), 400) }).catch(() => {});
-        if (state === "expanded") hasResized.current = true;
+        // For expanded state, do a second resize after 300ms to catch async markdown rendering
+        if (state === "expanded") {
+          setTimeout(() => {
+            if (contentRef.current) {
+              const c = contentRef.current;
+              const old = c.style.maxHeight;
+              c.style.maxHeight = "none";
+              const h = c.scrollHeight;
+              c.style.maxHeight = old;
+              invoke("resize_popup_content", { height: Math.min(Math.max(h, 80), 400) }).catch(() => {});
+            }
+            hasResized.current = true;
+          }, 300);
+        }
       }
-    }, state === "streaming" ? 200 : 50);
+    }, delay);
     return () => clearTimeout(timer);
   }, [state, streamingText, translatedHtml, reorganizedHtml, readSummaryHtml, readTranslationHtml, readLayout]);
 
@@ -636,9 +648,7 @@ const Popup: FC<PopupProps> = ({ selection }) => {
             {/* Spinner — visible by default */}
             <div className="h-3.5 w-3.5 animate-spin rounded-full border-[1.5px] border-copilot-blue border-t-transparent group-hover:hidden" />
             {/* Stop icon — visible on hover */}
-            <svg className="w-3.5 h-3.5 hidden group-hover:block" viewBox="0 0 16 16" fill="currentColor">
-              <rect x="3" y="3" width="10" height="10" rx="1" />
-            </svg>
+            <Square size={14} className="hidden group-hover:block" />
             <span className="group-hover:hidden">Generating...</span>
             <span className="hidden group-hover:inline">Stop</span>
           </button>
@@ -648,92 +658,80 @@ const Popup: FC<PopupProps> = ({ selection }) => {
             className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors ${toolbarBtnClass}`}
             title="Regenerate"
           >
-            <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M2.5 8a5.5 5.5 0 0 1 9.3-4" />
-              <path d="M13.5 8a5.5 5.5 0 0 1-9.3 4" />
-              <path d="M11.5 1.5v3h3" />
-              <path d="M4.5 14.5v-3h-3" />
-            </svg>
+            <RefreshCw size={14} />
             Regenerate
           </button>
         )}
 
-        {/* Action dropdown */}
-        <div className={`relative ${disabledClass}`} ref={actionMenuRef}>
-          <button
-            onClick={() => setShowActionMenu(!showActionMenu)}
-            className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors ${toolbarBtnClass}`}
-            disabled={isGenerating}
-          >
-            {isReadMode
-              ? READ_ACTIONS.find((a) => a.value === currentReadAction)?.label
-              : WRITE_ACTIONS.find((a) => a.value === currentWriteAction)?.label}
-            <svg className="w-2.5 h-2.5 ml-0.5" viewBox="0 0 10 10" fill="currentColor">
-              <path d="M2 3.5L5 6.5L8 3.5" />
-            </svg>
-          </button>
-          {showActionMenu && (
-            <div className="absolute top-full left-0 mt-1 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 py-1 min-w-[180px] z-50">
-              {isReadMode
-                ? READ_ACTIONS.map((a) => (
-                    <button
-                      key={a.value}
-                      onClick={() => handleReadActionChange(a.value)}
-                      className={`w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 ${currentReadAction === a.value ? "text-copilot-blue font-medium" : "text-gray-700 dark:text-gray-300"}`}
-                    >
-                      <span className="w-3 inline-block text-center flex-shrink-0">{currentReadAction === a.value ? "✓" : ""}</span>
-                      <span>{a.label}</span>
-                    </button>
-                  ))
-                : WRITE_ACTIONS.map((a) => (
-                    <button
-                      key={a.value}
-                      onClick={() => handleWriteActionChange(a.value)}
-                      className={`w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 ${currentWriteAction === a.value ? "text-copilot-blue font-medium" : "text-gray-700 dark:text-gray-300"}`}
-                    >
-                      <span className="w-3 inline-block text-center flex-shrink-0">{currentWriteAction === a.value ? "✓" : ""}</span>
-                      <span>{a.label}</span>
-                    </button>
-                  ))}
-            </div>
-          )}
+        {/* Action dropdown (includes creative mode toggle for Write Mode) */}
+        <div className={`${disabledClass}`}>
+          <DropdownMenu.Root open={showActionMenu} onOpenChange={setShowActionMenu}>
+            <DropdownMenu.Trigger asChild>
+              <button
+                className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors ${toolbarBtnClass}`}
+                disabled={isGenerating}
+              >
+                {!isReadMode && creativeMode && <Sparkles size={10} className="text-blue-500 flex-shrink-0" />}
+                {isReadMode
+                  ? READ_ACTIONS.find((a) => a.value === currentReadAction)?.label
+                  : WRITE_ACTIONS.find((a) => a.value === currentWriteAction)?.label}
+                <ChevronDown size={10} className="ml-0.5" />
+              </button>
+            </DropdownMenu.Trigger>
+            <DropdownMenu.Portal>
+              <DropdownMenu.Content
+                className="bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 py-1 min-w-[180px] z-50"
+                sideOffset={4}
+                align="start"
+              >
+                {isReadMode
+                  ? READ_ACTIONS.map((a) => (
+                      <DropdownMenu.CheckboxItem
+                        key={a.value}
+                        checked={currentReadAction === a.value}
+                        onCheckedChange={() => handleReadActionChange(a.value)}
+                        className={`w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 outline-none cursor-pointer ${currentReadAction === a.value ? "text-copilot-blue font-medium" : "text-gray-700 dark:text-gray-300"}`}
+                      >
+                        <DropdownMenu.ItemIndicator className="w-3 inline-flex justify-center flex-shrink-0">
+                          <Check size={10} />
+                        </DropdownMenu.ItemIndicator>
+                        <span className={currentReadAction !== a.value ? "ml-5" : ""}>{a.label}</span>
+                      </DropdownMenu.CheckboxItem>
+                    ))
+                  : <>
+                      {WRITE_ACTIONS.map((a) => (
+                        <DropdownMenu.CheckboxItem
+                          key={a.value}
+                          checked={currentWriteAction === a.value}
+                          onCheckedChange={() => handleWriteActionChange(a.value)}
+                          className={`w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 outline-none cursor-pointer ${currentWriteAction === a.value ? "text-copilot-blue font-medium" : "text-gray-700 dark:text-gray-300"}`}
+                        >
+                          <DropdownMenu.ItemIndicator className="w-3 inline-flex justify-center flex-shrink-0">
+                            <Check size={10} />
+                          </DropdownMenu.ItemIndicator>
+                          <span className={currentWriteAction !== a.value ? "ml-5" : ""}>{a.label}</span>
+                        </DropdownMenu.CheckboxItem>
+                      ))}
+                      <DropdownMenu.Separator className="h-px bg-gray-200 dark:bg-gray-700 my-1" />
+                      <DropdownMenu.CheckboxItem
+                        checked={creativeMode}
+                        onCheckedChange={() => handleCreativeToggle()}
+                        className={`w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 outline-none cursor-pointer ${creativeMode ? "text-blue-600 dark:text-blue-400 font-medium" : "text-gray-700 dark:text-gray-300"}`}
+                      >
+                        <DropdownMenu.ItemIndicator className="w-3 inline-flex justify-center flex-shrink-0">
+                          <Check size={10} />
+                        </DropdownMenu.ItemIndicator>
+                        <span className={`flex items-center gap-1.5 ${!creativeMode ? "ml-5" : ""}`}>
+                          <Sparkles size={12} className="flex-shrink-0" />
+                          More Creative
+                        </span>
+                      </DropdownMenu.CheckboxItem>
+                    </>
+                }
+              </DropdownMenu.Content>
+            </DropdownMenu.Portal>
+          </DropdownMenu.Root>
         </div>
-
-        {/* More Creative toggle — Write Mode only */}
-        {!isReadMode && (
-          <label
-            className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium cursor-pointer select-none transition-colors ${toolbarBtnClass} ${
-              creativeMode
-                ? "text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30 !border-blue-300 dark:!border-blue-700"
-                : "text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/60"
-            } ${disabledClass}`}
-            title={creativeMode ? "More Creative ON — full creative rewrite" : "More Creative OFF — conservative rewrite"}
-          >
-            <input
-              type="checkbox"
-              checked={creativeMode}
-              onChange={handleCreativeToggle}
-              disabled={isGenerating}
-              className="sr-only"
-            />
-            <div className={`w-3.5 h-3.5 rounded border-[1.5px] flex items-center justify-center transition-colors ${
-              creativeMode
-                ? "bg-blue-500 border-blue-500"
-                : "border-gray-400 dark:border-gray-500"
-            }`}>
-              {creativeMode && (
-                <svg className="w-2.5 h-2.5 text-white" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M2 6l3 3 5-6" />
-                </svg>
-              )}
-            </div>
-            <svg className="w-3.5 h-3.5 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z" />
-              <path d="M20 3v4" /><path d="M22 5h-4" />
-            </svg>
-            <span>More Creative</span>
-          </label>
-        )}
 
         <div className="flex-1" />
 
@@ -743,9 +741,7 @@ const Popup: FC<PopupProps> = ({ selection }) => {
           className="flex items-center justify-center w-6 h-6 rounded-md text-gray-400 dark:text-gray-500 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
           title="Dismiss"
         >
-          <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
-            <path d="M3 3l10 10M13 3L3 13" />
-          </svg>
+          <X size={14} />
         </button>
       </div>
     );
@@ -768,10 +764,7 @@ const Popup: FC<PopupProps> = ({ selection }) => {
           className={`flex items-center justify-center w-6 h-6 rounded-md text-gray-400 dark:text-gray-500 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 hover:text-gray-600 dark:hover:text-gray-300 transition-colors border border-gray-200 dark:border-gray-600 shadow-sm ${disabledActions}`}
           title="Settings"
         >
-          <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="8" cy="8" r="2.5" />
-            <path d="M13.5 8a5.5 5.5 0 0 0-.1-.9l1.4-1.1-1.2-2-1.7.6a5.3 5.3 0 0 0-1.6-.9L10 2H8L7.7 3.7a5.3 5.3 0 0 0-1.6.9l-1.7-.6-1.2 2 1.4 1.1a5.6 5.6 0 0 0 0 1.8l-1.4 1.1 1.2 2 1.7-.6c.5.4 1 .7 1.6.9L8 14h2l.3-1.7c.6-.2 1.1-.5 1.6-.9l1.7.6 1.2-2-1.4-1.1a5.5 5.5 0 0 0 .1-.9z" />
-          </svg>
+          <Settings size={14} />
         </button>
 
         {/* Model name */}
@@ -795,9 +788,7 @@ const Popup: FC<PopupProps> = ({ selection }) => {
               className={`flex items-center justify-center w-6 h-6 rounded-md transition-colors border shadow-sm ${showRaw ? "text-blue-500 bg-blue-50 dark:bg-blue-900/30 border-blue-300 dark:border-blue-700 hover:bg-blue-100 dark:hover:bg-blue-900/50" : "text-gray-400 dark:text-gray-500 border-gray-200 dark:border-gray-600 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 hover:text-gray-600 dark:hover:text-gray-300"}`}
               title={showRaw ? "Show preview" : "Show markdown"}
             >
-              <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="currentColor">
-                <path d="M2.5 3A1.5 1.5 0 0 0 1 4.5v7A1.5 1.5 0 0 0 2.5 13h11a1.5 1.5 0 0 0 1.5-1.5v-7A1.5 1.5 0 0 0 13.5 3h-11zM3 9V7l1.5 2L6 7v2h1V5H6L4.5 7.5 3 5H2v4h1zm7-1h1.5L9.5 11V8H8V5h1v3z" />
-              </svg>
+              <Code size={14} />
             </button>
           )}
 
@@ -807,69 +798,66 @@ const Popup: FC<PopupProps> = ({ selection }) => {
             className="flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-gray-600 shadow-sm hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors"
             title="Copy"
           >
-            <svg className="w-3 h-3" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="5" y="5" width="9" height="9" rx="1.5" />
-              <path d="M11 5V3.5A1.5 1.5 0 0 0 9.5 2h-6A1.5 1.5 0 0 0 2 3.5v6A1.5 1.5 0 0 0 3.5 11H5" />
-            </svg>
+            <Copy size={12} />
             Copy
           </button>
 
           {/* Replace split-button — Write Mode only */}
           {!isReadMode && (
-            <div className="relative flex shadow-sm rounded-md" ref={replaceMenuRef}>
+            <div className="flex shadow-sm rounded-md">
               <button
                 onClick={handleReplace}
                 className="flex items-center gap-1.5 rounded-l-md bg-copilot-blue px-2.5 py-1 text-xs font-medium text-white hover:bg-copilot-blue-hover transition-colors"
                 title={replaceMode === "rendered" ? "Replace with rendered text" : "Replace with markdown"}
               >
                 {replaceMode === "rendered" ? (
-                  /* Rendered text icon — document with lines */
-                  <svg className="w-3 h-3" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="2" y="1.5" width="12" height="13" rx="1.5" />
-                    <path d="M5 5h6M5 8h6M5 11h3" />
-                  </svg>
+                  <FileText size={12} />
                 ) : (
-                  /* Markdown icon — Md */
-                  <svg className="w-3.5 h-3" viewBox="0 0 16 10" fill="currentColor">
-                    <path d="M1 1.5A1.5 1.5 0 0 1 2.5 0h11A1.5 1.5 0 0 1 15 1.5v7a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 1 8.5v-7zM2.5 7V3l1.5 2L5.5 3v4h1V1.5h-1L4 3.5 2.5 1.5h-1V7h1zm7-1h1.5L9 9V6H8V1.5h1V6z" />
-                  </svg>
+                  <Code size={14} />
                 )}
                 Replace
               </button>
-              <button
-                onClick={(e) => { e.stopPropagation(); setShowReplaceMenu(!showReplaceMenu); }}
-                className="flex items-center rounded-r-md bg-copilot-blue px-1.5 py-1 text-white hover:bg-copilot-blue-hover transition-colors border-l border-white/20"
-                title="Replace options"
-              >
-                <svg className="w-2.5 h-2.5" viewBox="0 0 10 10" fill="currentColor">
-                  <path d="M2 3.5L5 6.5L8 3.5" />
-                </svg>
-              </button>
-              {showReplaceMenu && (
-                <div className="absolute bottom-full right-0 mb-1 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 py-1 min-w-[180px] z-50">
+              <DropdownMenu.Root open={showReplaceMenu} onOpenChange={setShowReplaceMenu}>
+                <DropdownMenu.Trigger asChild>
                   <button
-                    onClick={(e) => { e.stopPropagation(); switchReplaceMode("rendered"); }}
-                    className={`w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 ${replaceMode === "rendered" ? "text-copilot-blue font-medium" : "text-gray-700 dark:text-gray-300"}`}
+                    className="flex items-center rounded-r-md bg-copilot-blue px-1.5 py-1 text-white hover:bg-copilot-blue-hover transition-colors border-l border-white/20"
+                    title="Replace options"
                   >
-                    <span className="w-3 inline-block text-center flex-shrink-0">{replaceMode === "rendered" ? "✓" : ""}</span>
-                    <svg className="w-3.5 h-3.5 flex-shrink-0" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                      <rect x="2" y="1.5" width="12" height="13" rx="1.5" />
-                      <path d="M5 5h6M5 8h6M5 11h3" />
-                    </svg>
-                    Rendered text
+                    <ChevronDown size={10} />
                   </button>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); switchReplaceMode("markdown"); }}
-                    className={`w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 ${replaceMode === "markdown" ? "text-copilot-blue font-medium" : "text-gray-700 dark:text-gray-300"}`}
+                </DropdownMenu.Trigger>
+                <DropdownMenu.Portal>
+                  <DropdownMenu.Content
+                    className="bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 py-1 min-w-[180px] z-50"
+                    sideOffset={4}
+                    align="end"
+                    side="top"
                   >
-                    <span className="w-3 inline-block text-center flex-shrink-0">{replaceMode === "markdown" ? "✓" : ""}</span>
-                    <svg className="w-3.5 h-3.5 flex-shrink-0" viewBox="0 0 16 10" fill="currentColor">
-                      <path d="M1 1.5A1.5 1.5 0 0 1 2.5 0h11A1.5 1.5 0 0 1 15 1.5v7a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 1 8.5v-7zM2.5 7V3l1.5 2L5.5 3v4h1V1.5h-1L4 3.5 2.5 1.5h-1V7h1zm7-1h1.5L9 9V6H8V1.5h1V6z" />
-                    </svg>
-                    Markdown
-                  </button>
-                </div>
-              )}
+                    <DropdownMenu.CheckboxItem
+                      checked={replaceMode === "rendered"}
+                      onCheckedChange={() => switchReplaceMode("rendered")}
+                      className={`w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 outline-none cursor-pointer ${replaceMode === "rendered" ? "text-copilot-blue font-medium" : "text-gray-700 dark:text-gray-300"}`}
+                    >
+                      <DropdownMenu.ItemIndicator className="w-3 inline-flex justify-center flex-shrink-0">
+                        <Check size={10} />
+                      </DropdownMenu.ItemIndicator>
+                      <FileText size={14} className={`flex-shrink-0 ${replaceMode !== "rendered" ? "ml-5" : ""}`} />
+                      Rendered text
+                    </DropdownMenu.CheckboxItem>
+                    <DropdownMenu.CheckboxItem
+                      checked={replaceMode === "markdown"}
+                      onCheckedChange={() => switchReplaceMode("markdown")}
+                      className={`w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 outline-none cursor-pointer ${replaceMode === "markdown" ? "text-copilot-blue font-medium" : "text-gray-700 dark:text-gray-300"}`}
+                    >
+                      <DropdownMenu.ItemIndicator className="w-3 inline-flex justify-center flex-shrink-0">
+                        <Check size={10} />
+                      </DropdownMenu.ItemIndicator>
+                      <Code size={14} className={`flex-shrink-0 ${replaceMode !== "markdown" ? "ml-5" : ""}`} />
+                      Markdown
+                    </DropdownMenu.CheckboxItem>
+                  </DropdownMenu.Content>
+                </DropdownMenu.Portal>
+              </DropdownMenu.Root>
             </div>
           )}
         </div>
@@ -977,9 +965,7 @@ const Popup: FC<PopupProps> = ({ selection }) => {
           {renderTopToolbar()}
           <div className={`flex-1 px-5 py-4 flex items-start gap-2.5 mx-4 my-2 ${contentCardClass}`}>
             <div className="flex-shrink-0 w-5 h-5 rounded-full bg-red-50 dark:bg-red-900/30 flex items-center justify-center mt-0.5">
-              <svg className="w-3 h-3 text-red-500" viewBox="0 0 12 12" fill="currentColor">
-                <path d="M6 0a6 6 0 100 12A6 6 0 006 0zm.75 9h-1.5V7.5h1.5V9zm0-3h-1.5V3h1.5v3z"/>
-              </svg>
+              <AlertCircle size={12} className="text-red-500" />
             </div>
             <p className="text-[13px] leading-[1.5] text-red-600 dark:text-red-400">{error}</p>
           </div>
@@ -1043,9 +1029,7 @@ const Popup: FC<PopupProps> = ({ selection }) => {
                   onClick={() => { const next = !showOriginal; setShowOriginal(next); invoke("log_action", { action: `Full translation ${next ? "expanded" : "collapsed"}` }).catch(() => {}); }}
                   className="flex items-center gap-1 text-[11px] text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors py-2 w-full"
                 >
-                  <svg className={`w-3 h-3 transition-transform ${showOriginal ? "rotate-90" : ""}`} viewBox="0 0 12 12" fill="currentColor">
-                    <path d="M4.5 2l5 4-5 4V2z" />
-                  </svg>
+                  <ChevronRight size={12} className={`transition-transform ${showOriginal ? "rotate-90" : ""}`} />
                   <span className="font-medium tracking-wide uppercase">{readModeSettings.native_language.split(/[\s(]/)[0]} (Full Translation)</span>
                 </button>
               </div>
@@ -1080,9 +1064,7 @@ const Popup: FC<PopupProps> = ({ selection }) => {
                   onClick={() => { const next = !showOriginal; setShowOriginal(next); invoke("log_action", { action: `Original section ${next ? "expanded" : "collapsed"}` }).catch(() => {}); }}
                   className="flex items-center gap-1 text-[11px] text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors py-2 w-full"
                 >
-                  <svg className={`w-3 h-3 transition-transform ${showOriginal ? "rotate-90" : ""}`} viewBox="0 0 12 12" fill="currentColor">
-                    <path d="M4.5 2l5 4-5 4V2z" />
-                  </svg>
+                  <ChevronRight size={12} className={`transition-transform ${showOriginal ? "rotate-90" : ""}`} />
                   <span className="font-medium tracking-wide uppercase">{readModeSettings.native_language.split(' ')[0]} (Polished)</span>
                 </button>
               </div>
