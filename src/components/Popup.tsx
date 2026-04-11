@@ -7,7 +7,7 @@ import iconImg from "../assets/icon-48.png";
 import { SelectionInfo, ProcessResponse } from "../hooks/useSelection";
 import { extractJsonStringValue, stripCodeFences, extractVocabulary, parseReadModeSeparator } from "../utils/jsonParser";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
-import { Square, RefreshCw, ChevronDown, Check, Sparkles, X, Settings, Copy, FileText, AlertCircle, Code } from "lucide-react";
+import { Square, RefreshCw, ChevronDown, ChevronLeft, ChevronRight, Check, Sparkles, X, Settings, Copy, FileText, AlertCircle, Code } from "lucide-react";
 
 // ── State machine ──
 // icon (48×48) → loading (expanded, spinner) → streaming (expanded, text flowing) → expanded (final) | error
@@ -48,6 +48,10 @@ const Popup: FC<PopupProps> = ({ selection }) => {
   const [creativeMode, setCreativeMode] = useState<boolean>(false);
   const [replaceMode, setReplaceMode] = useState<"rendered" | "markdown">("rendered");
   const [showReplaceMenu, setShowReplaceMenu] = useState(false);
+
+  // Result history for pagination
+  const [history, setHistory] = useState<{ result: ProcessResponse }[]>([]);
+  const [historyIndex, setHistoryIndex] = useState(-1);
 
   // Read Mode state
   const [isReadMode, setIsReadMode] = useState(false);
@@ -149,6 +153,12 @@ const Popup: FC<PopupProps> = ({ selection }) => {
       setPopupState("expanded");
       setRefreshing(false);
       refreshingRef.current = false;
+      // Save to history
+      setHistory(prev => {
+        const next = [...prev, { result: event.payload }];
+        setHistoryIndex(next.length - 1);
+        return next;
+      });
     });
 
     const unLoading = listen("show-preview-loading", () => {
@@ -475,6 +485,21 @@ const Popup: FC<PopupProps> = ({ selection }) => {
   const [copyToast, setCopyToast] = useState(false);
   const refreshingRef = useRef(false);
 
+  // ── History navigation ──
+  const handleHistoryPrev = useCallback(() => {
+    if (historyIndex <= 0) return;
+    const newIdx = historyIndex - 1;
+    setHistoryIndex(newIdx);
+    setResult(history[newIdx].result);
+  }, [historyIndex, history]);
+
+  const handleHistoryNext = useCallback(() => {
+    if (historyIndex >= history.length - 1) return;
+    const newIdx = historyIndex + 1;
+    setHistoryIndex(newIdx);
+    setResult(history[newIdx].result);
+  }, [historyIndex, history]);
+
   // ── Regenerate / Refresh ──
   const handleRegenerate = useCallback(async () => {
     if (!selection || isGenerating) return;
@@ -617,6 +642,8 @@ const Popup: FC<PopupProps> = ({ selection }) => {
     setIsReadMode(false);
     setReadTab("summary");
     setWriteTab("translated");
+    setHistory([]);
+    setHistoryIndex(-1);
     setShowActionMenu(false);
     setShowReplaceMenu(false);
   };
@@ -648,31 +675,6 @@ const Popup: FC<PopupProps> = ({ selection }) => {
         className="flex-shrink-0 flex items-center gap-1.5 px-4 py-2.5 border-b border-gray-200 dark:border-gray-600"
         style={{ background: isDark ? "rgba(15,23,42,0.6)" : "rgba(249,250,251,0.8)" }}
       >
-        {/* Regenerate / Generating / Stop button */}
-        {isGenerating ? (
-          <button
-            onClick={handleStop}
-            className={`group flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-blue-50 dark:bg-blue-900/30 text-copilot-blue hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 transition-colors ${toolbarBtnClass}`}
-            title="Stop generating"
-          >
-            {/* Spinner — visible by default */}
-            <div className="h-3.5 w-3.5 animate-spin rounded-full border-[1.5px] border-copilot-blue border-t-transparent group-hover:hidden" />
-            {/* Stop icon — visible on hover */}
-            <Square size={14} className="hidden group-hover:block" />
-            <span className="group-hover:hidden">Generating...</span>
-            <span className="hidden group-hover:inline">Stop</span>
-          </button>
-        ) : (
-          <button
-            onClick={handleRegenerate}
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors ${toolbarBtnClass}`}
-            title="Regenerate"
-          >
-            <RefreshCw size={14} />
-            Regenerate
-          </button>
-        )}
-
         {/* Action dropdown (includes creative mode toggle for Write Mode) */}
         <div className={`${disabledClass}`}>
           <DropdownMenu.Root open={showActionMenu} onOpenChange={setShowActionMenu}>
@@ -743,6 +745,26 @@ const Popup: FC<PopupProps> = ({ selection }) => {
           </DropdownMenu.Root>
         </div>
 
+        {/* Settings gear */}
+        <button
+          onClick={() => { invoke("log_action", { action: "Settings button clicked" }).catch(() => {}); invoke("open_settings").catch(() => {}); }}
+          className={`flex items-center justify-center w-6 h-6 rounded-md text-gray-400 dark:text-gray-500 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 hover:text-gray-600 dark:hover:text-gray-300 transition-colors border border-gray-200 dark:border-gray-600 shadow-sm ${disabledClass}`}
+          title="Settings"
+        >
+          <Settings size={14} />
+        </button>
+
+        {/* Model name */}
+        {currentModel && (
+          <button
+            onClick={() => { invoke("log_action", { action: "Model name clicked — opening Settings" }).catch(() => {}); invoke("open_settings").catch(() => {}); }}
+            className={`text-[10px] text-gray-400 dark:text-gray-500 font-mono truncate max-w-[120px] hover:text-copilot-blue transition-colors cursor-pointer ${disabledClass}`}
+            title={`${currentModel} — Click to change model`}
+          >
+            {currentModel}
+          </button>
+        )}
+
         <div className="flex-1" />
 
         {/* Dismiss */}
@@ -768,41 +790,57 @@ const Popup: FC<PopupProps> = ({ selection }) => {
         className="flex-shrink-0 flex items-center gap-1.5 border-t border-gray-200 dark:border-gray-600 px-4 py-2.5"
         style={{ background: isDark ? "rgba(15,23,42,0.8)" : "rgba(249,250,251,0.8)" }}
       >
-        {/* Settings gear */}
-        <button
-          onClick={() => { invoke("log_action", { action: "Settings button clicked" }).catch(() => {}); invoke("open_settings").catch(() => {}); }}
-          className={`flex items-center justify-center w-6 h-6 rounded-md text-gray-400 dark:text-gray-500 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 hover:text-gray-600 dark:hover:text-gray-300 transition-colors border border-gray-200 dark:border-gray-600 shadow-sm ${disabledActions}`}
-          title="Settings"
-        >
-          <Settings size={14} />
-        </button>
-
-        {/* Model name */}
-        {currentModel && (
+        {/* Regenerate / Generating / Stop button */}
+        {isGenerating ? (
           <button
-            onClick={() => { invoke("log_action", { action: "Model name clicked — opening Settings" }).catch(() => {}); invoke("open_settings").catch(() => {}); }}
-            className={`text-[10px] text-gray-400 dark:text-gray-500 font-mono truncate max-w-[120px] hover:text-copilot-blue transition-colors cursor-pointer ${disabledActions}`}
-            title={`${currentModel} — Click to change model`}
+            onClick={handleStop}
+            className={`group flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-blue-50 dark:bg-blue-900/30 text-copilot-blue hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 transition-colors ${toolbarBtnClass}`}
+            title="Stop generating"
           >
-            {currentModel}
+            <div className="h-3.5 w-3.5 animate-spin rounded-full border-[1.5px] border-copilot-blue border-t-transparent group-hover:hidden" />
+            <Square size={14} className="hidden group-hover:block" />
+            <span className="group-hover:hidden">Generating...</span>
+            <span className="hidden group-hover:inline">Stop</span>
           </button>
+        ) : (
+          <button
+            onClick={handleRegenerate}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors ${toolbarBtnClass}`}
+            title="Regenerate"
+          >
+            <RefreshCw size={14} />
+            Regenerate
+          </button>
+        )}
+
+        {/* History pagination */}
+        {history.length > 1 && !isGenerating && (
+          <div className="flex items-center gap-0 text-xs text-gray-500 dark:text-gray-400">
+            <button
+              onClick={handleHistoryPrev}
+              disabled={historyIndex <= 0}
+              className="flex items-center justify-center w-5 h-5 rounded hover:bg-gray-200/60 dark:hover:bg-gray-700/60 transition-colors disabled:opacity-30 disabled:pointer-events-none"
+              title="Previous result"
+            >
+              <ChevronLeft size={14} />
+            </button>
+            <span className="tabular-nums text-[11px] select-none">
+              {historyIndex + 1} of {history.length}
+            </span>
+            <button
+              onClick={handleHistoryNext}
+              disabled={historyIndex >= history.length - 1}
+              className="flex items-center justify-center w-5 h-5 rounded hover:bg-gray-200/60 dark:hover:bg-gray-700/60 transition-colors disabled:opacity-30 disabled:pointer-events-none"
+              title="Next result"
+            >
+              <ChevronRight size={14} />
+            </button>
+          </div>
         )}
 
         <div className="flex-1" />
 
         <div className={`flex items-center gap-1 ${disabledActions}`}>
-          {/* Markdown toggle — Write Mode only */}
-          {!isReadMode && (
-            <button
-              onClick={() => { const next = !showRaw; setShowRaw(next); invoke("log_action", { action: `Markdown view ${next ? "ON" : "OFF"}` }).catch(() => {}); }}
-              className={`flex items-center justify-center w-6 h-6 rounded-md transition-colors border shadow-sm ${showRaw ? "text-blue-500 bg-blue-50 dark:bg-blue-900/30 border-blue-300 dark:border-blue-700 hover:bg-blue-100 dark:hover:bg-blue-900/50" : "text-gray-400 dark:text-gray-500 border-gray-200 dark:border-gray-600 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 hover:text-gray-600 dark:hover:text-gray-300"}`}
-              title={showRaw ? "Show preview" : "Show markdown"}
-            >
-              <Code size={14} />
-            </button>
-          )}
-
-          {/* Copy button */}
           <button
             onClick={handleCopy}
             className="flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-gray-600 shadow-sm hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors"
