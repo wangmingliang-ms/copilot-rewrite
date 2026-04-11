@@ -360,8 +360,10 @@ const Popup: FC<PopupProps> = ({ selection }) => {
   // Resize popup to fit content
   const contentRef = useRef<HTMLDivElement>(null);
   const hasResized = useRef(false);
+  const sizeLockedForRegenerate = useRef(false);
   useEffect(() => {
     if ((state !== "expanded" && state !== "streaming" && state !== "loading") || !contentRef.current) return;
+    if (sizeLockedForRegenerate.current) return;
     if (state === "expanded" && hasResized.current) return;
     const delay = state === "streaming" ? 200 : state === "loading" ? 150 : 50;
     const timer = setTimeout(() => {
@@ -384,6 +386,7 @@ const Popup: FC<PopupProps> = ({ selection }) => {
               invoke("resize_popup_content", { height: Math.min(Math.max(h, 80), 400) }).catch(() => {});
             }
             hasResized.current = true;
+            sizeLockedForRegenerate.current = true;
           }, 300);
         }
       }
@@ -480,7 +483,6 @@ const Popup: FC<PopupProps> = ({ selection }) => {
     setError(null);
     setResult(null);
     setStreamingText(null);
-    hasResized.current = false;
     await invokeProcess({ isRefresh: true });
   }, [selection, isGenerating, invokeProcess]);
 
@@ -507,7 +509,6 @@ const Popup: FC<PopupProps> = ({ selection }) => {
     setPopupState("loading");
     setStreamingText(null);
     setResult(null);
-    hasResized.current = false;
     setRefreshing(true);
     refreshingRef.current = true;
     await invokeProcess({ action, isRefresh: true });
@@ -528,7 +529,6 @@ const Popup: FC<PopupProps> = ({ selection }) => {
     setPopupState("loading");
     setStreamingText(null);
     setResult(null);
-    hasResized.current = false;
     setRefreshing(true);
     refreshingRef.current = true;
     await invokeProcess({ readAction: action, isRefresh: true });
@@ -551,7 +551,6 @@ const Popup: FC<PopupProps> = ({ selection }) => {
     setPopupState("loading");
     setStreamingText(null);
     setResult(null);
-    hasResized.current = false;
     setRefreshing(true);
     refreshingRef.current = true;
     await invokeProcess({ creative: newCreative, isRefresh: true });
@@ -614,6 +613,7 @@ const Popup: FC<PopupProps> = ({ selection }) => {
     setRefreshing(false);
     refreshingRef.current = false;
     hasResized.current = false;
+    sizeLockedForRegenerate.current = false;
     setIsReadMode(false);
     setReadTab("summary");
     setWriteTab("translated");
