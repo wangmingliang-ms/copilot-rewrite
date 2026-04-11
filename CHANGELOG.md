@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.12.0] - 2026-04-11
+
+### ✨ Features
+
+- **Redesigned popup UI with toolbar and inner cards** — Removed the intermediate spinning state; clicking the popup icon now immediately expands to the full UI with a loading spinner inside. New top toolbar with Regenerate/Stop button, action dropdown (Write: Translate+Polish / Translate / Polish; Read: Summarize+Translate / Translate), "More Creative" toggle with sparkles icon, and dismiss button. New bottom action bar with settings gear, model name, markdown toggle, Copy, and Replace split-button. All controls are visible but disabled during generation.
+- **Persistent user selections** — Write action, read mode sub-mode, creative mode, and replace mode choices are now saved to settings and restored on next popup open. No more resetting to defaults every time.
+
+### 🔧 Improvements
+
+- **Elevated card design** — Inner content area styled as a card with border, rounded corners, and inset shadow. Outer card has layered shadows and a visible border for a more polished, elevated look.
+- **Translate-only mode preserves original formatting** — Removed aggressive formatting instructions from translate-only prompts so the output preserves the original text's structure instead of adding bold/headings/emoji/lists.
+- **Creative mode moved to popup toolbar** — Renamed "Beast Mode" to "Creative Mode" across the entire codebase (Rust, TypeScript, docs). Removed from Settings page — now accessible directly from the popup toolbar.
+- **Fixed dropdown alignment** — All three dropdowns (action, read action, replace) now use a fixed-width checkmark container for consistent alignment.
+
+### 🐛 Bug Fixes
+
+- **Fixed Read Mode blank content after streaming** — Resolved a stale `isReadMode` closure that caused Read Mode to show blank content after streaming completed.
+- **Regenerate now shows full loading flow** — Regenerate button now triggers the complete loading → streaming → expanded flow, same as the initial generation.
+
 ## [0.11.0] - 2026-04-10
 
 ### ⚡ Performance
