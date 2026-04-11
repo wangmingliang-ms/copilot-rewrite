@@ -7,6 +7,7 @@ import iconImg from "../assets/icon-48.png";
 import { SelectionInfo, ProcessResponse } from "../hooks/useSelection";
 import { extractJsonStringValue, stripCodeFences, extractVocabulary, parseReadModeSeparator } from "../utils/jsonParser";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
+import * as Select from "@radix-ui/react-select";
 import { Square, RefreshCw, ChevronDown, ChevronLeft, ChevronRight, Check, Sparkles, X, Settings, Copy, FileText, AlertCircle, Code } from "lucide-react";
 
 // ── State machine ──
@@ -31,6 +32,9 @@ const READ_ACTIONS: { value: ReadAction; label: string }[] = [
 interface CopilotModel {
   id: string;
   name: string;
+  vendor: string;
+  preview: boolean;
+  category: string;
 }
 
 interface PopupProps {
@@ -45,6 +49,8 @@ const Popup: FC<PopupProps> = ({ selection }) => {
   const [error, setError] = useState<string | null>(null);
   const [showRaw, setShowRaw] = useState(false);
   const [currentModel, setCurrentModel] = useState<string>("");
+  const [currentModelId, setCurrentModelId] = useState<string>("");
+  const [models, setModels] = useState<CopilotModel[]>([]);
   const [creativeMode, setCreativeMode] = useState<boolean>(false);
   const [replaceMode, setReplaceMode] = useState<"rendered" | "markdown">("rendered");
   const [showReplaceMenu, setShowReplaceMenu] = useState(false);
@@ -133,10 +139,12 @@ const Popup: FC<PopupProps> = ({ selection }) => {
       };
       setReadModeSettings(rms);
       setCurrentReadAction(rms.read_mode_sub === "simple_translate" ? "simple_translate" : "translate_summarize");
-      if (!s.model) { setCurrentModel(""); return; }
+      if (!s.model) { setCurrentModel(""); setCurrentModelId(""); return; }
+      setCurrentModelId(s.model);
       try {
-        const models = await invoke<CopilotModel[]>("list_models");
-        const match = models.find((m) => m.id === s.model);
+        const fetchedModels = await invoke<CopilotModel[]>("list_models");
+        setModels(fetchedModels);
+        const match = fetchedModels.find((m) => m.id === s.model);
         setCurrentModel(match ? match.name : s.model);
       } catch {
         setCurrentModel(s.model);
@@ -517,6 +525,32 @@ const Popup: FC<PopupProps> = ({ selection }) => {
     invoke("log_action", { action: "Stop generating clicked" }).catch(() => {});
   }, []);
 
+  // ── Model change → persist + auto-regenerate ──
+  const handleModelChange = useCallback(async (modelId: string) => {
+    if (!modelId || modelId === currentModelId) return;
+    setCurrentModelId(modelId);
+    const match = models.find((m) => m.id === modelId);
+    setCurrentModel(match ? match.name : modelId);
+    invoke("log_action", { action: `Model changed to: ${modelId}` }).catch(() => {});
+
+    // Persist
+    try {
+      const s = await invoke<Record<string, unknown>>("get_settings");
+      await invoke("update_settings", { settings: { ...s, model: modelId } });
+    } catch { /* non-critical */ }
+
+    // Auto-regenerate if we have a result
+    if (state === "expanded" || state === "error") {
+      await invoke("cancel_request").catch(() => {});
+      setPopupState("loading");
+      setStreamingText(null);
+      setResult(null);
+      setRefreshing(true);
+      refreshingRef.current = true;
+      await invokeProcess({ isRefresh: true });
+    }
+  }, [currentModelId, models, state, invokeProcess]);
+
   // ── Action dropdown change → persist + auto-regenerate ──
   const handleWriteActionChange = useCallback(async (action: WriteAction) => {
     setCurrentWriteAction(action);
@@ -745,6 +779,65 @@ const Popup: FC<PopupProps> = ({ selection }) => {
           </DropdownMenu.Root>
         </div>
 
+        {/* Model dropdown */}
+        <div className={`${disabledClass}`}>
+          <Select.Root value={currentModelId} onValueChange={handleModelChange}>
+            <Select.Trigger
+              className={`flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-mono text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors max-w-[150px] ${toolbarBtnClass}`}
+              disabled={isGenerating}
+            >
+              <Select.Value placeholder="Select model">
+                {currentModel || currentModelId || "No model"}
+              </Select.Value>
+              <Select.Icon>
+                <ChevronDown size={10} className="flex-shrink-0" />
+              </Select.Icon>
+            </Select.Trigger>
+            <Select.Portal>
+              <Select.Content
+                className="bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 overflow-hidden z-50"
+                position="popper"
+                sideOffset={4}
+              >
+                <Select.Viewport className="p-1 max-h-[300px]">
+                  {(() => {
+                    const grouped = models.reduce<Record<string, CopilotModel[]>>((acc, m) => {
+                      const vendor = m.vendor || "Other";
+                      (acc[vendor] = acc[vendor] || []).push(m);
+                      return acc;
+                    }, {});
+                    const sortedVendors = Object.keys(grouped).sort();
+                    return sortedVendors.map((vendor) => (
+                      <Select.Group key={vendor}>
+                        <Select.Label className="px-2.5 py-1 text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase">{vendor}</Select.Label>
+                        {grouped[vendor].sort((a, b) => a.name.localeCompare(b.name)).map((model) => (
+                          <Select.Item
+                            key={model.id}
+                            value={model.id}
+                            className="px-2.5 py-1.5 text-xs text-gray-900 dark:text-gray-100 rounded cursor-pointer outline-none data-[highlighted]:bg-gray-100 dark:data-[highlighted]:bg-gray-700 flex items-center gap-2"
+                          >
+                            <Select.ItemText>
+                              {model.name}{model.preview ? " (Preview)" : ""}{model.category === "powerful" ? " ⚡" : ""}
+                            </Select.ItemText>
+                            <Select.ItemIndicator>
+                              <Check size={12} className="text-copilot-blue" />
+                            </Select.ItemIndicator>
+                          </Select.Item>
+                        ))}
+                      </Select.Group>
+                    ));
+                  })()}
+                  {models.length === 0 && currentModelId && (
+                    <Select.Item value={currentModelId} className="px-2.5 py-1.5 text-xs text-gray-900 dark:text-gray-100">
+                      <Select.ItemText>{currentModel || currentModelId}</Select.ItemText>
+                    </Select.Item>
+                  )}
+                </Select.Viewport>
+              </Select.Content>
+            </Select.Portal>
+          </Select.Root>
+        </div>
+
         {/* Settings gear */}
         <button
           onClick={() => { invoke("log_action", { action: "Settings button clicked" }).catch(() => {}); invoke("open_settings").catch(() => {}); }}
@@ -753,17 +846,6 @@ const Popup: FC<PopupProps> = ({ selection }) => {
         >
           <Settings size={14} />
         </button>
-
-        {/* Model name */}
-        {currentModel && (
-          <button
-            onClick={() => { invoke("log_action", { action: "Model name clicked — opening Settings" }).catch(() => {}); invoke("open_settings").catch(() => {}); }}
-            className={`text-[10px] text-gray-400 dark:text-gray-500 font-mono truncate max-w-[120px] hover:text-copilot-blue transition-colors cursor-pointer ${disabledClass}`}
-            title={`${currentModel} — Click to change model`}
-          >
-            {currentModel}
-          </button>
-        )}
 
         <div className="flex-1" />
 
