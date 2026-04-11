@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.13.0] - 2026-04-11
+
+### ✨ Features
+
+- **Replaced hand-drawn SVGs with Radix UI + Lucide React** — Migrated ~25 inline SVG icons across 6 component files to tree-shakable Lucide React icons, and replaced custom-built dropdowns, checkboxes, selects, modals, and progress bars with headless Radix UI primitives. Tailwind styling preserved via Radix `data-state` attributes.
+- **Merged creative mode into action dropdown** — The standalone "More Creative" checkbox is now a `CheckboxItem` inside the action dropdown, grouped below the mode options with a separator. A sparkle icon appears on the dropdown trigger when creative mode is active.
+
+### 🔧 Improvements
+
+- **Increased popup minimum height** — `EXPANDED_MIN_HEIGHT` raised from 120px to 200px for better content visibility.
+- **Improved popup resize logic** — The resize effect now also covers the "loading" state and includes a delayed retry for async markdown rendering in the "expanded" state.
+- **Removed redundant inline styles** — Deleted duplicate `<style>` block from `index.html` (already defined in `src/styles/index.css`), fixing a Vite 6 build issue.
+
+### 🐛 Bug Fixes
+
+- **Fixed popup auto-dismissing after ~60 seconds** — Removed the `PREVIEW_VISIBLE_TIMEOUT_SECS` forced reset. Popup now only closes on: text deselection, window switch, or manual close.
+- **Fixed popup appearing after alt-tab** — Added foreground window validation before showing popup: if the user switches windows during the debounce period, the popup is suppressed instead of appearing in the wrong context.
+- **Fixed Radix Portal blur events** — Added a blur guard that skips auto-dismiss when Radix dropdown menus are open (their Portal causes transient blur in Tauri WebView).
+
 ## [0.12.0] - 2026-04-11
 
 ### ✨ Features
