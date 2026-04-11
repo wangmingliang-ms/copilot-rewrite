@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.15.0] - 2026-04-11
+
+### ✨ Features
+
+- **Debug mode toggle in Settings** — New "Debug logging" checkbox in the General section. When enabled, writes DEBUG-level messages to the log file including full LLM system prompts, user text, request parameters, and responses. Uses a global `AtomicBool` for lock-free access from the log formatter.
+
+### 🔧 Improvements
+
+- **Rewritten polish/rewrite system prompts** — All four polish and translate+polish prompts (normal and creative) now use an understanding-first approach: the LLM first comprehends the author's intent, key points, and logical flow before re-expressing. Markdown and emoji are used as expressive tools for comprehension rather than mechanical formatting rules.
+- **Better content structure guidance** — Prompts now instruct the LLM to avoid long dense paragraphs, never mix unrelated topics in a single paragraph, and separate distinct topics with headings or section breaks.
+- **Bolder emoji usage** — Prompts now encourage liberal use of emoji while requiring accuracy — each emoji must match the meaning of its context.
+
+### 🐛 Bug Fixes
+
+- **Fixed stale results in history navigation** — Selecting new text now properly clears the result history. Previously, results from a prior selection could appear in the pagination controls after generating on new text.
+- **Fixed read mode popup height over-estimation** — Height calculation now measures only the largest tab section instead of the full response text containing all sections.
+
 ## [0.14.0] - 2026-04-11
 
 ### ✨ Features
