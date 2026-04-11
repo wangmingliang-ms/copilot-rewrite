@@ -402,14 +402,33 @@ fn resize_popup_physical(app_handle: &AppHandle, w: f64, h: f64) {
     }
 }
 
-/// Estimate expanded height based on text content (single pass over chars)
+/// Estimate expanded height based on text content.
+/// For tabbed content (read mode with separators, write mode with separator),
+/// only estimates based on the largest single section since tabs show one at a time.
 fn estimate_height(text: &str) -> f64 {
     if text.is_empty() {
         return EXPANDED_MIN_HEIGHT;
     }
+
+    // If the text contains section separators (tabs), only measure the largest section
+    let measure_text = if text.contains("---VOCABULARY---") || text.contains("---SUMMARY---") {
+        // Read mode: split by separators, find the largest section
+        text.split("---VOCABULARY---")
+            .flat_map(|part| part.split("---SUMMARY---"))
+            .max_by_key(|s| s.len())
+            .unwrap_or(text)
+    } else if text.contains("---TRANSLATED---") {
+        // Write mode: split by separator, find the largest section
+        text.split("---TRANSLATED---")
+            .max_by_key(|s| s.len())
+            .unwrap_or(text)
+    } else {
+        text
+    };
+
     let mut newline_count = 0usize;
     let mut char_count = 0usize;
-    for c in text.chars() {
+    for c in measure_text.chars() {
         char_count += 1;
         if c == '\n' {
             newline_count += 1;
