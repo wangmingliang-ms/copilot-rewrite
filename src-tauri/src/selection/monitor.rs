@@ -48,8 +48,6 @@ const FAST_POLL_MS: u64 = 20;
 const IDLE_POLL_MS: u64 = 200;
 /// Keyboard fallback UIA poll interval (ms) — SPEC §4.2: 500ms–1s.
 const KEYBOARD_POLL_MS: u64 = 800;
-/// Maximum time preview_visible can stay true before forced reset (seconds).
-const PREVIEW_VISIBLE_TIMEOUT_SECS: u64 = 60;
 
 // ─── DismissReason ───────────────────────────────────────────────────────────
 
@@ -64,8 +62,6 @@ enum DismissReason {
     SelectionCleared,
     /// External dismiss bumped the generation counter
     GenerationChanged,
-    /// preview_visible was stuck true for too long
-    PreviewVisibleStuck,
 }
 
 // ─── MonitorState ────────────────────────────────────────────────────────────
@@ -83,6 +79,9 @@ struct MonitorState {
     last_is_input: bool,
     /// HWND of the window where the selection originated
     selection_source_hwnd: isize,
+    /// HWND of the foreground window when the selection was first detected
+    /// (used to validate the foreground hasn't changed before showing popup)
+    selection_origin_hwnd: isize,
     /// Whether the popup icon is currently visible
     popup_icon_visible: bool,
     /// Whether the mouse has gone idle (button released) after popup appeared.
@@ -114,6 +113,7 @@ impl MonitorState {
             debounce_text: None,
             last_is_input: true,
             selection_source_hwnd: 0,
+            selection_origin_hwnd: 0,
             popup_icon_visible: false,
             mouse_idle_after_popup: false,
             mouse_selecting: false,
@@ -143,6 +143,7 @@ impl MonitorState {
         self.debounce_text = None;
         self.popup_icon_visible = false;
         self.selection_source_hwnd = 0;
+        self.selection_origin_hwnd = 0;
         self.mouseup_time = None;
         self.mouse_idle_after_popup = false;
         self.mouse_selecting = false;
@@ -154,7 +155,7 @@ impl MonitorState {
 
         // ── Reason-specific side effects ──
         match reason {
-            DismissReason::ForegroundChanged | DismissReason::PreviewVisibleStuck => {
+            DismissReason::ForegroundChanged => {
                 *state.preview_visible.lock() = false;
                 state.cancel_token.lock().cancel();
             }
@@ -433,13 +434,13 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
         let poll_interval = state.settings.lock().poll_interval_ms;
 
         // ── 4. Preview stuck check ──
-        // Track when preview_visible first became true, force-reset after timeout
+        // If Tauri reports popup hidden but preview_visible is still true, fix the inconsistency.
         if preview_is_visible {
             if ms.preview_visible_since.is_none() {
                 ms.preview_visible_since = Some(Instant::now());
             }
 
-            // Check 1: Tauri reports popup hidden but preview_visible is still true
+            // Tauri reports popup hidden but preview_visible is still true
             // Throttled to every 5s to avoid per-iteration IPC + Win32 calls
             if ms.last_stuck_check.elapsed() >= Duration::from_secs(5) {
                 ms.last_stuck_check = Instant::now();
@@ -451,26 +452,6 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
                             preview_is_visible = false;
                             ms.preview_visible_since = None;
                         }
-                    }
-                }
-            }
-
-            // Check 2: Timeout — preview_visible stuck true for too long
-            if preview_is_visible {
-                if let Some(since) = ms.preview_visible_since {
-                    if since.elapsed() >= Duration::from_secs(PREVIEW_VISIBLE_TIMEOUT_SECS) {
-                        warn!(
-                            "preview_visible stuck for {}s -- force dismissing",
-                            since.elapsed().as_secs()
-                        );
-                        ms.dismiss(
-                            DismissReason::PreviewVisibleStuck,
-                            &app_handle,
-                            &state,
-                            uia.as_ref(),
-                        );
-                        std::thread::sleep(Duration::from_millis(poll_interval));
-                        continue;
                     }
                 }
             }
@@ -653,6 +634,10 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
                             );
                             ms.last_is_input = is_input;
 
+                            // Record which window was foreground when we first detected the selection
+                            let fg_now = unsafe { GetForegroundWindow().0 as isize };
+                            ms.selection_origin_hwnd = fg_now;
+
                             if !mouseup_active {
                                 // Keyboard path -- start debounce timer
                                 ms.debounce_text = Some(text_trimmed.clone());
@@ -681,6 +666,24 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
                                 >= Duration::from_millis(DEBOUNCE_MS);
 
                         if instant || debounced {
+                            // Validate that the foreground window hasn't changed since
+                            // selection was detected (user may have alt-tabbed during debounce)
+                            let current_fg = unsafe { GetForegroundWindow().0 as isize };
+                            let is_own = current_fg == popup_hwnd || current_fg == settings_hwnd;
+                            if ms.selection_origin_hwnd != 0
+                                && current_fg != ms.selection_origin_hwnd
+                                && !is_own
+                            {
+                                info!(
+                                    "Foreground changed during debounce: origin=0x{:X} current=0x{:X} -- skipping popup",
+                                    ms.selection_origin_hwnd, current_fg
+                                );
+                                ms.debounce_text = None;
+                                ms.mouseup_time = None;
+                                std::thread::sleep(Duration::from_millis(poll_interval));
+                                continue;
+                            }
+
                             let show_text = ms.last_selection.as_ref().unwrap();
                             if instant {
                                 info!(
@@ -696,8 +699,7 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
                             } else {
                                 get_cursor_position()
                             };
-                            let source_hwnd =
-                                unsafe { GetForegroundWindow().0 as isize };
+                            let source_hwnd = current_fg;
 
                             // Cache foreground context (reuse if HWND unchanged)
                             let (app_name, window_title) = match &ms.cached_fg_context {

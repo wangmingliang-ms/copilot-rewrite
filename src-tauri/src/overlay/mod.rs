@@ -27,7 +27,7 @@ const ICON_SIZE: f64 = 48.0;
 
 /// Expanded preview width
 const EXPANDED_WIDTH: f64 = 400.0;
-const EXPANDED_MIN_HEIGHT: f64 = 120.0;
+const EXPANDED_MIN_HEIGHT: f64 = 200.0;
 const EXPANDED_MAX_HEIGHT: f64 = 400.0;
 /// Default height for initial streaming expand (before content is measured)
 const EXPANDED_STREAMING_HEIGHT: f64 = 250.0;
