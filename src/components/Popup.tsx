@@ -7,7 +7,7 @@ import iconImg from "../assets/icon-48.png";
 import { SelectionInfo, ProcessResponse } from "../hooks/useSelection";
 import { extractJsonStringValue, stripCodeFences, extractVocabulary, parseReadModeSeparator } from "../utils/jsonParser";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
-import { Square, RefreshCw, ChevronDown, Check, Sparkles, X, Settings, Copy, FileText, ChevronRight, AlertCircle, Code } from "lucide-react";
+import { Square, RefreshCw, ChevronDown, Check, Sparkles, X, Settings, Copy, FileText, AlertCircle, Code } from "lucide-react";
 
 // ── State machine ──
 // icon (48×48) → loading (expanded, spinner) → streaming (expanded, text flowing) → expanded (final) | error
@@ -43,7 +43,6 @@ const Popup: FC<PopupProps> = ({ selection }) => {
   const [streamingText, setStreamingText] = useState<string | null>(null);
   const [result, setResult] = useState<ProcessResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [showOriginal, setShowOriginal] = useState(false);
   const [showRaw, setShowRaw] = useState(false);
   const [currentModel, setCurrentModel] = useState<string>("");
   const [creativeMode, setCreativeMode] = useState<boolean>(false);
@@ -52,6 +51,8 @@ const Popup: FC<PopupProps> = ({ selection }) => {
 
   // Read Mode state
   const [isReadMode, setIsReadMode] = useState(false);
+  const [readTab, setReadTab] = useState<"summary" | "translation" | "vocabulary">("summary");
+  const [writeTab, setWriteTab] = useState<"translated" | "polished">("translated");
 
   // Top toolbar state — action selection
   const [currentWriteAction, setCurrentWriteAction] = useState<WriteAction>("TranslateAndPolish");
@@ -315,12 +316,20 @@ const Popup: FC<PopupProps> = ({ selection }) => {
   }, [streamingParsed.text]);
 
   // Output text for Replace/Copy
+  const effectiveReadTab = (() => {
+    const hasSummary = readLayout === "withSummary" && !!readSummary;
+    const hasVocab = readVocabulary.length > 0;
+    if (hasSummary && readTab === "summary") return "summary";
+    if (hasVocab && readTab === "vocabulary") return "vocabulary";
+    return "translation";
+  })();
+  const effectiveWriteTab = reorganized && writeTab === "polished" ? "polished" : "translated";
   const outputText = isReadMode
-    ? (readSummary || readTranslation || result?.result || "")
-    : (translated || result?.result || "");
+    ? (effectiveReadTab === "summary" ? readSummary : effectiveReadTab === "vocabulary" ? readVocabulary.map(v => `${v.term} — ${v.meaning}`).join("\n") : readTranslation) || result?.result || ""
+    : (effectiveWriteTab === "polished" ? reorganized : translated) || result?.result || "";
   const outputHtml = isReadMode
-    ? (readSummaryHtml || readTranslationHtml)
-    : translatedHtml;
+    ? (effectiveReadTab === "summary" ? readSummaryHtml : effectiveReadTab === "vocabulary" ? "" : readTranslationHtml)
+    : (effectiveWriteTab === "polished" ? reorganizedHtml : translatedHtml);
 
   // Close menus on Escape
   useEffect(() => {
@@ -601,12 +610,13 @@ const Popup: FC<PopupProps> = ({ selection }) => {
     setResult(null);
     setError(null);
     setStreamingText(null);
-    setShowOriginal(false);
     setShowRaw(false);
     setRefreshing(false);
     refreshingRef.current = false;
     hasResized.current = false;
     setIsReadMode(false);
+    setReadTab("summary");
+    setWriteTab("translated");
     setShowActionMenu(false);
     setShowReplaceMenu(false);
   };
@@ -983,93 +993,108 @@ const Popup: FC<PopupProps> = ({ selection }) => {
 
         {isReadMode ? (
           /* ── Read Mode Content ── */
-          <>
-            {!showOriginal && (
-              <div className={`flex-1 min-h-0 overflow-auto px-5 pt-4 pb-3 mx-4 my-2 ${contentCardClass}`} style={{ userSelect: "text", WebkitUserSelect: "text" }}>
-                {readLayout === "withSummary" && readSummary ? (
-                  showRaw ? (
-                    <pre className="text-[12px] leading-[1.6] text-gray-700 dark:text-gray-300 whitespace-pre-wrap break-words font-mono">{readSummary}</pre>
-                  ) : (
-                    <div className="markdown-body text-[13.5px] leading-[1.7]" style={{ background: "transparent" }} dangerouslySetInnerHTML={{ __html: readSummaryHtml }} />
-                  )
-                ) : (
-                  showRaw ? (
-                    <pre className="text-[12px] leading-[1.6] text-gray-700 dark:text-gray-300 whitespace-pre-wrap break-words font-mono">{readTranslation}</pre>
-                  ) : (
-                    <div className="markdown-body text-[13.5px] leading-[1.7]" style={{ background: "transparent" }} dangerouslySetInnerHTML={{ __html: readTranslationHtml }} />
-                  )
-                )}
-                {readVocabulary.length > 0 && (
-                  <div className="space-y-2 border-t border-gray-100 dark:border-gray-700 pt-2 mt-3">
-                    <div className="text-[11px] font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wide">Vocabulary</div>
-                    {readVocabulary.map((v: { term: string; meaning: string }, i: number) => (
-                      <div key={i} className="pl-3 border-l-2 border-purple-200 dark:border-purple-800">
-                        <span className="text-[12.5px] font-semibold text-purple-600 dark:text-purple-400">{v.term}</span>
-                        <span className="text-[12px] text-gray-600 dark:text-gray-400"> — {v.meaning}</span>
-                      </div>
-                    ))}
+          (() => {
+            const hasSummary = readLayout === "withSummary" && !!readSummary;
+            const hasVocab = readVocabulary.length > 0;
+            const tabCount = (hasSummary ? 1 : 0) + 1 /* translation always */ + (hasVocab ? 1 : 0);
+            const activeTab = hasSummary && readTab === "summary" ? "summary"
+              : hasVocab && readTab === "vocabulary" ? "vocabulary"
+              : "translation";
+            const tabBtnClass = (active: boolean) =>
+              `text-[11px] uppercase tracking-wide py-2 px-3 transition-colors font-medium ${active
+                ? "text-copilot-blue border-b-2 border-copilot-blue"
+                : "text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 border-b-2 border-transparent"}`;
+            return (
+              <>
+                {/* Tab content */}
+                <div className={`flex-1 min-h-0 overflow-auto px-5 pt-4 pb-3 mx-4 my-2 ${contentCardClass}`} style={{ userSelect: "text", WebkitUserSelect: "text" }}>
+                  {activeTab === "summary" && (
+                    showRaw ? (
+                      <pre className="text-[12px] leading-[1.6] text-gray-700 dark:text-gray-300 whitespace-pre-wrap break-words font-mono">{readSummary}</pre>
+                    ) : (
+                      <div className="markdown-body text-[13.5px] leading-[1.7]" style={{ background: "transparent" }} dangerouslySetInnerHTML={{ __html: readSummaryHtml }} />
+                    )
+                  )}
+                  {activeTab === "translation" && (
+                    showRaw ? (
+                      <pre className="text-[12px] leading-[1.6] text-gray-700 dark:text-gray-300 whitespace-pre-wrap break-words font-mono">{readTranslation}</pre>
+                    ) : (
+                      <div className="markdown-body text-[13.5px] leading-[1.7]" style={{ background: "transparent" }} dangerouslySetInnerHTML={{ __html: readTranslationHtml }} />
+                    )
+                  )}
+                  {activeTab === "vocabulary" && (
+                    <div className="space-y-2">
+                      {readVocabulary.map((v: { term: string; meaning: string }, i: number) => (
+                        <div key={i} className="pl-3 border-l-2 border-purple-200 dark:border-purple-800">
+                          <span className="text-[12.5px] font-semibold text-purple-600 dark:text-purple-400">{v.term}</span>
+                          <span className="text-[12px] text-gray-600 dark:text-gray-400"> — {v.meaning}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                {/* Tab bar — only shown when multiple tabs available */}
+                {tabCount > 1 && (
+                  <div className="flex-shrink-0 flex items-center gap-0 px-4 border-t border-gray-200 dark:border-gray-600">
+                    {hasSummary && (
+                      <button onClick={() => setReadTab("summary")} className={tabBtnClass(activeTab === "summary")}>
+                        Summary
+                      </button>
+                    )}
+                    <button onClick={() => setReadTab("translation")} className={tabBtnClass(activeTab === "translation")}>
+                      Translation
+                    </button>
+                    {hasVocab && (
+                      <button onClick={() => setReadTab("vocabulary")} className={tabBtnClass(activeTab === "vocabulary")}>
+                        Vocabulary
+                      </button>
+                    )}
                   </div>
                 )}
-              </div>
-            )}
-            {showOriginal && readLayout === "withSummary" && readTranslation && (
-              <div className={`flex-1 min-h-0 overflow-auto px-5 pt-4 pb-3 mx-4 my-2 ${contentCardClass}`} style={{ userSelect: "text", WebkitUserSelect: "text" }}>
-                {showRaw ? (
-                  <pre className="text-[12px] leading-[1.6] text-gray-500 dark:text-gray-400 whitespace-pre-wrap break-words font-mono">{readTranslation}</pre>
-                ) : (
-                  <div className="markdown-body text-[12px] leading-[1.55] text-gray-400 dark:text-gray-500" style={{ background: "transparent" }}>
-                    <div dangerouslySetInnerHTML={{ __html: readTranslationHtml }} />
-                  </div>
-                )}
-              </div>
-            )}
-            {readLayout === "withSummary" && readSummary && readTranslation && (
-              <div className="flex-shrink-0 px-4 border-t border-gray-200 dark:border-gray-600">
-                <button
-                  onClick={() => { const next = !showOriginal; setShowOriginal(next); invoke("log_action", { action: `Full translation ${next ? "expanded" : "collapsed"}` }).catch(() => {}); }}
-                  className="flex items-center gap-1 text-[11px] text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors py-2 w-full"
-                >
-                  <ChevronRight size={12} className={`transition-transform ${showOriginal ? "rotate-90" : ""}`} />
-                  <span className="font-medium tracking-wide uppercase">{readModeSettings.native_language.split(/[\s(]/)[0]} (Full Translation)</span>
-                </button>
-              </div>
-            )}
-          </>
+              </>
+            );
+          })()
         ) : (
           /* ── Write Mode Content ── */
-          <>
-            {!showOriginal && (
-              <div className={`flex-1 min-h-0 overflow-auto px-5 pt-4 pb-3 mx-4 my-2 ${contentCardClass}`} style={{ userSelect: "text", WebkitUserSelect: "text" }}>
-                {showRaw ? (
-                  <pre className="text-[12px] leading-[1.6] text-gray-700 dark:text-gray-300 whitespace-pre-wrap break-words font-mono">{translated}</pre>
-                ) : (
-                  <div className="markdown-body text-[13.5px] leading-[1.7]" style={{ background: "transparent" }} dangerouslySetInnerHTML={{ __html: translatedHtml }} />
-                )}
-              </div>
-            )}
-            {showOriginal && (
-              <div className={`flex-1 min-h-0 overflow-auto px-5 pt-4 pb-3 mx-4 my-2 ${contentCardClass}`} style={{ userSelect: "text", WebkitUserSelect: "text" }}>
-                {showRaw ? (
-                  <pre className="text-[12px] leading-[1.6] text-gray-500 dark:text-gray-400 whitespace-pre-wrap break-words font-mono">{reorganized}</pre>
-                ) : (
-                  <div className="markdown-body text-[12px] leading-[1.55] text-gray-400 dark:text-gray-500" style={{ background: "transparent" }}>
-                    <div dangerouslySetInnerHTML={{ __html: reorganizedHtml }} />
+          (() => {
+            const hasPolished = !!reorganizedHtml;
+            const tabCount = hasPolished ? 2 : 1;
+            const activeTab = hasPolished && writeTab === "polished" ? "polished" : "translated";
+            const tabBtnClass = (active: boolean) =>
+              `text-[11px] uppercase tracking-wide py-2 px-3 transition-colors font-medium ${active
+                ? "text-copilot-blue border-b-2 border-copilot-blue"
+                : "text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 border-b-2 border-transparent"}`;
+            return (
+              <>
+                <div className={`flex-1 min-h-0 overflow-auto px-5 pt-4 pb-3 mx-4 my-2 ${contentCardClass}`} style={{ userSelect: "text", WebkitUserSelect: "text" }}>
+                  {activeTab === "translated" && (
+                    showRaw ? (
+                      <pre className="text-[12px] leading-[1.6] text-gray-700 dark:text-gray-300 whitespace-pre-wrap break-words font-mono">{translated}</pre>
+                    ) : (
+                      <div className="markdown-body text-[13.5px] leading-[1.7]" style={{ background: "transparent" }} dangerouslySetInnerHTML={{ __html: translatedHtml }} />
+                    )
+                  )}
+                  {activeTab === "polished" && (
+                    showRaw ? (
+                      <pre className="text-[12px] leading-[1.6] text-gray-700 dark:text-gray-300 whitespace-pre-wrap break-words font-mono">{reorganized}</pre>
+                    ) : (
+                      <div className="markdown-body text-[13.5px] leading-[1.7]" style={{ background: "transparent" }} dangerouslySetInnerHTML={{ __html: reorganizedHtml }} />
+                    )
+                  )}
+                </div>
+                {tabCount > 1 && (
+                  <div className="flex-shrink-0 flex items-center gap-0 px-4 border-t border-gray-200 dark:border-gray-600">
+                    <button onClick={() => setWriteTab("translated")} className={tabBtnClass(activeTab === "translated")}>
+                      Translated
+                    </button>
+                    <button onClick={() => setWriteTab("polished")} className={tabBtnClass(activeTab === "polished")}>
+                      Polished
+                    </button>
                   </div>
                 )}
-              </div>
-            )}
-            {reorganizedHtml && (
-              <div className="flex-shrink-0 px-4 border-t border-gray-200 dark:border-gray-600">
-                <button
-                  onClick={() => { const next = !showOriginal; setShowOriginal(next); invoke("log_action", { action: `Original section ${next ? "expanded" : "collapsed"}` }).catch(() => {}); }}
-                  className="flex items-center gap-1 text-[11px] text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors py-2 w-full"
-                >
-                  <ChevronRight size={12} className={`transition-transform ${showOriginal ? "rotate-90" : ""}`} />
-                  <span className="font-medium tracking-wide uppercase">{readModeSettings.native_language.split(' ')[0]} (Polished)</span>
-                </button>
-              </div>
-            )}
-          </>
+              </>
+            );
+          })()
         )}
 
         {renderBottomBar()}
