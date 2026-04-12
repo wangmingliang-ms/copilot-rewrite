@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.1] - 2026-04-12
+
+### 🐛 Bug Fixes
+
+- **Fixed popup icon overlapping selected text** — Increased the gap between the popup icon and the selection bounding rect from 4px to 16px to account for the icon's box-shadow spread. The shadow no longer bleeds over the selected text.
+- **Disabled right-click context menu on popup icon** — Right-clicking the floating icon no longer opens the browser context menu. The context menu remains fully functional in the expanded state for copying text etc.
+
 ## [0.15.0] - 2026-04-11
 
 ### ✨ Features

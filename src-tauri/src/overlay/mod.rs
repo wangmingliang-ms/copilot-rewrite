@@ -138,7 +138,7 @@ pub fn show_popup_icon(
             let sel_y = sy as f64 / scale;
             let sel_w = sw as f64 / scale;
             let sel_h = sh as f64 / scale;
-            let gap = 4.0; // pixels gap between selection and icon
+            let gap = 16.0; // pixels gap between selection and icon (accounts for box-shadow spread)
 
             match icon_position {
                 "top-left" => (sel_x, sel_y - icon_logical - gap),

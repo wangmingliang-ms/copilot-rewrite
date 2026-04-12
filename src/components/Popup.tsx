@@ -1006,7 +1006,7 @@ const Popup: FC<PopupProps> = ({ selection }) => {
   // ── Icon state (48×48) ──
   if (state === "icon") {
     return (
-      <div className="w-screen h-screen flex items-center justify-center" style={{ padding: "20px", background: "transparent", pointerEvents: "none" }}>
+      <div className="w-screen h-screen flex items-center justify-center" onContextMenu={(e) => e.preventDefault()} style={{ padding: "20px", background: "transparent", pointerEvents: "none" }}>
         <div className="w-full h-full flex items-center justify-center"
           style={{
             pointerEvents: "auto",
