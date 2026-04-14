@@ -6,7 +6,7 @@ import { useUpdater } from "../hooks/useUpdater";
 import * as Select from "@radix-ui/react-select";
 import * as Checkbox from "@radix-ui/react-checkbox";
 import * as Progress from "@radix-ui/react-progress";
-import { RefreshCw, Check, ChevronDown, ArrowUpLeft, ArrowUp, ArrowUpRight, ArrowDownLeft, ArrowDown, ArrowDownRight } from "lucide-react";
+import { RefreshCw, Check, ChevronDown, ArrowUpLeft, ArrowUp, ArrowUpRight, ArrowDownLeft, ArrowDown, ArrowDownRight, Plus, Trash2 } from "lucide-react";
 
 // GitHub Octocat logo — brand mark not available in Lucide
 const GithubIcon = ({ size = 16, className = "" }: { size?: number; className?: string }) => (
@@ -33,12 +33,22 @@ interface DeviceCodeInfo {
   verification_uri: string;
 }
 
+type ReplaceMode = "Markdown" | "Rendered" | "Plain";
+
+interface ReplaceRule {
+  process: string;
+  title_contains: string;
+  mode: ReplaceMode;
+}
+
 interface Settings {
   target_language: string;
   auto_start: boolean;
   poll_interval_ms: number;
   creative_mode: boolean;
   model: string;
+  global_replace_mode: ReplaceMode;
+  replace_rules: ReplaceRule[];
   theme: string;
   native_language: string;
   read_mode_enabled: boolean;
@@ -62,7 +72,18 @@ interface CopilotModel {
   category: string;
 }
 
+// ── Tab definitions ──
+type SettingsTab = "general" | "assistant" | "replace" | "popup";
+
+const TABS: { id: SettingsTab; label: string; icon: string }[] = [
+  { id: "general", label: "General", icon: "\u2699\uFE0F" },
+  { id: "assistant", label: "Assistant", icon: "\uD83D\uDCAC" },
+  { id: "replace", label: "Replace", icon: "\uD83D\uDD04" },
+  { id: "popup", label: "Popup", icon: "\uD83D\uDCCC" },
+];
+
 const SettingsPanel: FC<{ themeCtx: ThemeCtx }> = ({ themeCtx }) => {
+  const [activeTab, setActiveTab] = useState<SettingsTab>("general");
   const [authStatus, setAuthStatus] = useState<AuthStatus>({ logged_in: false, username: null });
   const [settings, setSettings] = useState<Settings>({
     target_language: "English",
@@ -70,6 +91,8 @@ const SettingsPanel: FC<{ themeCtx: ThemeCtx }> = ({ themeCtx }) => {
     poll_interval_ms: 100,
     creative_mode: false,
     model: "claude-sonnet-4",
+    global_replace_mode: "Rendered",
+    replace_rules: [],
     theme: "system",
     native_language: "Chinese (Simplified)",
     read_mode_enabled: true,
@@ -181,404 +204,612 @@ const SettingsPanel: FC<{ themeCtx: ThemeCtx }> = ({ themeCtx }) => {
     }
   }, []);
 
-  return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-5">
-      <div className="max-w-md mx-auto">
-        <h1 className="text-lg font-bold text-gray-900 dark:text-gray-100 mb-0.5">Copilot Rewrite</h1>
-        <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">Settings</p>
+  // ── Tab content render functions ──
 
-        {/* Account Section */}
-        <section className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-5 mb-4">
-          <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-2">
-            <GithubIcon size={16} />
-            GitHub Account
-          </h2>
+  const renderGeneralTab = () => (
+    <>
+      {/* Account Section */}
+      <section className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-5 mb-4">
+        <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-2">
+          <GithubIcon size={16} />
+          GitHub Account
+        </h2>
 
-          {authStatus.logged_in ? (
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <img
-                  src={`https://github.com/${authStatus.username}.png?size=64`}
-                  alt={authStatus.username || "User"}
-                  className="w-8 h-8 rounded-full"
-                  onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
-                />
-                <div>
-                  <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{authStatus.username || "Connected"}</p>
-                  <p className="text-xs text-green-600 dark:text-green-400">● Copilot active</p>
-                </div>
+        {authStatus.logged_in ? (
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <img
+                src={`https://github.com/${authStatus.username}.png?size=64`}
+                alt={authStatus.username || "User"}
+                className="w-8 h-8 rounded-full"
+                onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+              />
+              <div>
+                <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{authStatus.username || "Connected"}</p>
+                <p className="text-xs text-green-600 dark:text-green-400">{"\u25CF"} Copilot active</p>
               </div>
-              <button
-                onClick={handleLogout}
-                className="text-xs text-red-500 hover:text-red-700 transition-colors"
-              >
-                Sign out
-              </button>
             </div>
-          ) : loginStep === "idle" ? (
             <button
-              onClick={handleLogin}
-              className="w-full rounded-lg bg-gray-900 dark:bg-gray-100 px-4 py-2.5 text-sm font-medium text-white dark:text-gray-900 transition-colors hover:bg-gray-800 dark:hover:bg-gray-200 active:scale-[0.98] flex items-center justify-center gap-2"
+              onClick={handleLogout}
+              className="text-xs text-red-500 hover:text-red-700 transition-colors"
             >
-              <GithubIcon size={16} />
-              Sign in with GitHub
-            </button>
-          ) : loginStep === "loading" ? (
-            <div className="flex items-center justify-center py-4">
-              <div className="h-5 w-5 animate-spin rounded-full border-2 border-gray-300 dark:border-gray-600 border-t-gray-900 dark:border-t-gray-100" />
-              <span className="ml-3 text-sm text-gray-500 dark:text-gray-400">Connecting...</span>
-            </div>
-          ) : loginStep === "code" && deviceCode ? (
-            <div>
-              <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">Copy this code and enter it on GitHub:</p>
-              <div className="rounded-lg bg-gray-50 dark:bg-gray-700 border-2 border-dashed border-gray-200 dark:border-gray-600 p-3 mb-3 text-center">
-                <span className="font-mono text-xl font-bold tracking-[0.3em] text-gray-900 dark:text-gray-100 select-all">
-                  {deviceCode.user_code}
-                </span>
-              </div>
-              <button
-                onClick={handleCopyAndOpen}
-                className="w-full rounded-lg bg-copilot-blue px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-copilot-blue-hover flex items-center justify-center gap-2"
-              >
-                {copied ? "✓ Copied!" : "📋 Copy & Open GitHub"}
-              </button>
-            </div>
-          ) : loginStep === "waiting" ? (
-            <div className="text-center py-3">
-              {deviceCode && (
-                <div className="rounded-lg bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 p-2 mb-3">
-                  <span className="font-mono text-lg font-bold tracking-[0.2em] text-gray-400 dark:text-gray-500">{deviceCode.user_code}</span>
-                </div>
-              )}
-              <div className="flex items-center justify-center">
-                <div className="h-5 w-5 animate-spin rounded-full border-2 border-copilot-blue border-t-transparent" />
-                <span className="ml-3 text-sm text-gray-500 dark:text-gray-400">Waiting for authorization...</span>
-              </div>
-            </div>
-          ) : loginStep === "error" ? (
-            <div>
-              <div className="rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 p-3 mb-3">
-                <p className="text-sm text-red-700 dark:text-red-400">{loginError}</p>
-              </div>
-              <button
-                onClick={handleLogin}
-                className="w-full rounded-lg bg-gray-900 dark:bg-gray-100 px-4 py-2.5 text-sm font-medium text-white dark:text-gray-900 hover:bg-gray-800 dark:hover:bg-gray-200"
-              >
-                Try Again
-              </button>
-            </div>
-          ) : null}
-        </section>
-
-        {/* Model Section */}
-        <section className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 px-4 py-3 mb-3">
-          <div className="flex items-center justify-between mb-1.5">
-            <h2 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">AI Model</h2>
-            <button onClick={() => { invoke("log_action", { action: "Refresh models clicked" }).catch(() => {}); fetchModels(); }} className="flex items-center gap-1 text-xs text-copilot-blue hover:underline" disabled={modelsLoading}>
-              {modelsLoading ? "..." : <><RefreshCw size={12} /> Refresh</>}
+              Sign out
             </button>
           </div>
-          <Select.Root
-            value={settings.model}
-            onValueChange={(value) => {
-              invoke("log_action", { action: `Model changed to: ${value}` }).catch(() => {});
-              setSettings({ ...settings, model: value });
-            }}
+        ) : loginStep === "idle" ? (
+          <button
+            onClick={handleLogin}
+            className="w-full rounded-lg bg-gray-900 dark:bg-gray-100 px-4 py-2.5 text-sm font-medium text-white dark:text-gray-900 transition-colors hover:bg-gray-800 dark:hover:bg-gray-200 active:scale-[0.98] flex items-center justify-center gap-2"
           >
-            <Select.Trigger
-              className={`w-full rounded border px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 flex items-center justify-between ${
-                !settings.model
-                  ? "border-red-400 focus:ring-red-500"
-                  : "border-gray-200 dark:border-gray-600 focus:border-copilot-blue focus:ring-copilot-blue"
+            <GithubIcon size={16} />
+            Sign in with GitHub
+          </button>
+        ) : loginStep === "loading" ? (
+          <div className="flex items-center justify-center py-4">
+            <div className="h-5 w-5 animate-spin rounded-full border-2 border-gray-300 dark:border-gray-600 border-t-gray-900 dark:border-t-gray-100" />
+            <span className="ml-3 text-sm text-gray-500 dark:text-gray-400">Connecting...</span>
+          </div>
+        ) : loginStep === "code" && deviceCode ? (
+          <div>
+            <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">Copy this code and enter it on GitHub:</p>
+            <div className="rounded-lg bg-gray-50 dark:bg-gray-700 border-2 border-dashed border-gray-200 dark:border-gray-600 p-3 mb-3 text-center">
+              <span className="font-mono text-xl font-bold tracking-[0.3em] text-gray-900 dark:text-gray-100 select-all">
+                {deviceCode.user_code}
+              </span>
+            </div>
+            <button
+              onClick={handleCopyAndOpen}
+              className="w-full rounded-lg bg-copilot-blue px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-copilot-blue-hover flex items-center justify-center gap-2"
+            >
+              {copied ? "\u2713 Copied!" : "\uD83D\uDCCB Copy & Open GitHub"}
+            </button>
+          </div>
+        ) : loginStep === "waiting" ? (
+          <div className="text-center py-3">
+            {deviceCode && (
+              <div className="rounded-lg bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 p-2 mb-3">
+                <span className="font-mono text-lg font-bold tracking-[0.2em] text-gray-400 dark:text-gray-500">{deviceCode.user_code}</span>
+              </div>
+            )}
+            <div className="flex items-center justify-center">
+              <div className="h-5 w-5 animate-spin rounded-full border-2 border-copilot-blue border-t-transparent" />
+              <span className="ml-3 text-sm text-gray-500 dark:text-gray-400">Waiting for authorization...</span>
+            </div>
+          </div>
+        ) : loginStep === "error" ? (
+          <div>
+            <div className="rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 p-3 mb-3">
+              <p className="text-sm text-red-700 dark:text-red-400">{loginError}</p>
+            </div>
+            <button
+              onClick={handleLogin}
+              className="w-full rounded-lg bg-gray-900 dark:bg-gray-100 px-4 py-2.5 text-sm font-medium text-white dark:text-gray-900 hover:bg-gray-800 dark:hover:bg-gray-200"
+            >
+              Try Again
+            </button>
+          </div>
+        ) : null}
+      </section>
+
+      {/* Model Section */}
+      <section className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 px-4 py-3 mb-3">
+        <div className="flex items-center justify-between mb-1.5">
+          <h2 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">AI Model</h2>
+          <button onClick={() => { invoke("log_action", { action: "Refresh models clicked" }).catch(() => {}); fetchModels(); }} className="flex items-center gap-1 text-xs text-copilot-blue hover:underline" disabled={modelsLoading}>
+            {modelsLoading ? "..." : <><RefreshCw size={12} /> Refresh</>}
+          </button>
+        </div>
+        <Select.Root
+          value={settings.model}
+          onValueChange={(value) => {
+            invoke("log_action", { action: `Model changed to: ${value}` }).catch(() => {});
+            setSettings({ ...settings, model: value });
+          }}
+        >
+          <Select.Trigger
+            className={`w-full rounded border px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 flex items-center justify-between ${
+              !settings.model
+                ? "border-red-400 focus:ring-red-500"
+                : "border-gray-200 dark:border-gray-600 focus:border-copilot-blue focus:ring-copilot-blue"
+            }`}
+          >
+            <Select.Value placeholder="— Select a model —" />
+            <Select.Icon>
+              <ChevronDown size={14} className="text-gray-400" />
+            </Select.Icon>
+          </Select.Trigger>
+          <Select.Portal>
+            <Select.Content
+              className="bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 overflow-hidden z-50"
+              position="popper"
+              sideOffset={4}
+            >
+              <Select.Viewport className="p-1 max-h-[300px]">
+                {(() => {
+                  const grouped = models.reduce<Record<string, CopilotModel[]>>((acc, m) => {
+                    const vendor = m.vendor || "Other";
+                    (acc[vendor] = acc[vendor] || []).push(m);
+                    return acc;
+                  }, {});
+                  const sortedVendors = Object.keys(grouped).sort();
+                  return sortedVendors.map((vendor) => (
+                    <Select.Group key={vendor}>
+                      <Select.Label className="px-2.5 py-1 text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase">{vendor}</Select.Label>
+                      {grouped[vendor].sort((a, b) => a.name.localeCompare(b.name)).map((model) => (
+                        <Select.Item
+                          key={model.id}
+                          value={model.id}
+                          className="px-2.5 py-1.5 text-sm text-gray-900 dark:text-gray-100 rounded cursor-pointer outline-none data-[highlighted]:bg-gray-100 dark:data-[highlighted]:bg-gray-700 flex items-center gap-2"
+                        >
+                          <Select.ItemText>
+                            {model.name}{model.preview ? " (Preview)" : ""}{model.category === "powerful" ? " \u26A1" : ""}
+                          </Select.ItemText>
+                          <Select.ItemIndicator>
+                            <Check size={12} className="text-copilot-blue" />
+                          </Select.ItemIndicator>
+                        </Select.Item>
+                      ))}
+                    </Select.Group>
+                  ));
+                })()}
+                {models.length === 0 && settings.model && (
+                  <Select.Item value={settings.model} className="px-2.5 py-1.5 text-sm text-gray-900 dark:text-gray-100">
+                    <Select.ItemText>{settings.model}</Select.ItemText>
+                  </Select.Item>
+                )}
+              </Select.Viewport>
+            </Select.Content>
+          </Select.Portal>
+        </Select.Root>
+        {!settings.model && <p className="text-xs text-red-500 mt-0.5">{"\u26A0"} Model is required</p>}
+        <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-1">Only models that support chat completions are listed.</p>
+      </section>
+
+      {/* Theme / Appearance */}
+      <section className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 px-4 py-3 mb-3">
+        <h2 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase mb-1.5">Appearance</h2>
+        <div className="flex gap-2">
+          {(["system", "light", "dark"] as const).map((t) => (
+            <button
+              key={t}
+              onClick={() => {
+                invoke("log_action", { action: `Theme changed to: ${t}` }).catch(() => {});
+                themeCtx.changeTheme(t);
+                setSettings({ ...settings, theme: t });
+              }}
+              className={`flex-1 rounded-lg px-3 py-2 text-xs font-medium transition-colors ${
+                themeCtx.theme === t
+                  ? "bg-copilot-blue text-white"
+                  : "bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600"
               }`}
             >
-              <Select.Value placeholder="— Select a model —" />
+              {t === "system" ? "\u2600\uFE0F\uD83C\uDF19 System" : t === "light" ? "\u2600\uFE0F Light" : "\uD83C\uDF19 Dark"}
+            </button>
+          ))}
+        </div>
+      </section>
+
+      {/* General — auto-start + debug */}
+      <section className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 px-4 py-3 mb-3">
+        <label className="flex items-center justify-between cursor-pointer">
+          <span className="text-sm text-gray-700 dark:text-gray-300">Start on Windows login</span>
+          <Checkbox.Root
+            checked={settings.auto_start}
+            onCheckedChange={(checked) => {
+              invoke("log_action", { action: `Auto-start ${checked ? "enabled" : "disabled"}` }).catch(() => {});
+              setSettings({ ...settings, auto_start: !!checked });
+            }}
+            className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${
+              settings.auto_start
+                ? "bg-copilot-blue border-copilot-blue"
+                : "border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700"
+            }`}
+          >
+            <Checkbox.Indicator>
+              <Check size={12} className="text-white" />
+            </Checkbox.Indicator>
+          </Checkbox.Root>
+        </label>
+        <label className="flex items-center justify-between cursor-pointer mt-2">
+          <div>
+            <span className="text-sm text-gray-700 dark:text-gray-300">Debug logging</span>
+            <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5">Log LLM prompts and responses to the log file for troubleshooting.</p>
+          </div>
+          <Checkbox.Root
+            checked={settings.debug_mode}
+            onCheckedChange={(checked) => {
+              invoke("log_action", { action: `Debug mode ${checked ? "enabled" : "disabled"}` }).catch(() => {});
+              setSettings({ ...settings, debug_mode: !!checked });
+            }}
+            className={`w-4 h-4 rounded border flex items-center justify-center ml-3 flex-shrink-0 transition-colors ${
+              settings.debug_mode
+                ? "bg-copilot-blue border-copilot-blue"
+                : "border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700"
+            }`}
+          >
+            <Checkbox.Indicator>
+              <Check size={12} className="text-white" />
+            </Checkbox.Indicator>
+          </Checkbox.Root>
+        </label>
+      </section>
+    </>
+  );
+
+  const renderAssistantTab = () => (
+    <>
+      {/* Read Assistant */}
+      <section className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 px-4 py-3 mb-3">
+        <label className="flex items-center justify-between cursor-pointer">
+          <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">{"\uD83D\uDCD6"} Read Assistant</span>
+          <Checkbox.Root
+            checked={settings.read_mode_enabled}
+            onCheckedChange={(checked) => {
+              invoke("log_action", { action: `Read assistant ${checked ? "enabled" : "disabled"}` }).catch(() => {});
+              setSettings({ ...settings, read_mode_enabled: !!checked });
+            }}
+            className={`w-4 h-4 rounded border flex items-center justify-center ml-3 flex-shrink-0 transition-colors ${
+              settings.read_mode_enabled
+                ? "bg-copilot-blue border-copilot-blue"
+                : "border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700"
+            }`}
+          >
+            <Checkbox.Indicator>
+              <Check size={12} className="text-white" />
+            </Checkbox.Indicator>
+          </Checkbox.Root>
+        </label>
+        <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-1 mb-3">Select text on webpages, PDFs, or messages to translate and understand. AI auto-selects the best mode.</p>
+
+        <div className="space-y-2.5">
+          <div>
+            <label className="text-[11px] font-medium text-gray-500 dark:text-gray-400">Target Language</label>
+            <Select.Root
+              value={settings.native_language}
+              onValueChange={(value) => {
+                invoke("log_action", { action: `Read assistant target language changed to: ${value}` }).catch(() => {});
+                setSettings({ ...settings, native_language: value });
+              }}
+            >
+              <Select.Trigger className="w-full mt-0.5 rounded border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-gray-100 px-2.5 py-1.5 text-sm focus:border-copilot-blue focus:outline-none focus:ring-1 focus:ring-copilot-blue flex items-center justify-between">
+                <Select.Value />
+                <Select.Icon>
+                  <ChevronDown size={14} className="text-gray-400" />
+                </Select.Icon>
+              </Select.Trigger>
+              <Select.Portal>
+                <Select.Content className="bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 overflow-hidden z-50" position="popper" sideOffset={4}>
+                  <Select.Viewport className="p-1 max-h-[250px]">
+                    {LANGUAGES.map((lang) => (
+                      <Select.Item key={lang} value={lang} className="px-2.5 py-1.5 text-sm text-gray-900 dark:text-gray-100 rounded cursor-pointer outline-none data-[highlighted]:bg-gray-100 dark:data-[highlighted]:bg-gray-700 flex items-center gap-2">
+                        <Select.ItemText>{lang}</Select.ItemText>
+                        <Select.ItemIndicator>
+                          <Check size={12} className="text-copilot-blue" />
+                        </Select.ItemIndicator>
+                      </Select.Item>
+                    ))}
+                  </Select.Viewport>
+                </Select.Content>
+              </Select.Portal>
+            </Select.Root>
+            <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5">Your mother tongue. Translations, explanations, and vocabulary notes appear in this language.</p>
+          </div>
+        </div>
+      </section>
+
+      {/* Write Assistant */}
+      <section className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 px-4 py-3 mb-3">
+        <div className="flex items-center justify-between mb-1">
+          <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">{"\u270D\uFE0F"} Write Assistant</span>
+        </div>
+        <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5 mb-3">Select text in input fields to translate, polish, and rewrite. Always on.</p>
+
+        <div className="space-y-2.5">
+          <div>
+            <label className="text-[11px] font-medium text-gray-500 dark:text-gray-400">Target Language</label>
+            <Select.Root
+              value={settings.target_language}
+              onValueChange={(value) => {
+                invoke("log_action", { action: `Write assistant target language changed to: ${value}` }).catch(() => {});
+                setSettings({ ...settings, target_language: value });
+              }}
+            >
+              <Select.Trigger className="w-full mt-0.5 rounded border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-gray-100 px-2.5 py-1.5 text-sm focus:border-copilot-blue focus:outline-none focus:ring-1 focus:ring-copilot-blue flex items-center justify-between">
+                <Select.Value />
+                <Select.Icon>
+                  <ChevronDown size={14} className="text-gray-400" />
+                </Select.Icon>
+              </Select.Trigger>
+              <Select.Portal>
+                <Select.Content className="bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 overflow-hidden z-50" position="popper" sideOffset={4}>
+                  <Select.Viewport className="p-1 max-h-[250px]">
+                    {LANGUAGES.map((lang) => (
+                      <Select.Item key={lang} value={lang} className="px-2.5 py-1.5 text-sm text-gray-900 dark:text-gray-100 rounded cursor-pointer outline-none data-[highlighted]:bg-gray-100 dark:data-[highlighted]:bg-gray-700 flex items-center gap-2">
+                        <Select.ItemText>{lang}</Select.ItemText>
+                        <Select.ItemIndicator>
+                          <Check size={12} className="text-copilot-blue" />
+                        </Select.ItemIndicator>
+                      </Select.Item>
+                    ))}
+                  </Select.Viewport>
+                </Select.Content>
+              </Select.Portal>
+            </Select.Root>
+            <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5">Your translated output language. Final polished text will be in this language.</p>
+          </div>
+        </div>
+      </section>
+    </>
+  );
+
+  const renderReplaceTab = () => (
+    <>
+      {/* Smart Replace — Default Mode */}
+      <section className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 px-4 py-3 mb-3">
+        <div className="flex items-center justify-between mb-1">
+          <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">{"\uD83D\uDD04"} Smart Replace</span>
+        </div>
+        <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5 mb-3">
+          Auto-detect how to paste replaced text based on the target app.
+        </p>
+
+        <div className="mb-3">
+          <label className="text-[11px] font-medium text-gray-500 dark:text-gray-400">Default Mode</label>
+          <Select.Root
+            value={settings.global_replace_mode}
+            onValueChange={(value) => {
+              invoke("log_action", { action: `Global replace mode changed to: ${value}` }).catch(() => {});
+              setSettings({ ...settings, global_replace_mode: value as ReplaceMode });
+            }}
+          >
+            <Select.Trigger className="w-full mt-0.5 rounded border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-gray-100 px-2.5 py-1.5 text-sm focus:border-copilot-blue focus:outline-none focus:ring-1 focus:ring-copilot-blue flex items-center justify-between">
+              <Select.Value />
               <Select.Icon>
                 <ChevronDown size={14} className="text-gray-400" />
               </Select.Icon>
             </Select.Trigger>
             <Select.Portal>
-              <Select.Content
-                className="bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 overflow-hidden z-50"
-                position="popper"
-                sideOffset={4}
-              >
-                <Select.Viewport className="p-1 max-h-[300px]">
-                  {(() => {
-                    const grouped = models.reduce<Record<string, CopilotModel[]>>((acc, m) => {
-                      const vendor = m.vendor || "Other";
-                      (acc[vendor] = acc[vendor] || []).push(m);
-                      return acc;
-                    }, {});
-                    const sortedVendors = Object.keys(grouped).sort();
-                    return sortedVendors.map((vendor) => (
-                      <Select.Group key={vendor}>
-                        <Select.Label className="px-2.5 py-1 text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase">{vendor}</Select.Label>
-                        {grouped[vendor].sort((a, b) => a.name.localeCompare(b.name)).map((model) => (
-                          <Select.Item
-                            key={model.id}
-                            value={model.id}
-                            className="px-2.5 py-1.5 text-sm text-gray-900 dark:text-gray-100 rounded cursor-pointer outline-none data-[highlighted]:bg-gray-100 dark:data-[highlighted]:bg-gray-700 flex items-center gap-2"
-                          >
-                            <Select.ItemText>
-                              {model.name}{model.preview ? " (Preview)" : ""}{model.category === "powerful" ? " ⚡" : ""}
-                            </Select.ItemText>
-                            <Select.ItemIndicator>
-                              <Check size={12} className="text-copilot-blue" />
-                            </Select.ItemIndicator>
-                          </Select.Item>
-                        ))}
-                      </Select.Group>
-                    ));
-                  })()}
-                  {models.length === 0 && settings.model && (
-                    <Select.Item value={settings.model} className="px-2.5 py-1.5 text-sm text-gray-900 dark:text-gray-100">
-                      <Select.ItemText>{settings.model}</Select.ItemText>
+              <Select.Content className="bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 overflow-hidden z-50" position="popper" sideOffset={4}>
+                <Select.Viewport className="p-1">
+                  {([
+                    { value: "Rendered", label: "Rich Text \u2014 HTML paste (Teams, Outlook, Word)" },
+                    { value: "Markdown", label: "Markdown \u2014 raw source (GitHub, GitLab, Slack)" },
+                    { value: "Plain", label: "Plain Text \u2014 no formatting (Notepad, terminal)" },
+                  ] as const).map((opt) => (
+                    <Select.Item key={opt.value} value={opt.value} className="px-2.5 py-1.5 text-sm text-gray-900 dark:text-gray-100 rounded cursor-pointer outline-none data-[highlighted]:bg-gray-100 dark:data-[highlighted]:bg-gray-700 flex items-center gap-2">
+                      <Select.ItemText>{opt.label}</Select.ItemText>
+                      <Select.ItemIndicator>
+                        <Check size={12} className="text-copilot-blue" />
+                      </Select.ItemIndicator>
                     </Select.Item>
-                  )}
+                  ))}
                 </Select.Viewport>
               </Select.Content>
             </Select.Portal>
           </Select.Root>
-          {!settings.model && <p className="text-xs text-red-500 mt-0.5">⚠ Model is required</p>}
-          <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-1">Only models that support chat completions are listed.</p>
-        </section>
+          <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5">Used when no app-specific rule matches.</p>
+        </div>
+      </section>
 
-        {/* ── Read Assistant ── */}
-        <section className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 px-4 py-3 mb-3">
-          <label className="flex items-center justify-between cursor-pointer">
-            <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">📖 Read Assistant</span>
-            <Checkbox.Root
-              checked={settings.read_mode_enabled}
-              onCheckedChange={(checked) => {
-                invoke("log_action", { action: `Read assistant ${checked ? "enabled" : "disabled"}` }).catch(() => {});
-                setSettings({ ...settings, read_mode_enabled: !!checked });
-              }}
-              className={`w-4 h-4 rounded border flex items-center justify-center ml-3 flex-shrink-0 transition-colors ${
-                settings.read_mode_enabled
-                  ? "bg-copilot-blue border-copilot-blue"
-                  : "border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700"
-              }`}
-            >
-              <Checkbox.Indicator>
-                <Check size={12} className="text-white" />
-              </Checkbox.Indicator>
-            </Checkbox.Root>
-          </label>
-          <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-1 mb-3">Select text on webpages, PDFs, or messages to translate and understand. AI auto-selects the best mode.</p>
+      {/* App-Specific Rules */}
+      <section className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 px-4 py-3 mb-3">
+        <h2 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase mb-1.5">App-Specific Rules</h2>
+        <p className="text-[10px] text-gray-400 dark:text-gray-500 mb-3">
+          Rules are matched top-to-bottom; first match wins. When you change the replace mode in the popup, a rule is automatically created here.
+        </p>
 
-          <div className="space-y-2.5">
-            <div>
-              <label className="text-[11px] font-medium text-gray-500 dark:text-gray-400">Target Language</label>
-              <Select.Root
-                value={settings.native_language}
-                onValueChange={(value) => {
-                  invoke("log_action", { action: `Read assistant target language changed to: ${value}` }).catch(() => {});
-                  setSettings({ ...settings, native_language: value });
-                }}
-              >
-                <Select.Trigger className="w-full mt-0.5 rounded border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-gray-100 px-2.5 py-1.5 text-sm focus:border-copilot-blue focus:outline-none focus:ring-1 focus:ring-copilot-blue flex items-center justify-between">
-                  <Select.Value />
-                  <Select.Icon>
-                    <ChevronDown size={14} className="text-gray-400" />
-                  </Select.Icon>
-                </Select.Trigger>
-                <Select.Portal>
-                  <Select.Content className="bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 overflow-hidden z-50" position="popper" sideOffset={4}>
-                    <Select.Viewport className="p-1 max-h-[250px]">
-                      {LANGUAGES.map((lang) => (
-                        <Select.Item key={lang} value={lang} className="px-2.5 py-1.5 text-sm text-gray-900 dark:text-gray-100 rounded cursor-pointer outline-none data-[highlighted]:bg-gray-100 dark:data-[highlighted]:bg-gray-700 flex items-center gap-2">
-                          <Select.ItemText>{lang}</Select.ItemText>
-                          <Select.ItemIndicator>
-                            <Check size={12} className="text-copilot-blue" />
-                          </Select.ItemIndicator>
-                        </Select.Item>
-                      ))}
-                    </Select.Viewport>
-                  </Select.Content>
-                </Select.Portal>
-              </Select.Root>
-              <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5">Your mother tongue. Translations, explanations, and vocabulary notes appear in this language.</p>
+        {settings.replace_rules.length > 0 ? (
+          <div className="space-y-1.5 mb-3">
+            {/* Header row */}
+            <div className="grid grid-cols-[1fr_1fr_100px_28px] gap-1.5 items-center">
+              <span className="text-[10px] font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wide px-1">Process</span>
+              <span className="text-[10px] font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wide px-1">Title Contains</span>
+              <span className="text-[10px] font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wide px-1">Mode</span>
+              <span />
             </div>
-          </div>
-        </section>
-
-        {/* ── Write Assistant ── */}
-        <section className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 px-4 py-3 mb-3">
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">✍️ Write Assistant</span>
-          </div>
-          <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5 mb-3">Select text in input fields to translate, polish, and rewrite. Always on.</p>
-
-          <div className="space-y-2.5">
-            <div>
-              <label className="text-[11px] font-medium text-gray-500 dark:text-gray-400">Target Language</label>
-              <Select.Root
-                value={settings.target_language}
-                onValueChange={(value) => {
-                  invoke("log_action", { action: `Write assistant target language changed to: ${value}` }).catch(() => {});
-                  setSettings({ ...settings, target_language: value });
-                }}
-              >
-                <Select.Trigger className="w-full mt-0.5 rounded border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-gray-100 px-2.5 py-1.5 text-sm focus:border-copilot-blue focus:outline-none focus:ring-1 focus:ring-copilot-blue flex items-center justify-between">
-                  <Select.Value />
-                  <Select.Icon>
-                    <ChevronDown size={14} className="text-gray-400" />
-                  </Select.Icon>
-                </Select.Trigger>
-                <Select.Portal>
-                  <Select.Content className="bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 overflow-hidden z-50" position="popper" sideOffset={4}>
-                    <Select.Viewport className="p-1 max-h-[250px]">
-                      {LANGUAGES.map((lang) => (
-                        <Select.Item key={lang} value={lang} className="px-2.5 py-1.5 text-sm text-gray-900 dark:text-gray-100 rounded cursor-pointer outline-none data-[highlighted]:bg-gray-100 dark:data-[highlighted]:bg-gray-700 flex items-center gap-2">
-                          <Select.ItemText>{lang}</Select.ItemText>
-                          <Select.ItemIndicator>
-                            <Check size={12} className="text-copilot-blue" />
-                          </Select.ItemIndicator>
-                        </Select.Item>
-                      ))}
-                    </Select.Viewport>
-                  </Select.Content>
-                </Select.Portal>
-              </Select.Root>
-              <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5">Your translated output language. Final polished text will be in this language.</p>
-            </div>
-          </div>
-        </section>
-
-        {/* ── Popup Icon Position ── */}
-        <section className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 px-4 py-3 mb-3">
-          <h2 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase mb-2">Popup Icon Position</h2>
-          <p className="text-[10px] text-gray-400 dark:text-gray-500 mb-2">Where the icon appears relative to selected text.</p>
-          <div className="flex items-center gap-4">
-            {/* Visual position picker */}
-            <div className="relative w-[120px] h-[80px] flex-shrink-0">
-              {/* Selected text representation */}
-              <div className="absolute inset-x-3 top-1/2 -translate-y-1/2 h-[20px] rounded bg-blue-100 dark:bg-blue-900/40 border border-blue-200 dark:border-blue-800 flex items-center justify-center">
-                <span className="text-[8px] text-blue-400 dark:text-blue-500 font-medium tracking-wider">SELECTED TEXT</span>
-              </div>
-              {/* Position dots */}
-              {([
-                { value: "top-left", style: "top-[6px] left-3" },
-                { value: "top-center", style: "top-[6px] left-1/2 -translate-x-1/2" },
-                { value: "top-right", style: "top-[6px] right-3" },
-                { value: "bottom-left", style: "bottom-[6px] left-3" },
-                { value: "bottom-center", style: "bottom-[6px] left-1/2 -translate-x-1/2" },
-                { value: "bottom-right", style: "bottom-[6px] right-3" },
-              ] as const).map((pos) => (
-                <button
-                  key={pos.value}
-                  onClick={() => {
-                    invoke("log_action", { action: `Popup icon position changed to: ${pos.value}` }).catch(() => {});
-                    setSettings({ ...settings, popup_icon_position: pos.value });
+            {settings.replace_rules.map((rule, idx) => (
+              <div key={idx} className="grid grid-cols-[1fr_1fr_100px_28px] gap-1.5 items-center">
+                <input
+                  type="text"
+                  value={rule.process}
+                  onChange={(e) => {
+                    const rules = [...settings.replace_rules];
+                    rules[idx] = { ...rules[idx], process: e.target.value };
+                    setSettings({ ...settings, replace_rules: rules });
                   }}
-                  className={`absolute ${pos.style} w-4 h-4 rounded-full border-2 transition-all duration-200 ${
-                    settings.popup_icon_position === pos.value
-                      ? "bg-copilot-blue border-copilot-blue scale-110 shadow-md shadow-blue-300/50 dark:shadow-blue-500/30"
-                      : "bg-white dark:bg-gray-600 border-gray-300 dark:border-gray-500 hover:border-copilot-blue hover:scale-105"
-                  }`}
-                  title={pos.value.replace("-", " ")}
+                  className="rounded border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-gray-100 px-2 py-1 text-xs focus:border-copilot-blue focus:outline-none focus:ring-1 focus:ring-copilot-blue"
+                  placeholder="e.g. chrome"
                 />
-              ))}
-            </div>
-            {/* Current selection label */}
-            <div className="flex items-center gap-1.5 text-xs">
-              {(() => {
-                const iconClass = "w-4 h-4 text-copilot-blue";
-                const pos = settings.popup_icon_position;
-                if (pos === "top-left") return <ArrowUpLeft className={iconClass} />;
-                if (pos === "top-center") return <ArrowUp className={iconClass} />;
-                if (pos === "top-right") return <ArrowUpRight className={iconClass} />;
-                if (pos === "bottom-left") return <ArrowDownLeft className={iconClass} />;
-                if (pos === "bottom-center") return <ArrowDown className={iconClass} />;
-                return <ArrowDownRight className={iconClass} />;
-              })()}
-              <span className="font-medium text-gray-700 dark:text-gray-300">{
-                settings.popup_icon_position === "top-left" ? "Top Left" :
-                settings.popup_icon_position === "top-center" ? "Top Center" :
-                settings.popup_icon_position === "top-right" ? "Top Right" :
-                settings.popup_icon_position === "bottom-left" ? "Bottom Left" :
-                settings.popup_icon_position === "bottom-center" ? "Bottom Center" :
-                "Bottom Right"
-              }</span>
-            </div>
-          </div>
-        </section>
-
-        {/* General */}
-        <section className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 px-4 py-3 mb-3">
-          <label className="flex items-center justify-between cursor-pointer">
-            <span className="text-sm text-gray-700 dark:text-gray-300">Start on Windows login</span>
-            <Checkbox.Root
-              checked={settings.auto_start}
-              onCheckedChange={(checked) => {
-                invoke("log_action", { action: `Auto-start ${checked ? "enabled" : "disabled"}` }).catch(() => {});
-                setSettings({ ...settings, auto_start: !!checked });
-              }}
-              className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${
-                settings.auto_start
-                  ? "bg-copilot-blue border-copilot-blue"
-                  : "border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700"
-              }`}
-            >
-              <Checkbox.Indicator>
-                <Check size={12} className="text-white" />
-              </Checkbox.Indicator>
-            </Checkbox.Root>
-          </label>
-          <label className="flex items-center justify-between cursor-pointer mt-2">
-            <div>
-              <span className="text-sm text-gray-700 dark:text-gray-300">Debug logging</span>
-              <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5">Log LLM prompts and responses to the log file for troubleshooting.</p>
-            </div>
-            <Checkbox.Root
-              checked={settings.debug_mode}
-              onCheckedChange={(checked) => {
-                invoke("log_action", { action: `Debug mode ${checked ? "enabled" : "disabled"}` }).catch(() => {});
-                setSettings({ ...settings, debug_mode: !!checked });
-              }}
-              className={`w-4 h-4 rounded border flex items-center justify-center ml-3 flex-shrink-0 transition-colors ${
-                settings.debug_mode
-                  ? "bg-copilot-blue border-copilot-blue"
-                  : "border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700"
-              }`}
-            >
-              <Checkbox.Indicator>
-                <Check size={12} className="text-white" />
-              </Checkbox.Indicator>
-            </Checkbox.Root>
-          </label>
-        </section>
-
-        {/* Theme */}
-        <section className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 px-4 py-3 mb-3">
-          <h2 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase mb-1.5">Appearance</h2>
-          <div className="flex gap-2">
-            {(["system", "light", "dark"] as const).map((t) => (
-              <button
-                key={t}
-                onClick={() => {
-                  invoke("log_action", { action: `Theme changed to: ${t}` }).catch(() => {});
-                  themeCtx.changeTheme(t);
-                  setSettings({ ...settings, theme: t });
-                }}
-                className={`flex-1 rounded-lg px-3 py-2 text-xs font-medium transition-colors ${
-                  themeCtx.theme === t
-                    ? "bg-copilot-blue text-white"
-                    : "bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600"
-                }`}
-              >
-                {t === "system" ? "☀️🌙 System" : t === "light" ? "☀️ Light" : "🌙 Dark"}
-              </button>
+                <input
+                  type="text"
+                  value={rule.title_contains}
+                  onChange={(e) => {
+                    const rules = [...settings.replace_rules];
+                    rules[idx] = { ...rules[idx], title_contains: e.target.value };
+                    setSettings({ ...settings, replace_rules: rules });
+                  }}
+                  className="rounded border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-gray-100 px-2 py-1 text-xs focus:border-copilot-blue focus:outline-none focus:ring-1 focus:ring-copilot-blue"
+                  placeholder="(optional)"
+                />
+                <Select.Root
+                  value={rule.mode}
+                  onValueChange={(value) => {
+                    const rules = [...settings.replace_rules];
+                    rules[idx] = { ...rules[idx], mode: value as ReplaceMode };
+                    setSettings({ ...settings, replace_rules: rules });
+                  }}
+                >
+                  <Select.Trigger className="rounded border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-gray-100 px-2 py-1 text-xs focus:border-copilot-blue focus:outline-none focus:ring-1 focus:ring-copilot-blue flex items-center justify-between">
+                    <Select.Value>
+                      {rule.mode === "Rendered" ? "Rich" : rule.mode === "Markdown" ? "MD" : "Plain"}
+                    </Select.Value>
+                    <Select.Icon>
+                      <ChevronDown size={10} className="text-gray-400" />
+                    </Select.Icon>
+                  </Select.Trigger>
+                  <Select.Portal>
+                    <Select.Content className="bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 overflow-hidden z-50" position="popper" sideOffset={4}>
+                      <Select.Viewport className="p-1">
+                        <Select.Item value="Rendered" className="px-2.5 py-1 text-xs text-gray-900 dark:text-gray-100 rounded cursor-pointer outline-none data-[highlighted]:bg-gray-100 dark:data-[highlighted]:bg-gray-700 flex items-center gap-2">
+                          <Select.ItemText>Rich Text</Select.ItemText>
+                          <Select.ItemIndicator><Check size={10} className="text-copilot-blue" /></Select.ItemIndicator>
+                        </Select.Item>
+                        <Select.Item value="Markdown" className="px-2.5 py-1 text-xs text-gray-900 dark:text-gray-100 rounded cursor-pointer outline-none data-[highlighted]:bg-gray-100 dark:data-[highlighted]:bg-gray-700 flex items-center gap-2">
+                          <Select.ItemText>Markdown</Select.ItemText>
+                          <Select.ItemIndicator><Check size={10} className="text-copilot-blue" /></Select.ItemIndicator>
+                        </Select.Item>
+                        <Select.Item value="Plain" className="px-2.5 py-1 text-xs text-gray-900 dark:text-gray-100 rounded cursor-pointer outline-none data-[highlighted]:bg-gray-100 dark:data-[highlighted]:bg-gray-700 flex items-center gap-2">
+                          <Select.ItemText>Plain Text</Select.ItemText>
+                          <Select.ItemIndicator><Check size={10} className="text-copilot-blue" /></Select.ItemIndicator>
+                        </Select.Item>
+                      </Select.Viewport>
+                    </Select.Content>
+                  </Select.Portal>
+                </Select.Root>
+                <button
+                  onClick={() => {
+                    const rules = settings.replace_rules.filter((_, i) => i !== idx);
+                    setSettings({ ...settings, replace_rules: rules });
+                  }}
+                  className="flex items-center justify-center w-7 h-7 rounded text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                  title="Delete rule"
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
             ))}
           </div>
-        </section>
+        ) : (
+          <div className="text-xs text-gray-400 dark:text-gray-500 py-3 mb-3 text-center border border-dashed border-gray-200 dark:border-gray-600 rounded-lg">
+            No rules — all apps will use the default mode above.
+          </div>
+        )}
 
-        {saved && <p className="text-center text-xs text-green-500 dark:text-green-400 mt-1">✓ Saved</p>}
+        <button
+          onClick={() => {
+            setSettings({
+              ...settings,
+              replace_rules: [...settings.replace_rules, { process: "", title_contains: "", mode: "Rendered" }],
+            });
+          }}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-copilot-blue border border-copilot-blue/30 hover:bg-copilot-blue/5 dark:hover:bg-copilot-blue/10 transition-colors"
+        >
+          <Plus size={14} />
+          Add Rule
+        </button>
+      </section>
+    </>
+  );
 
-        {/* Update Section */}
+  const renderPopupTab = () => (
+    <>
+      {/* Popup Icon Position */}
+      <section className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 px-4 py-3 mb-3">
+        <h2 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase mb-2">Popup Icon Position</h2>
+        <p className="text-[10px] text-gray-400 dark:text-gray-500 mb-2">Where the icon appears relative to selected text.</p>
+        <div className="flex items-center gap-4">
+          {/* Visual position picker */}
+          <div className="relative w-[120px] h-[80px] flex-shrink-0">
+            {/* Selected text representation */}
+            <div className="absolute inset-x-3 top-1/2 -translate-y-1/2 h-[20px] rounded bg-blue-100 dark:bg-blue-900/40 border border-blue-200 dark:border-blue-800 flex items-center justify-center">
+              <span className="text-[8px] text-blue-400 dark:text-blue-500 font-medium tracking-wider">SELECTED TEXT</span>
+            </div>
+            {/* Position dots */}
+            {([
+              { value: "top-left", style: "top-[6px] left-3" },
+              { value: "top-center", style: "top-[6px] left-1/2 -translate-x-1/2" },
+              { value: "top-right", style: "top-[6px] right-3" },
+              { value: "bottom-left", style: "bottom-[6px] left-3" },
+              { value: "bottom-center", style: "bottom-[6px] left-1/2 -translate-x-1/2" },
+              { value: "bottom-right", style: "bottom-[6px] right-3" },
+            ] as const).map((pos) => (
+              <button
+                key={pos.value}
+                onClick={() => {
+                  invoke("log_action", { action: `Popup icon position changed to: ${pos.value}` }).catch(() => {});
+                  setSettings({ ...settings, popup_icon_position: pos.value });
+                }}
+                className={`absolute ${pos.style} w-4 h-4 rounded-full border-2 transition-all duration-200 ${
+                  settings.popup_icon_position === pos.value
+                    ? "bg-copilot-blue border-copilot-blue scale-110 shadow-md shadow-blue-300/50 dark:shadow-blue-500/30"
+                    : "bg-white dark:bg-gray-600 border-gray-300 dark:border-gray-500 hover:border-copilot-blue hover:scale-105"
+                }`}
+                title={pos.value.replace("-", " ")}
+              />
+            ))}
+          </div>
+          {/* Current selection label */}
+          <div className="flex items-center gap-1.5 text-xs">
+            {(() => {
+              const iconClass = "w-4 h-4 text-copilot-blue";
+              const pos = settings.popup_icon_position;
+              if (pos === "top-left") return <ArrowUpLeft className={iconClass} />;
+              if (pos === "top-center") return <ArrowUp className={iconClass} />;
+              if (pos === "top-right") return <ArrowUpRight className={iconClass} />;
+              if (pos === "bottom-left") return <ArrowDownLeft className={iconClass} />;
+              if (pos === "bottom-center") return <ArrowDown className={iconClass} />;
+              return <ArrowDownRight className={iconClass} />;
+            })()}
+            <span className="font-medium text-gray-700 dark:text-gray-300">{
+              settings.popup_icon_position === "top-left" ? "Top Left" :
+              settings.popup_icon_position === "top-center" ? "Top Center" :
+              settings.popup_icon_position === "top-right" ? "Top Right" :
+              settings.popup_icon_position === "bottom-left" ? "Bottom Left" :
+              settings.popup_icon_position === "bottom-center" ? "Bottom Center" :
+              "Bottom Right"
+            }</span>
+          </div>
+        </div>
+      </section>
+    </>
+  );
+
+  // ── Main render ──
+  return (
+    <div className="h-screen bg-gray-50 dark:bg-gray-900 flex flex-col overflow-hidden">
+      {/* Header */}
+      <div className="px-5 pt-4 pb-2 flex-shrink-0">
+        <h1 className="text-lg font-bold text-gray-900 dark:text-gray-100 mb-0.5">Copilot Rewrite</h1>
+        <p className="text-xs text-gray-500 dark:text-gray-400">Settings</p>
+      </div>
+
+      {/* Two-column body */}
+      <div className="flex flex-1 min-h-0 px-4">
+        {/* Left sidebar — Tab menu */}
+        <nav className="w-36 flex-shrink-0 pr-3 py-2 space-y-0.5">
+          {TABS.map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`w-full text-left px-3 py-2 rounded-md text-sm transition-colors flex items-center gap-2 ${
+                activeTab === tab.id
+                  ? "bg-copilot-blue/10 text-copilot-blue font-medium border-l-2 border-copilot-blue"
+                  : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 border-l-2 border-transparent"
+              }`}
+            >
+              <span className="text-base leading-none">{tab.icon}</span>
+              {tab.label}
+            </button>
+          ))}
+        </nav>
+
+        {/* Right content area */}
+        <main className="flex-1 overflow-y-auto py-2 pl-3 border-l border-gray-200 dark:border-gray-700">
+          {activeTab === "general" && renderGeneralTab()}
+          {activeTab === "assistant" && renderAssistantTab()}
+          {activeTab === "replace" && renderReplaceTab()}
+          {activeTab === "popup" && renderPopupTab()}
+
+          {/* Saved indicator */}
+          {saved && <p className="text-center text-xs text-green-500 dark:text-green-400 mt-1">{"\u2713"} Saved</p>}
+        </main>
+      </div>
+
+      {/* Footer */}
+      <div className="flex-shrink-0 border-t border-gray-200 dark:border-gray-700 px-5 py-2">
+        {/* Update notifications */}
         {updater.status === "available" && (
-          <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg px-4 py-3 mt-3">
+          <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg px-4 py-3 mb-2">
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium text-blue-900 dark:text-blue-300">
@@ -605,7 +836,7 @@ const SettingsPanel: FC<{ themeCtx: ThemeCtx }> = ({ themeCtx }) => {
           </div>
         )}
         {updater.status === "downloading" && (
-          <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg px-4 py-3 mt-3">
+          <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg px-4 py-3 mb-2">
             <p className="text-sm font-medium text-blue-900 dark:text-blue-300 mb-2">Downloading update... {updater.progress}%</p>
             <Progress.Root className="w-full bg-blue-200 rounded-full h-1.5 overflow-hidden" value={updater.progress}>
               <Progress.Indicator
@@ -616,17 +847,17 @@ const SettingsPanel: FC<{ themeCtx: ThemeCtx }> = ({ themeCtx }) => {
           </div>
         )}
         {updater.status === "ready" && (
-          <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg px-4 py-3 mt-3">
-            <p className="text-sm font-medium text-green-800 dark:text-green-400">✓ Update installed — restarting...</p>
+          <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg px-4 py-3 mb-2">
+            <p className="text-sm font-medium text-green-800 dark:text-green-400">{"\u2713"} Update installed — restarting...</p>
           </div>
         )}
         {updater.status === "error" && (
-          <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg px-4 py-2 mt-3">
+          <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg px-4 py-2 mb-2">
             <p className="text-xs text-red-600 dark:text-red-400">{updater.error}</p>
           </div>
         )}
 
-        <div className="flex items-center justify-between mt-3 text-xs text-gray-400 dark:text-gray-500">
+        <div className="flex items-center justify-between text-xs text-gray-400 dark:text-gray-500">
           <div className="flex items-center gap-1.5">
             <button
               onClick={() => {
@@ -660,7 +891,7 @@ const SettingsPanel: FC<{ themeCtx: ThemeCtx }> = ({ themeCtx }) => {
                 className="hover:text-copilot-blue transition-colors"
                 title="Check for updates"
               >
-                {updater.status === "upToDate" ? "✓ Up to date" : "Check updates"}
+                {updater.status === "upToDate" ? "\u2713 Up to date" : "Check updates"}
               </button>
             ) : null}
             <a href="#" onClick={(e) => { e.preventDefault(); open(`https://github.com/wangmingliang-ms/copilot-rewrite/releases/tag/v${appVersion}`); }} className="hover:underline">v{appVersion}</a>

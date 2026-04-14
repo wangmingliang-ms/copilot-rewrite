@@ -11,6 +11,7 @@ pub mod tray;
 
 use log::{info, warn, LevelFilter};
 use parking_lot::Mutex;
+use pulldown_cmark::{Event, Parser, Tag, TagEnd};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -101,6 +102,14 @@ pub struct SelectionInfo {
     /// false = non-input element (Read Mode)
     #[serde(default = "default_true")]
     pub is_input_element: bool,
+    /// Resolved replace mode for this selection ("markdown", "rendered", or "plain").
+    /// Determined at selection time based on app_name, window_title, and replace rules.
+    #[serde(default = "default_replace_mode_str")]
+    pub replace_mode: String,
+}
+
+fn default_replace_mode_str() -> String {
+    "rendered".to_string()
 }
 
 fn default_true() -> bool {
@@ -113,6 +122,34 @@ pub enum SelectionSource {
     UIA,
     /// Detected via clipboard monitoring (fallback)
     Clipboard,
+}
+
+/// Replace mode for pasting translated text back into the target application
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum ReplaceMode {
+    /// Paste Markdown source text (for apps like GitHub, GitLab, Reddit, Slack)
+    Markdown,
+    /// Render Markdown to HTML and paste via CF_HTML (for Teams, Outlook, Word, etc.)
+    Rendered,
+    /// Strip all Markdown formatting and paste plain text (for Notepad, terminals, etc.)
+    Plain,
+}
+
+impl Default for ReplaceMode {
+    fn default() -> Self {
+        ReplaceMode::Rendered
+    }
+}
+
+/// A rule for auto-detecting replace mode based on process name and window title
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReplaceRule {
+    /// Process name substring match (case-insensitive)
+    pub process: String,
+    /// Window title substring match (case-insensitive). Empty = match process only.
+    pub title_contains: String,
+    /// The replace mode to use when this rule matches
+    pub mode: ReplaceMode,
 }
 
 /// User-configurable settings
@@ -133,9 +170,12 @@ pub struct Settings {
     pub creative_mode: bool,
     /// AI model to use (e.g. "gpt-4o", "claude-3.5-sonnet")
     pub model: String,
-    /// Replace mode: "rendered" (rich text) or "markdown" (plain text)
-    #[serde(default = "default_replace_mode")]
-    pub replace_mode: String,
+    /// Global default replace mode when no rule matches
+    #[serde(default)]
+    pub global_replace_mode: ReplaceMode,
+    /// Ordered list of rules for auto-detecting replace mode by app/window title
+    #[serde(default = "default_replace_rules")]
+    pub replace_rules: Vec<ReplaceRule>,
     /// Theme: "system" (follow OS), "light", or "dark"
     #[serde(default = "default_theme")]
     pub theme: String,
@@ -160,8 +200,31 @@ pub struct Settings {
     pub debug_mode: bool,
 }
 
-fn default_replace_mode() -> String {
-    "rendered".to_string()
+fn default_replace_rules() -> Vec<ReplaceRule> {
+    vec![
+        // Browsers + GitHub → Markdown
+        ReplaceRule { process: "msedge".into(), title_contains: "github.com".into(), mode: ReplaceMode::Markdown },
+        ReplaceRule { process: "chrome".into(), title_contains: "github.com".into(), mode: ReplaceMode::Markdown },
+        ReplaceRule { process: "firefox".into(), title_contains: "github.com".into(), mode: ReplaceMode::Markdown },
+        // Browsers + GitLab → Markdown
+        ReplaceRule { process: "msedge".into(), title_contains: "gitlab".into(), mode: ReplaceMode::Markdown },
+        ReplaceRule { process: "chrome".into(), title_contains: "gitlab".into(), mode: ReplaceMode::Markdown },
+        // Browsers + Reddit → Markdown
+        ReplaceRule { process: "msedge".into(), title_contains: "reddit.com".into(), mode: ReplaceMode::Markdown },
+        ReplaceRule { process: "chrome".into(), title_contains: "reddit.com".into(), mode: ReplaceMode::Markdown },
+        // Rich text apps → Rendered
+        ReplaceRule { process: "ms-teams".into(), title_contains: String::new(), mode: ReplaceMode::Rendered },
+        ReplaceRule { process: "Teams".into(), title_contains: String::new(), mode: ReplaceMode::Rendered },
+        ReplaceRule { process: "OUTLOOK".into(), title_contains: String::new(), mode: ReplaceMode::Rendered },
+        ReplaceRule { process: "WINWORD".into(), title_contains: String::new(), mode: ReplaceMode::Rendered },
+        ReplaceRule { process: "lark".into(), title_contains: String::new(), mode: ReplaceMode::Rendered },
+        // Plain text apps → Plain
+        ReplaceRule { process: "notepad".into(), title_contains: String::new(), mode: ReplaceMode::Plain },
+        ReplaceRule { process: "WindowsTerminal".into(), title_contains: String::new(), mode: ReplaceMode::Plain },
+        ReplaceRule { process: "Code".into(), title_contains: String::new(), mode: ReplaceMode::Plain },
+        ReplaceRule { process: "cmd".into(), title_contains: String::new(), mode: ReplaceMode::Plain },
+        ReplaceRule { process: "powershell".into(), title_contains: String::new(), mode: ReplaceMode::Plain },
+    ]
 }
 
 fn default_theme() -> String {
@@ -235,7 +298,8 @@ impl Default for Settings {
             poll_interval_ms: 100,
             creative_mode: true,
             model: "claude-sonnet-4".to_string(),
-            replace_mode: "rendered".to_string(),
+            global_replace_mode: ReplaceMode::Rendered,
+            replace_rules: default_replace_rules(),
             theme: "system".to_string(),
             native_language: "Chinese (Simplified)".to_string(),
             read_mode_enabled: true,
@@ -390,6 +454,24 @@ async fn process_and_show_preview(
         overlay::expand_popup_streaming(&app);
     }
     info!("[PERF] +{}ms — emitted show-preview-loading, popup expanded", t0.elapsed().as_millis());
+
+    // Resolve replace mode only for Write Mode (Read Mode has no Replace button).
+    // Done at icon-click time so the cost is hidden behind the LLM wait.
+    if !matches!(request.action, RewriteAction::ReadModeTranslate) {
+        let sel = state.current_selection.lock();
+        let (app_name, window_title) = match sel.as_ref() {
+            Some(s) => (s.app_name.as_str(), s.window_title.as_str()),
+            None => ("", ""),
+        };
+        let mode = resolve_replace_mode(app_name, window_title, &settings.replace_rules, &settings.global_replace_mode);
+        let mode_str = match mode {
+            ReplaceMode::Markdown => "markdown",
+            ReplaceMode::Rendered => "rendered",
+            ReplaceMode::Plain => "plain",
+        };
+        info!("[PERF] +{}ms — resolved replace mode: {} (app={}, title={})", t0.elapsed().as_millis(), mode_str, app_name, window_title);
+        let _ = app.emit("replace-mode-resolved", mode_str);
+    }
 
     // Call Copilot API with cancellation support
     let native_lang = settings.native_language.clone();
@@ -692,6 +774,99 @@ fn open_log_dir() -> Result<(), String> {
     Ok(())
 }
 
+/// Resolve which replace mode to use based on app_name, window_title, and rules.
+/// Iterates through rules in order; first match wins. Falls back to default_mode.
+pub fn resolve_replace_mode(
+    app_name: &str,
+    window_title: &str,
+    rules: &[ReplaceRule],
+    default_mode: &ReplaceMode,
+) -> ReplaceMode {
+    let app_lower = app_name.to_lowercase();
+    let title_lower = window_title.to_lowercase();
+    for rule in rules {
+        let process_lower = rule.process.to_lowercase();
+        if app_lower.contains(&process_lower) {
+            if rule.title_contains.is_empty() || title_lower.contains(&rule.title_contains.to_lowercase()) {
+                return rule.mode.clone();
+            }
+        }
+    }
+    default_mode.clone()
+}
+
+/// Strip Markdown formatting and return plain text using pulldown-cmark.
+pub fn strip_markdown(markdown: &str) -> String {
+    let parser = Parser::new(markdown);
+    let mut output = String::with_capacity(markdown.len());
+
+    for event in parser {
+        match event {
+            Event::Text(text) => output.push_str(&text),
+            Event::Code(code) => output.push_str(&code),
+            Event::SoftBreak | Event::HardBreak => output.push('\n'),
+            Event::Start(Tag::CodeBlock(_)) => {}
+            Event::End(TagEnd::CodeBlock) => {
+                if !output.ends_with('\n') {
+                    output.push('\n');
+                }
+            }
+            Event::Start(Tag::Paragraph) => {
+                if !output.is_empty() && !output.ends_with('\n') {
+                    output.push('\n');
+                }
+            }
+            Event::End(TagEnd::Paragraph) => {
+                if !output.ends_with('\n') {
+                    output.push('\n');
+                }
+            }
+            Event::Start(Tag::Item) => {
+                if !output.is_empty() && !output.ends_with('\n') {
+                    output.push('\n');
+                }
+                output.push_str("• ");
+            }
+            Event::End(TagEnd::Item) => {
+                if !output.ends_with('\n') {
+                    output.push('\n');
+                }
+            }
+            Event::Start(Tag::Heading { .. }) => {
+                if !output.is_empty() && !output.ends_with('\n') {
+                    output.push('\n');
+                }
+            }
+            Event::End(TagEnd::Heading(_)) => {
+                if !output.ends_with('\n') {
+                    output.push('\n');
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // Trim trailing whitespace
+    output.trim_end().to_string()
+}
+
+/// Get the auto-detected replace mode for the current selection
+#[tauri::command]
+fn get_replace_mode(state: tauri::State<'_, Arc<AppState>>) -> String {
+    let settings = state.settings.lock().clone();
+    let selection = state.current_selection.lock().clone();
+    let (app_name, window_title) = match &selection {
+        Some(sel) => (sel.app_name.as_str(), sel.window_title.as_str()),
+        None => ("", ""),
+    };
+    let mode = resolve_replace_mode(app_name, window_title, &settings.replace_rules, &settings.global_replace_mode);
+    match mode {
+        ReplaceMode::Markdown => "markdown".to_string(),
+        ReplaceMode::Rendered => "rendered".to_string(),
+        ReplaceMode::Plain => "plain".to_string(),
+    }
+}
+
 /// Replace selected text in the source application
 /// Must restore focus to the original app window before pasting
 /// IMPORTANT: SendInput must run on a dedicated thread (not tokio async pool)
@@ -701,9 +876,18 @@ async fn replace_text(
     state: tauri::State<'_, Arc<AppState>>,
     text: String,
     html: Option<String>,
+    mode_override: Option<String>,
 ) -> Result<(), String> {
-    let replace_mode = state.settings.lock().replace_mode.clone();
-    log::info!("[REPLACE CMD] replace_text called, text_len={}, html={}, mode={}", text.len(), html.is_some(), replace_mode);
+    // Replace mode is always provided by the frontend (resolved at selection time).
+    // Parse the mode string; fall back to Rendered if somehow missing.
+    let effective_mode = match mode_override.as_deref() {
+        Some("markdown") => ReplaceMode::Markdown,
+        Some("plain") => ReplaceMode::Plain,
+        Some("rendered") | _ => ReplaceMode::Rendered,
+    };
+
+    log::info!("[REPLACE CMD] replace_text called, text_len={}, html={}, mode={:?}",
+        text.len(), html.is_some(), effective_mode);
 
     // Temporarily pause selection monitoring to prevent toolbar re-appearing
     *state.enabled.lock() = false;
@@ -721,12 +905,27 @@ async fn replace_text(
     overlay::hide_popup(&app);
     log::info!("[REPLACE CMD] popup hidden");
 
+    // Prepare clipboard content based on mode
+    let (final_text, final_html) = match effective_mode {
+        ReplaceMode::Markdown => {
+            // Paste raw markdown source text
+            (text.clone(), None)
+        }
+        ReplaceMode::Rendered => {
+            // Paste rendered HTML (if available) via CF_HTML
+            (text.clone(), html.clone())
+        }
+        ReplaceMode::Plain => {
+            // Strip markdown formatting and paste plain text
+            let plain = strip_markdown(&text);
+            (plain, None)
+        }
+    };
+
     // Run replacement on a dedicated OS thread (NOT tokio pool)
     // SendInput requires proper thread context for input injection
-    let text_clone = text.clone();
-    let html_clone = if replace_mode == "rendered" { html.clone() } else { None };
     let result = tokio::task::spawn_blocking(move || {
-        replacement::replace_selected_text(&text_clone, source_hwnd, html_clone.as_deref())
+        replacement::replace_selected_text(&final_text, source_hwnd, final_html.as_deref())
     })
     .await
     .map_err(|e| format!("Thread error: {}", e))?
@@ -802,6 +1001,90 @@ fn update_settings(
     let mut current = state.settings.lock();
     *current = settings;
     Ok(())
+}
+
+/// Upsert a replace rule based on user's choice in the popup.
+/// If an existing rule already matches this (app_name, window_title), update its mode.
+/// Otherwise, create a new rule — for browser processes, extract a domain from the title;
+/// for other apps, use process-only matching.
+#[tauri::command]
+fn upsert_replace_rule(
+    state: tauri::State<'_, Arc<AppState>>,
+    app_name: String,
+    window_title: String,
+    mode: String,
+) -> Result<(), String> {
+    let replace_mode = match mode.as_str() {
+        "markdown" => ReplaceMode::Markdown,
+        "plain" => ReplaceMode::Plain,
+        _ => ReplaceMode::Rendered,
+    };
+
+    let mut settings = state.settings.lock();
+
+    // 1) Check if an existing rule matches this (app_name, window_title).
+    //    Use the same matching logic as resolve_replace_mode.
+    let app_lower = app_name.to_lowercase();
+    let title_lower = window_title.to_lowercase();
+    let mut found = false;
+    for rule in settings.replace_rules.iter_mut() {
+        let process_lower = rule.process.to_lowercase();
+        if app_lower.contains(&process_lower) {
+            if rule.title_contains.is_empty() || title_lower.contains(&rule.title_contains.to_lowercase()) {
+                // This rule currently matches — update its mode
+                rule.mode = replace_mode.clone();
+                found = true;
+                info!("Updated existing replace rule: process={}, title={}, mode={}", rule.process, rule.title_contains, mode);
+                break;
+            }
+        }
+    }
+
+    if !found {
+        // 2) No matching rule — create a new one.
+        //    For browsers, try to extract a domain from window title.
+        let title_pattern = extract_title_pattern(&app_lower, &title_lower);
+        settings.replace_rules.insert(
+            0,
+            ReplaceRule {
+                process: app_name.clone(),
+                title_contains: title_pattern.clone(),
+                mode: replace_mode,
+            },
+        );
+        info!("Inserted new replace rule: process={}, title={}, mode={}", app_name, title_pattern, mode);
+    }
+
+    settings.save().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Extract a meaningful title_contains pattern from a window title.
+/// For browsers, tries to find a domain (e.g. "github.com" from "...github.com...").
+/// For non-browser apps, returns empty string (match by process only).
+fn extract_title_pattern(app_lower: &str, title_lower: &str) -> String {
+    let browsers = ["edge", "chrome", "firefox", "brave", "opera", "safari", "arc"];
+    let is_browser = browsers.iter().any(|b| app_lower.contains(b));
+
+    if !is_browser {
+        return String::new();
+    }
+
+    // Try to find a domain-like pattern in the title: something.tld
+    // Browser titles often look like: "Page Title - site.com - Microsoft Edge"
+    // We scan for words that look like domains
+    for word in title_lower.split(|c: char| c.is_whitespace() || c == '-' || c == '—' || c == '|') {
+        let word = word.trim();
+        if word.contains('.') && !word.starts_with('.') && !word.ends_with('.') {
+            // Looks like a domain — check it has a TLD-like part
+            let parts: Vec<&str> = word.split('.').collect();
+            if parts.len() >= 2 && parts.last().map_or(false, |tld| tld.len() >= 2) {
+                return word.to_string();
+            }
+        }
+    }
+
+    String::new()
 }
 
 /// Toggle the enabled state
@@ -939,6 +1222,7 @@ pub fn run() {
             get_settings,
             get_system_theme,
             update_settings,
+            upsert_replace_rule,
             toggle_enabled,
             is_enabled,
             dismiss_popup,
@@ -953,6 +1237,7 @@ pub fn run() {
             open_log_file,
             open_log_dir,
             log_action,
+            get_replace_mode,
         ])
         .setup(move |app| {
             let app_handle = app.handle().clone();

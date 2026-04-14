@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.16.0] - 2026-04-14
+
+### ✨ Features
+
+- **Smart Replace** — New rule-based replace mode system. The app auto-detects the best paste format (Rich Text / Markdown / Plain Text) based on the target application. Three modes: Rendered (HTML for Teams, Outlook, Word), Markdown (raw source for GitHub, GitLab, Slack), and Plain Text (for Notepad, terminals).
+- **Auto-learn replace rules** — When users manually switch the replace mode in the popup, the choice is automatically saved as an app-specific rule in Settings. For browsers, the domain is extracted from the window title to create fine-grained rules.
+- **Replace mode resolved at icon-click time** — Replace mode resolution is deferred to when the LLM request starts, hiding the resolve cost behind the LLM wait. Read Mode skips resolution entirely since it has no Replace button.
+- **Settings page tab layout** — Redesigned Settings from a single-column scroll into a left sidebar tab navigation with 4 tabs: General (Account, Model, Theme, Auto-start, Debug), Assistant (Read/Write language settings), Replace (Default mode + app-specific rules table), and Popup (Icon position picker). Window widened to 640px and made resizable.
+- **Editable replace rules in Settings** — The Replace tab shows a full editable rules table where users can add, modify, and delete app-specific replace mode rules. Rules are matched top-to-bottom with first-match-wins semantics.
+- **Upsert replace rule backend** — New `upsert_replace_rule` Tauri command with smart matching: updates existing rules that match (app_name, window_title), or creates new ones with auto-extracted domain patterns for browser windows.
+
+### 🔧 Improvements
+
+- **Settings window resizable** — Settings window now supports resizing with minimum dimensions of 560×480, making the rules table easier to use.
+- **Replace mode event** — New `replace-mode-resolved` backend event notifies the popup of the resolved replace mode, keeping the UI reactive during loading/streaming states.
+
 ## [0.15.1] - 2026-04-12
 
 ### 🐛 Bug Fixes

@@ -1,6 +1,6 @@
 [package]
 name = "copilot-rewrite"
-version = "0.15.1"
+version = "0.16.0"
 description = "System-level text translation and polishing tool for Windows"
 authors = ["Miller Wang"]
 license = "MIT"
@@ -34,6 +34,7 @@ dirs = "5"
 clipboard-win = "5"
 winreg = "0.55"
 tauri-plugin-notification = "2"
+pulldown-cmark = "0.12"
 
 [dependencies.windows]
 version = "0.58"

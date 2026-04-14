@@ -10,6 +10,13 @@ export interface SelectionInfo {
   /** Whether the selection is from an input/editable element (Write Mode).
    *  false = non-input element (Read Mode) */
   is_input_element: boolean;
+  /** Name of the source application (e.g. "Teams", "chrome") */
+  app_name?: string;
+  /** Window title of the source application */
+  window_title?: string;
+  /** Resolved replace mode ("markdown", "rendered", or "plain").
+   *  Determined at selection time based on app context and rules. */
+  replace_mode?: string;
 }
 
 /** Matches the Rust RewriteAction enum */

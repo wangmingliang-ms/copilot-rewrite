@@ -318,6 +318,9 @@ fn show_popup(app_handle: AppHandle, state: &Arc<AppState>, info: SelectionInfo)
         info.mouse_x, info.mouse_y, preview
     );
 
+    // replace_mode is resolved later at icon-click time (in process_and_show_preview)
+    // so the resolve cost is hidden behind the LLM wait.
+
     *state.current_selection.lock() = Some(info.clone());
 
     let icon_position = state.settings.lock().popup_icon_position.clone();
@@ -737,6 +740,7 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
                                 app_name,
                                 window_title,
                                 is_input_element: ms.last_is_input,
+                                replace_mode: String::new(), // resolved in show_popup()
                             };
 
                             show_popup(app_handle.clone(), &state, selection_info);

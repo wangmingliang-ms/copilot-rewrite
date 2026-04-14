@@ -8,7 +8,7 @@ import { SelectionInfo, ProcessResponse } from "../hooks/useSelection";
 import { extractJsonStringValue, stripCodeFences, extractVocabulary, parseReadModeSeparator } from "../utils/jsonParser";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import * as Select from "@radix-ui/react-select";
-import { Square, RefreshCw, ChevronDown, ChevronLeft, ChevronRight, Check, Sparkles, X, Settings, Copy, FileText, AlertCircle, Code } from "lucide-react";
+import { Square, RefreshCw, ChevronDown, ChevronLeft, ChevronRight, Check, Sparkles, X, Settings, Copy, FileText, AlertCircle, Code, Type } from "lucide-react";
 
 // ── State machine ──
 // icon (48×48) → loading (expanded, spinner) → streaming (expanded, text flowing) → expanded (final) | error
@@ -52,7 +52,9 @@ const Popup: FC<PopupProps> = ({ selection }) => {
   const [currentModelId, setCurrentModelId] = useState<string>("");
   const [models, setModels] = useState<CopilotModel[]>([]);
   const [creativeMode, setCreativeMode] = useState<boolean>(false);
-  const [replaceMode, setReplaceMode] = useState<"rendered" | "markdown">("rendered");
+  // Replace mode — resolved at selection time, user can manually switch
+  type SmartReplaceMode = "markdown" | "rendered" | "plain";
+  const [replaceMode, setReplaceMode] = useState<SmartReplaceMode>("rendered");
   const [showReplaceMenu, setShowReplaceMenu] = useState(false);
 
   // Result history for pagination
@@ -120,13 +122,12 @@ const Popup: FC<PopupProps> = ({ selection }) => {
   const refreshSettings = useCallback(async () => {
     try {
       const s = await invoke<{
-        model: string; creative_mode: boolean; replace_mode: string; theme?: string;
+        model: string; creative_mode: boolean; theme?: string;
         native_language?: string; target_language?: string; read_mode_enabled?: boolean; read_mode_sub?: string;
         write_action?: string;
       }>("get_settings");
       setCreativeMode(s.creative_mode || false);
       applyTheme(s.theme);
-      setReplaceMode((s.replace_mode === "markdown" ? "markdown" : "rendered") as "rendered" | "markdown");
       // Restore write action
       const wa = s.write_action || "TranslateAndPolish";
       if (wa === "TranslateAndPolish" || wa === "Translate" || wa === "Polish") {
@@ -200,7 +201,17 @@ const Popup: FC<PopupProps> = ({ selection }) => {
       setStreamingText(null);
       setHistory([]);
       setHistoryIndex(-1);
+      // replace mode is resolved later at icon-click time (replace-mode-resolved event)
       refreshSettings();
+    });
+
+    // Replace mode is resolved at icon-click time (in process_and_show_preview)
+    // so the resolve cost is hidden behind the LLM wait.
+    const unReplaceMode = listen<string>("replace-mode-resolved", (event) => {
+      const mode = event.payload;
+      if (mode === "markdown" || mode === "rendered" || mode === "plain") {
+        setReplaceMode(mode as SmartReplaceMode);
+      }
     });
 
     const unCancelled = listen("request-cancelled", () => {
@@ -216,6 +227,7 @@ const Popup: FC<PopupProps> = ({ selection }) => {
       unChunk.then((f) => f());
       unError.then((f) => f());
       unSelection.then((f) => f());
+      unReplaceMode.then((f) => f());
       unCancelled.then((f) => f());
     };
   }, []);
@@ -624,7 +636,7 @@ const Popup: FC<PopupProps> = ({ selection }) => {
     try {
       const html = replaceMode === "rendered" && outputHtml ? outputHtml : null;
       await invoke("log_action", { action: `Replace clicked — mode=${replaceMode}, text_len=${outputText.length}` }).catch(() => {});
-      await invoke("replace_text", { text: outputText, html });
+      await invoke("replace_text", { text: outputText, html, modeOverride: replaceMode });
       await invoke("dismiss_popup");
       resetState();
     } catch (err) {
@@ -632,15 +644,19 @@ const Popup: FC<PopupProps> = ({ selection }) => {
     }
   }, [outputText, outputHtml, replaceMode]);
 
-  const switchReplaceMode = useCallback(async (mode: "rendered" | "markdown") => {
+  const switchReplaceMode = useCallback(async (mode: SmartReplaceMode) => {
     setReplaceMode(mode);
     setShowReplaceMenu(false);
     await invoke("log_action", { action: `Replace mode changed to: ${mode}` }).catch(() => {});
-    try {
-      const s = await invoke<Record<string, unknown>>("get_settings");
-      await invoke("update_settings", { settings: { ...s, replace_mode: mode } });
-    } catch { /* non-critical */ }
-  }, []);
+    // Persist user's choice to settings rules so it's remembered for this app/window
+    if (selection?.app_name) {
+      invoke("upsert_replace_rule", {
+        appName: selection.app_name,
+        windowTitle: selection.window_title ?? "",
+        mode,
+      }).catch(() => {});
+    }
+  }, [selection]);
 
   const handleCopy = useCallback(async () => {
     if (!outputText) return;
@@ -649,7 +665,7 @@ const Popup: FC<PopupProps> = ({ selection }) => {
         await invoke("log_action", { action: `Copy clicked — mode=rendered, text_len=${outputText.length}` }).catch(() => {});
         await invoke("copy_html_to_clipboard", { html: outputHtml, text: outputText });
       } else {
-        await invoke("log_action", { action: `Copy clicked — mode=markdown, text_len=${outputText.length}` }).catch(() => {});
+        await invoke("log_action", { action: `Copy clicked — mode=${replaceMode}, text_len=${outputText.length}` }).catch(() => {});
         await invoke("copy_to_clipboard", { text: outputText });
       }
       setCopyToast(true);
@@ -942,12 +958,14 @@ const Popup: FC<PopupProps> = ({ selection }) => {
               <button
                 onClick={handleReplace}
                 className="flex items-center gap-1.5 rounded-l-md bg-copilot-blue px-2.5 py-1 text-xs font-medium text-white hover:bg-copilot-blue-hover transition-colors"
-                title={replaceMode === "rendered" ? "Replace with rendered text" : "Replace with markdown"}
+                title={`Replace with ${replaceMode === "rendered" ? "rich text" : replaceMode === "markdown" ? "markdown" : "plain text"}`}
               >
                 {replaceMode === "rendered" ? (
                   <FileText size={12} />
-                ) : (
+                ) : replaceMode === "markdown" ? (
                   <Code size={14} />
+                ) : (
+                  <Type size={12} />
                 )}
                 Replace
               </button>
@@ -962,7 +980,7 @@ const Popup: FC<PopupProps> = ({ selection }) => {
                 </DropdownMenu.Trigger>
                 <DropdownMenu.Portal>
                   <DropdownMenu.Content
-                    className="bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 py-1 min-w-[180px] z-50"
+                    className="bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 py-1 min-w-[200px] z-50"
                     sideOffset={4}
                     align="end"
                     side="top"
@@ -976,7 +994,7 @@ const Popup: FC<PopupProps> = ({ selection }) => {
                         <Check size={10} />
                       </DropdownMenu.ItemIndicator>
                       <FileText size={14} className={`flex-shrink-0 ${replaceMode !== "rendered" ? "ml-5" : ""}`} />
-                      Rendered text
+                      Rich Text
                     </DropdownMenu.CheckboxItem>
                     <DropdownMenu.CheckboxItem
                       checked={replaceMode === "markdown"}
@@ -988,6 +1006,17 @@ const Popup: FC<PopupProps> = ({ selection }) => {
                       </DropdownMenu.ItemIndicator>
                       <Code size={14} className={`flex-shrink-0 ${replaceMode !== "markdown" ? "ml-5" : ""}`} />
                       Markdown
+                    </DropdownMenu.CheckboxItem>
+                    <DropdownMenu.CheckboxItem
+                      checked={replaceMode === "plain"}
+                      onCheckedChange={() => switchReplaceMode("plain")}
+                      className={`w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 outline-none cursor-pointer ${replaceMode === "plain" ? "text-copilot-blue font-medium" : "text-gray-700 dark:text-gray-300"}`}
+                    >
+                      <DropdownMenu.ItemIndicator className="w-3 inline-flex justify-center flex-shrink-0">
+                        <Check size={10} />
+                      </DropdownMenu.ItemIndicator>
+                      <Type size={14} className={`flex-shrink-0 ${replaceMode !== "plain" ? "ml-5" : ""}`} />
+                      Plain Text
                     </DropdownMenu.CheckboxItem>
                   </DropdownMenu.Content>
                 </DropdownMenu.Portal>
