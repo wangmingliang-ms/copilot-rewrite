@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.16.2] - 2026-04-14
+
+### 🐛 Bug Fixes
+
+- **Fixed popup flickering on expand** — Clicking the popup icon would briefly flash the expanded popup at the wrong position (often near the top of the screen) before snapping to the correct location. Root cause: the frontend's resize effect fired before the backend had set the anchor position (`POPUP_BOTTOM`), causing the popup to be positioned relative to `y=0`. Fixed by guarding `resize_popup_to_content` against uninitialized state, and replacing two separate `set_size`/`set_position` Tauri calls with a single atomic `SetWindowPos` Win32 call in both `apply_expanded_layout` and `resize_popup_to_content`.
+
 ## [0.16.1] - 2026-04-14
 
 ### 🐛 Bug Fixes

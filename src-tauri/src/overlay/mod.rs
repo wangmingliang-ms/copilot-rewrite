@@ -9,7 +9,7 @@
 
 use log::{debug, error, info, warn};
 use parking_lot::Mutex;
-use tauri::{AppHandle, LogicalPosition, LogicalSize, Manager, Position};
+use tauri::{AppHandle, LogicalPosition, Manager, Position};
 use tauri::WebviewWindow;
 use windows::Win32::Foundation::{HWND, POINT};
 use windows::Win32::Graphics::Gdi::{GetMonitorInfoW, MonitorFromPoint, MONITOR_DEFAULTTONEAREST, MONITORINFO};
@@ -299,8 +299,22 @@ fn apply_expanded_layout(app_handle: &AppHandle, x: f64, y: f64, w_logical: f64,
         let content_bottom = y + height;
         *POPUP_BOTTOM.lock() = content_bottom;
 
-        let _ = window.set_size(LogicalSize::new(win_w, win_h));
-        let _ = window.set_position(Position::Logical(LogicalPosition::new(win_x, win_y)));
+        // Use a single SetWindowPos call to set position + size atomically,
+        // avoiding the visible intermediate state between separate set_size/set_position.
+        if let Ok(hwnd) = window.hwnd() {
+            let scale = window.scale_factor().unwrap_or(1.0);
+            unsafe {
+                let _ = SetWindowPos(
+                    HWND(hwnd.0 as *mut _),
+                    HWND_TOP,
+                    (win_x * scale) as i32,
+                    (win_y * scale) as i32,
+                    (win_w * scale) as i32,
+                    (win_h * scale) as i32,
+                    SWP_NOZORDER | SWP_FRAMECHANGED,
+                );
+            }
+        }
 
         info!(
             "Popup {} to {:.0}x{:.0} (content {:.0}x{:.0}) at ({:.0}, {:.0}), bottom={:.0}",
@@ -452,11 +466,16 @@ fn estimate_height(text: &str) -> f64 {
 /// Resize expanded popup to fit actual rendered content height (called from frontend)
 /// Anchors the bottom edge — grows/shrinks upward
 pub fn resize_popup_to_content(app_handle: &AppHandle, content_height: f64) {
+    let bottom = *POPUP_BOTTOM.lock();
+    if bottom == 0.0 {
+        debug!("resize_popup_to_content: POPUP_BOTTOM not set yet, skipping");
+        return;
+    }
+
     if let Some(window) = get_popup(app_handle) {
         // Add 20px buffer to avoid sub-pixel scrollbar
         let height = (content_height + 20.0).clamp(EXPANDED_MIN_HEIGHT, EXPANDED_MAX_HEIGHT);
         let stored_input = *INPUT_RECT.lock();
-        let bottom = *POPUP_BOTTOM.lock();
 
         // Determine width: use element width if available (clamped), otherwise default
         let w_logical = if let Some((_rx, ry, rw, _)) = stored_input {
@@ -495,8 +514,22 @@ pub fn resize_popup_to_content(app_handle: &AppHandle, content_height: f64) {
         let win_x = content_x - SHADOW_MARGIN;
         let win_y = content_y - SHADOW_MARGIN;
 
-        let _ = window.set_size(LogicalSize::new(win_w, win_h));
-        let _ = window.set_position(Position::Logical(LogicalPosition::new(win_x, win_y)));
+        // Use a single SetWindowPos call to set position + size atomically,
+        // avoiding the visible intermediate state between separate set_size/set_position.
+        if let Ok(hwnd) = window.hwnd() {
+            let scale = window.scale_factor().unwrap_or(1.0);
+            unsafe {
+                let _ = SetWindowPos(
+                    HWND(hwnd.0 as *mut _),
+                    HWND_TOP,
+                    (win_x * scale) as i32,
+                    (win_y * scale) as i32,
+                    (win_w * scale) as i32,
+                    (win_h * scale) as i32,
+                    SWP_NOZORDER | SWP_FRAMECHANGED,
+                );
+            }
+        }
 
         debug!("Popup resized to content: {:.0}x{:.0} (content height {:.0}), bottom anchored at {:.0}", win_w, win_h, height, bottom);
     }
