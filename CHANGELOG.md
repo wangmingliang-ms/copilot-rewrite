@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.16.1] - 2026-04-14
+
+### 🐛 Bug Fixes
+
+- **Fixed popup appearing on wrong monitor** — On multi-monitor setups, the popup would always appear on the primary monitor even when text was selected on a secondary monitor. Now uses `MonitorFromPoint` + `GetMonitorInfoW` to detect which monitor the cursor is on and clamps the popup position to that monitor's work area. Also fixes the expanded popup and content-resize positioning for multi-monitor scenarios.
+
 ## [0.16.0] - 2026-04-14
 
 ### ✨ Features

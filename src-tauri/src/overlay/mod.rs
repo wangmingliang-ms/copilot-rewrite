@@ -12,8 +12,7 @@ use parking_lot::Mutex;
 use tauri::{AppHandle, LogicalPosition, LogicalSize, Manager, Position};
 use tauri::WebviewWindow;
 use windows::Win32::Foundation::{HWND, POINT};
-use windows::Win32::Graphics::Gdi::MonitorFromPoint;
-use windows::Win32::Graphics::Gdi::MONITOR_DEFAULTTONEAREST;
+use windows::Win32::Graphics::Gdi::{GetMonitorInfoW, MonitorFromPoint, MONITOR_DEFAULTTONEAREST, MONITORINFO};
 use windows::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
 use windows::Win32::UI::WindowsAndMessaging::{
     GetWindowLongW, IsWindow, IsWindowVisible, SetWindowLongW, SetWindowPos, ShowWindow,
@@ -129,7 +128,7 @@ pub fn show_popup_icon(
 ) {
     if let Some(window) = get_popup(app_handle) {
         let scale = get_scale_at(mouse_x, mouse_y);
-        let (screen_w, screen_h, _) = get_primary_screen_info(app_handle);
+        let (mon_x, mon_y, mon_w, mon_h, _) = get_monitor_info_at(mouse_x, mouse_y);
         let icon_logical = ICON_SIZE / scale;
 
         // Position icon relative to selection bounding rect, or fallback to mouse
@@ -154,17 +153,17 @@ pub fn show_popup_icon(
             (logical_x + POPUP_OFFSET_X, logical_y + POPUP_OFFSET_Y)
         };
 
-        if x + icon_logical > screen_w {
-            x = screen_w - icon_logical - 8.0;
+        if x + icon_logical > mon_x + mon_w {
+            x = mon_x + mon_w - icon_logical - 8.0;
         }
-        if y < 0.0 {
-            y = 8.0;
+        if y < mon_y {
+            y = mon_y + 8.0;
         }
-        if x < 0.0 {
-            x = 8.0;
+        if x < mon_x {
+            x = mon_x + 8.0;
         }
-        if y + icon_logical > screen_h {
-            y = screen_h - icon_logical - 8.0;
+        if y + icon_logical > mon_y + mon_h {
+            y = mon_y + mon_h - icon_logical - 8.0;
         }
 
         // Store position, scale, and input rect for subsequent transitions
@@ -224,15 +223,24 @@ pub fn show_popup_icon(
 /// Compute expanded popup position and width given a target height.
 /// Returns (x, y, w_logical) in logical coordinates, clamped to screen bounds.
 /// Uses input element rect when available, otherwise falls back to stored popup position.
-fn compute_expanded_position(app_handle: &AppHandle, height: f64) -> (f64, f64, f64) {
-    let (screen_w, screen_h, _) = get_primary_screen_info(app_handle);
+fn compute_expanded_position(_app_handle: &AppHandle, height: f64) -> (f64, f64, f64) {
     let stored_input = *INPUT_RECT.lock();
+
+    // Determine which monitor the popup should appear on
+    let (mon_x, mon_y, mon_w, mon_h, _mon_scale) = if let Some((sx, sy, _, _)) = stored_input {
+        get_monitor_info_at(sx, sy)
+    } else {
+        let (px, py, s) = *POPUP_POS.lock();
+        get_monitor_info_at((px * s) as i32, (py * s) as i32)
+    };
+    let screen_right = mon_x + mon_w;
+    let screen_bottom = mon_y + mon_h;
 
     // Determine width and scale from selection rect (one get_scale_at call)
     let (w, scale_opt) = if let Some((_rx, ry, rw, _rh)) = stored_input {
         let scale = get_scale_at(0, ry);
         let elem_w = rw as f64 / scale;
-        (elem_w.max(EXPANDED_WIDTH).min(screen_w - 16.0), Some(scale))
+        (elem_w.max(EXPANDED_WIDTH).min(mon_w - 16.0), Some(scale))
     } else {
         (EXPANDED_WIDTH, None)
     };
@@ -248,28 +256,28 @@ fn compute_expanded_position(app_handle: &AppHandle, height: f64) -> (f64, f64, 
         let mut py = sel_y - height - 12.0;
         let mut px = sel_x;
 
-        if py < 0.0 {
+        if py < mon_y {
             // Not enough room above — place below selection
             py = sel_y + sel_h + 12.0;
         }
-        if py + height > screen_h {
-            py = screen_h - height - 8.0;
+        if py + height > screen_bottom {
+            py = screen_bottom - height - 8.0;
         }
-        if px + w > screen_w {
-            px = screen_w - w - 8.0;
+        if px + w > screen_right {
+            px = screen_right - w - 8.0;
         }
-        if px < 0.0 { px = 8.0; }
-        if py < 0.0 { py = 8.0; }
+        if px < mon_x { px = mon_x + 8.0; }
+        if py < mon_y { py = mon_y + 8.0; }
 
         (px, py, w)
     } else {
         let (stored_x, stored_y, _) = *POPUP_POS.lock();
         let mut x = stored_x;
         let mut y = stored_y;
-        if x + w > screen_w { x = screen_w - w - 8.0; }
-        if y + height > screen_h { y = screen_h - height - 8.0; }
-        if x < 0.0 { x = 8.0; }
-        if y < 0.0 { y = 8.0; }
+        if x + w > screen_right { x = screen_right - w - 8.0; }
+        if y + height > screen_bottom { y = screen_bottom - height - 8.0; }
+        if x < mon_x { x = mon_x + 8.0; }
+        if y < mon_y { y = mon_y + 8.0; }
         (x, y, w)
     }
 }
@@ -454,15 +462,24 @@ pub fn resize_popup_to_content(app_handle: &AppHandle, content_height: f64) {
         let w_logical = if let Some((_rx, ry, rw, _)) = stored_input {
             let scale = get_scale_at(0, ry);
             let elem_w = rw as f64 / scale;
-            elem_w.max(EXPANDED_WIDTH).min(1920.0)
+            let (_, _, mon_w, _, _) = get_monitor_info_at(_rx, ry);
+            elem_w.max(EXPANDED_WIDTH).min(mon_w - 16.0)
         } else {
             EXPANDED_WIDTH
         };
 
         // Anchor bottom edge: content top = bottom - height
         let mut content_y = bottom - height;
-        if content_y < 0.0 {
-            content_y = 0.0;
+        // Get the monitor that contains the popup (use stored input_rect or current position)
+        let (_mon_x, mon_y, _, _, _) = if let Some((sx, sy, _, _)) = stored_input {
+            get_monitor_info_at(sx, sy)
+        } else if let Ok(pos) = window.outer_position() {
+            get_monitor_info_at(pos.x, pos.y)
+        } else {
+            (0.0, 0.0, 1920.0, 1080.0, 1.0)
+        };
+        if content_y < mon_y {
+            content_y = mon_y;
         }
 
         // Get current X position (keep it stable)
@@ -497,12 +514,37 @@ fn get_scale_at(x: i32, y: i32) -> f64 {
     }
 }
 
-fn get_primary_screen_info(app_handle: &AppHandle) -> (f64, f64, f64) {
-    if let Some(monitor) = app_handle.primary_monitor().ok().flatten() {
-        let size = monitor.size();
-        let scale = monitor.scale_factor();
-        (size.width as f64 / scale, size.height as f64 / scale, scale)
-    } else {
-        (1920.0, 1080.0, 1.0)
+/// Get the monitor work area (logical coordinates) at the given physical pixel coordinates.
+/// Returns (x, y, width, height, scale) of the monitor's work area.
+/// Work area excludes taskbar, unlike full monitor bounds.
+fn get_monitor_info_at(phys_x: i32, phys_y: i32) -> (f64, f64, f64, f64, f64) {
+    unsafe {
+        let point = POINT { x: phys_x, y: phys_y };
+        let hmonitor = MonitorFromPoint(point, MONITOR_DEFAULTTONEAREST);
+
+        // Get DPI for this monitor
+        let mut dpi_x: u32 = 96;
+        let mut dpi_y: u32 = 96;
+        let _ = GetDpiForMonitor(hmonitor, MDT_EFFECTIVE_DPI, &mut dpi_x, &mut dpi_y);
+        let scale = dpi_x as f64 / 96.0;
+
+        // Get monitor work area (physical pixels)
+        let mut info = MONITORINFO {
+            cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+            ..Default::default()
+        };
+        if GetMonitorInfoW(hmonitor, &mut info).as_bool() {
+            let work = info.rcWork;
+            (
+                work.left as f64 / scale,
+                work.top as f64 / scale,
+                (work.right - work.left) as f64 / scale,
+                (work.bottom - work.top) as f64 / scale,
+                scale,
+            )
+        } else {
+            // Fallback: assume primary monitor at origin
+            (0.0, 0.0, 1920.0, 1080.0, 1.0)
+        }
     }
 }
