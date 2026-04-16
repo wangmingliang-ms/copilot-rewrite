@@ -40,17 +40,22 @@ pub fn set_html(html: &str, plain_text: &str) -> Result<()> {
     let _ = raw::empty();
 
     // Set CF_UNICODETEXT (plain text fallback)
+    // Use set_without_clear because we already called raw::empty() above.
+    // raw::set() would call empty() again, which is fine for the first format
+    // but would wipe previously-set formats if used for subsequent calls.
     let wide: Vec<u16> = plain_text.encode_utf16().chain(std::iter::once(0)).collect();
     let text_bytes: &[u8] = unsafe {
         std::slice::from_raw_parts(wide.as_ptr() as *const u8, wide.len() * 2)
     };
-    if let Err(e) = raw::set(formats::CF_UNICODETEXT, text_bytes) {
+    if let Err(e) = raw::set_without_clear(formats::CF_UNICODETEXT, text_bytes) {
         let _ = raw::close();
         anyhow::bail!("Failed to set clipboard text: {}", e);
     }
 
     // Set CF_HTML (rich text)
-    if let Err(e) = raw::set(html_format, cf_html.as_bytes()) {
+    // MUST use set_without_clear — raw::set() empties the clipboard first,
+    // which would wipe the CF_UNICODETEXT we just set above.
+    if let Err(e) = raw::set_without_clear(html_format, cf_html.as_bytes()) {
         debug!("Failed to set CF_HTML (non-fatal): {}", e);
     }
 
@@ -113,7 +118,7 @@ impl Drop for ClipboardGuard {
     fn drop(&mut self) {
         if let Some(ref text) = self.saved_text {
             // Small delay to ensure the Ctrl+V paste has completed
-            std::thread::sleep(std::time::Duration::from_millis(100));
+            std::thread::sleep(std::time::Duration::from_millis(150));
 
             match set_text(text) {
                 Ok(_) => debug!("Restored clipboard content"),

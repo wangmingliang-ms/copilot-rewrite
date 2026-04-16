@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.16.3] - 2026-04-16
+
+### 🐛 Bug Fixes
+
+- **Fixed Replace pasting empty content in Rendered mode** — When Replace mode was set to "Rendered" (rich HTML paste), the clipboard would end up with only the CF_HTML format and no CF_UNICODETEXT fallback, causing most input fields to paste nothing. Root cause: `clipboard_win::raw::set()` calls `EmptyClipboard()` internally, so the second `raw::set(CF_HTML)` call was wiping the CF_UNICODETEXT that was set moments before. Fixed by switching to `raw::set_without_clear()` for both formats after an explicit `raw::empty()` call.
+
 ## [0.16.2] - 2026-04-14
 
 ### 🐛 Bug Fixes
