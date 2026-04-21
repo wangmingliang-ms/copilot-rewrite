@@ -147,7 +147,17 @@ const Popup: FC<PopupProps> = ({ selection }) => {
         setModels(fetchedModels);
         const match = fetchedModels.find((m) => m.id === s.model);
         setCurrentModel(match ? match.name : s.model);
-      } catch {
+      } catch (err) {
+        // If models failed to load, retry after a short delay (token might not be ready yet)
+        console.warn("Failed to load models, will retry:", err);
+        setTimeout(async () => {
+          try {
+            const retried = await invoke<CopilotModel[]>("list_models");
+            setModels(retried);
+          } catch {
+            // Still failed - set empty but user can try manually via Settings
+          }
+        }, 2000);
         setCurrentModel(s.model);
       }
     } catch { /* ignore */ }
@@ -537,6 +547,9 @@ const Popup: FC<PopupProps> = ({ selection }) => {
   const handleStop = useCallback(() => {
     invoke("cancel_request").catch(() => {});
     invoke("log_action", { action: "Stop generating clicked" }).catch(() => {});
+    // Update state to stop showing generating UI
+    setPopupState("expanded");
+    setStreamingText(null);
   }, []);
 
   // ── Model change → persist + auto-regenerate ──
