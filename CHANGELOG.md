@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.16.4] - 2026-04-26
+
+### ✨ Improvements
+
+- **Model dropdown dynamic height** — The model dropdown in the preview popup now calculates its max-height dynamically based on the window size instead of using a hardcoded value, preventing overflow when the popup window is small. A scrollbar appears automatically when the list exceeds the available space.
+- **Stop button always visible during generation** — The Stop button is now always shown in red during text generation, instead of requiring a mouse hover to reveal it.
+- **Smarter cancel behavior** — Cancelling during a regeneration restores the previous result instead of showing a blank screen. Cancelling during the first generation shows a "No content" placeholder with the Regenerate button available.
+
+### 🐛 Bug Fixes
+
+- **Stop button now actually stops generation** — Previously clicking Stop had no effect while waiting for the next streaming chunk from the server. Now uses `tokio::select!` to race cancellation against chunk arrival, so Stop takes effect immediately.
+- **Stop button no longer collapses popup to icon** — The backend's `request-cancelled` event was overriding the frontend's expanded state, shrinking the popup back to a 48×48 icon. Fixed by not resetting state when `handleStop` has already handled it.
+
+### 🔄 Sync
+
+- **Settings sync between windows** — The Settings panel now reloads settings from the backend when it regains focus, ensuring model selection stays in sync between Preview and Settings windows.
+
 ## [0.16.3] - 2026-04-16
 
 ### 🐛 Bug Fixes
