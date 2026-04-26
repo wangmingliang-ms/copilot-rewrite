@@ -226,7 +226,10 @@ const Popup: FC<PopupProps> = ({ selection }) => {
     });
 
     const unCancelled = listen("request-cancelled", () => {
-      setPopupState("icon");
+      // Only reset to icon if still in a generating state (not yet handled by handleStop)
+      if (stateRef.current === "loading" || stateRef.current === "streaming") {
+        setPopupState("expanded");
+      }
       setStreamingText(null);
       setRefreshing(false);
       refreshingRef.current = false;
