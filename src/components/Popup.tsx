@@ -50,6 +50,7 @@ const Popup: FC<PopupProps> = ({ selection }) => {
   const [showRaw, setShowRaw] = useState(false);
   const [currentModel, setCurrentModel] = useState<string>("");
   const [currentModelId, setCurrentModelId] = useState<string>("");
+  const [modelDropMaxH, setModelDropMaxH] = useState(300);
   const [models, setModels] = useState<CopilotModel[]>([]);
   const [creativeMode, setCreativeMode] = useState<boolean>(false);
   // Replace mode — resolved at selection time, user can manually switch
@@ -547,10 +548,18 @@ const Popup: FC<PopupProps> = ({ selection }) => {
   const handleStop = useCallback(() => {
     invoke("cancel_request").catch(() => {});
     invoke("log_action", { action: "Stop generating clicked" }).catch(() => {});
-    // Update state to stop showing generating UI
-    setPopupState("expanded");
     setStreamingText(null);
-  }, []);
+    // If we have previous results in history, restore the last one
+    if (history.length > 0) {
+      const lastIdx = history.length - 1;
+      setResult(history[lastIdx].result);
+      setHistoryIndex(lastIdx);
+    } else {
+      // First generation — no content yet
+      setResult(null);
+    }
+    setPopupState("expanded");
+  }, [history]);
 
   // ── Model change → persist + auto-regenerate ──
   const handleModelChange = useCallback(async (modelId: string) => {
@@ -814,7 +823,12 @@ const Popup: FC<PopupProps> = ({ selection }) => {
 
         {/* Model dropdown */}
         <div className={`${disabledClass}`}>
-          <Select.Root value={currentModelId} onValueChange={handleModelChange}>
+          <Select.Root value={currentModelId} onValueChange={handleModelChange} onOpenChange={(open) => {
+            if (open) {
+              // Cap dropdown height to fit within the window regardless of pop direction
+              setModelDropMaxH(Math.max(window.innerHeight - 60, 60));
+            }
+          }}>
             <Select.Trigger
               className={`flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-mono text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors max-w-[150px] ${toolbarBtnClass}`}
               disabled={isGenerating}
@@ -832,7 +846,7 @@ const Popup: FC<PopupProps> = ({ selection }) => {
                 position="popper"
                 sideOffset={4}
               >
-                <Select.Viewport className="p-1 max-h-[300px]">
+                <Select.Viewport className="p-1 overflow-y-auto" style={{ maxHeight: `${modelDropMaxH}px` }}>
                   {(() => {
                     const grouped = models.reduce<Record<string, CopilotModel[]>>((acc, m) => {
                       const vendor = m.vendor || "Other";
@@ -909,13 +923,11 @@ const Popup: FC<PopupProps> = ({ selection }) => {
         {isGenerating ? (
           <button
             onClick={handleStop}
-            className={`group flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-blue-50 dark:bg-blue-900/30 text-copilot-blue hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 transition-colors ${toolbarBtnClass}`}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium text-red-500 bg-red-50 dark:bg-red-900/30 hover:bg-red-100 dark:hover:bg-red-900/50 transition-colors ${toolbarBtnClass}`}
             title="Stop generating"
           >
-            <div className="h-3.5 w-3.5 animate-spin rounded-full border-[1.5px] border-copilot-blue border-t-transparent group-hover:hidden" />
-            <Square size={14} className="hidden group-hover:block" />
-            <span className="group-hover:hidden">Generating...</span>
-            <span className="hidden group-hover:inline">Stop</span>
+            <Square size={14} />
+            Stop
           </button>
         ) : (
           <button
@@ -1157,7 +1169,12 @@ const Popup: FC<PopupProps> = ({ selection }) => {
       <div ref={contentRef} className="flex flex-col rounded-lg overflow-hidden h-full" style={cardStyle}>
         {renderTopToolbar()}
 
-        {isReadMode ? (
+        {!result ? (
+          /* ── No content (cancelled before first result) ── */
+          <div className={`flex-1 min-h-0 flex items-center justify-center px-5 py-4 mx-4 my-2 ${contentCardClass}`}>
+            <p className="text-sm text-gray-400 dark:text-gray-500">No content</p>
+          </div>
+        ) : isReadMode ? (
           /* ── Read Mode Content ── */
           (() => {
             const hasSummary = readLayout === "withSummary" && !!readSummary;

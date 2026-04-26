@@ -110,17 +110,26 @@ const SettingsPanel: FC<{ themeCtx: ThemeCtx }> = ({ themeCtx }) => {
   const [appVersion, setAppVersion] = useState("0.0.0");
   const updater = useUpdater(5_000); // auto-check 5s after settings opens
 
-  // Load on mount
+  // Load on mount + reload when window becomes visible (Settings window is
+  // hidden on close and re-shown, so mount only fires once)
   const [initialLoaded, setInitialLoaded] = useState(false);
+  const loadSettings = useCallback(() => {
+    invoke<Settings>("get_settings").then((s) => {
+      setSettings(s);
+      if (!initialLoaded) setInitialLoaded(true);
+    }).catch(() => { if (!initialLoaded) setInitialLoaded(true); });
+  }, [initialLoaded]);
   useEffect(() => {
     getVersion().then(setAppVersion).catch(() => {});
     invoke<AuthStatus>("get_auth_status").then(setAuthStatus).catch(() => {});
-    invoke<Settings>("get_settings").then((s) => {
-      setSettings(s);
-      setInitialLoaded(true);
-    }).catch(() => { setInitialLoaded(true); });
+    loadSettings();
     fetchModels();
   }, []);
+  useEffect(() => {
+    const onFocus = () => { loadSettings(); fetchModels(); };
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [loadSettings]);
 
   // Auto-save settings on any change (skip initial load)
   useEffect(() => {
