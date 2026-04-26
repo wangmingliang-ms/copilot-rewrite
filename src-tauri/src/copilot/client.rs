@@ -479,17 +479,31 @@ impl CopilotClient {
             let mut actual_model_logged = false;
             let mut done = false;
 
-            while let Some(chunk_result) = stream.next().await {
+            loop {
                 if done {
                     break;
                 }
 
-                // Check cancellation between chunks
-                if let Some(ct) = cancel_token {
-                    if ct.is_cancelled() {
-                        anyhow::bail!("Request cancelled");
+                // Race: next chunk vs cancellation
+                let chunk_result = if let Some(ct) = cancel_token {
+                    tokio::select! {
+                        biased;
+                        _ = ct.cancelled() => {
+                            anyhow::bail!("Request cancelled");
+                        }
+                        chunk = stream.next() => {
+                            match chunk {
+                                Some(c) => c,
+                                None => break,
+                            }
+                        }
                     }
-                }
+                } else {
+                    match stream.next().await {
+                        Some(c) => c,
+                        None => break,
+                    }
+                };
 
                 let bytes = chunk_result.context("Stream read error")?;
                 byte_buf.extend_from_slice(&bytes);
