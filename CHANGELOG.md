@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.16.5] - 2026-06-08
+
+### 🐛 Bug Fixes
+
+- **Right-click on popup now passes through to the source app** — Previously, right-clicking on the popup window (any state) would show the WebView2 browser context menu (`Refresh / Inspect`) on `loading` / `streaming` / `expanded` / `error` states, and the right-click was "eaten" entirely on the `icon` state — meaning the source application (Word, VSCode, browser, etc.) never received the right-click. Now: right-clicking on the popup dismisses it instantly, brings the underlying window to the foreground, and re-injects the right-click at the same cursor position via `SendInput`, so you get your real app's native context menu. A 500ms suppression flag prevents the popup from immediately re-appearing on the resulting mouseup.
+
 ## [0.16.4] - 2026-04-26
 
 ### ✨ Improvements
