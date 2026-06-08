@@ -146,7 +146,7 @@ pub fn show_popup_icon(
             let sel_y = sy as f64 / scale;
             let sel_w = sw as f64 / scale;
             let sel_h = sh as f64 / scale;
-            let gap = 32.0; // pixels gap between selection and icon (32px = ~1 cursor-width separation, reduces accidental right-click overlap)
+            let gap = 16.0; // pixels gap between selection and icon (accounts for box-shadow spread)
 
             match icon_position {
                 "top-left" => (sel_x, sel_y - icon_logical - gap),
@@ -173,57 +173,6 @@ pub fn show_popup_icon(
         }
         if y + icon_logical > mon_y + mon_h {
             y = mon_y + mon_h - icon_logical - 8.0;
-        }
-
-        // Anti-overlap: after monitor clamping, the popup may end up overlapping
-        // the selection rect (e.g. browser address bar selected at top of screen
-        // -> "top-center" gets clamped to mon_y + 8, which sits *on* the selection).
-        // Detect overlap and flip/shift to escape, preserving the gap.
-        if let Some((sx, sy, sw, sh)) = input_rect {
-            let sel_x = sx as f64 / scale;
-            let sel_y = sy as f64 / scale;
-            let sel_w = sw as f64 / scale;
-            let sel_h = sh as f64 / scale;
-            let gap = 32.0;
-
-            let overlaps = x < sel_x + sel_w
-                && x + icon_logical > sel_x
-                && y < sel_y + sel_h
-                && y + icon_logical > sel_y;
-
-            if overlaps {
-                // Try alternative positions in priority order, take the first one
-                // that fits on the monitor AND doesn't overlap the selection.
-                let candidates = [
-                    // 1. Below selection (centered)
-                    (sel_x + sel_w / 2.0 - icon_logical / 2.0, sel_y + sel_h + gap),
-                    // 2. Above selection (centered)
-                    (sel_x + sel_w / 2.0 - icon_logical / 2.0, sel_y - icon_logical - gap),
-                    // 3. Right of selection (vertically aligned with selection top)
-                    (sel_x + sel_w + gap, sel_y),
-                    // 4. Left of selection (vertically aligned with selection top)
-                    (sel_x - icon_logical - gap, sel_y),
-                ];
-                for (cx, cy) in candidates {
-                    let fits = cx >= mon_x
-                        && cx + icon_logical <= mon_x + mon_w
-                        && cy >= mon_y
-                        && cy + icon_logical <= mon_y + mon_h;
-                    let cand_overlaps = cx < sel_x + sel_w
-                        && cx + icon_logical > sel_x
-                        && cy < sel_y + sel_h
-                        && cy + icon_logical > sel_y;
-                    if fits && !cand_overlaps {
-                        info!(
-                            "Anti-overlap: relocating popup from ({:.0}, {:.0}) to ({:.0}, {:.0})",
-                            x, y, cx, cy
-                        );
-                        x = cx;
-                        y = cy;
-                        break;
-                    }
-                }
-            }
         }
 
         // Store position, scale, and input rect for subsequent transitions
