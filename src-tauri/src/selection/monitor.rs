@@ -13,9 +13,9 @@
 
 use crate::{AppState, SelectionInfo, SelectionSource};
 use log::{debug, error, info, trace, warn};
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::Emitter;
 use tauri::{AppHandle, Manager};
 use windows::Win32::Foundation::POINT;
@@ -48,6 +48,37 @@ const FAST_POLL_MS: u64 = 20;
 const IDLE_POLL_MS: u64 = 200;
 /// Keyboard fallback UIA poll interval (ms) — SPEC §4.2: 500ms–1s.
 const KEYBOARD_POLL_MS: u64 = 800;
+
+// ─── Right-click pass-through suppression ────────────────────────────────────
+
+/// How long to suppress popup re-show after a right-click pass-through (ms).
+/// Prevents the synthetic right-click's mouseup from re-triggering the popup
+/// at the same selection.
+const SUPPRESS_AFTER_RIGHT_CLICK_MS: u64 = 500;
+
+/// Unix-ms timestamp until which popup re-show is suppressed. 0 = not suppressed.
+static POPUP_SUPPRESS_UNTIL_MS: AtomicI64 = AtomicI64::new(0);
+
+/// Mark popup re-show as suppressed for the next SUPPRESS_AFTER_RIGHT_CLICK_MS.
+/// Called from overlay::forward_right_click_to_source after the synthetic
+/// right-click is sent.
+pub fn suppress_popup_briefly() {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64;
+    POPUP_SUPPRESS_UNTIL_MS.store(now + SUPPRESS_AFTER_RIGHT_CLICK_MS as i64, Ordering::Relaxed);
+    info!("Popup re-show suppressed for {}ms", SUPPRESS_AFTER_RIGHT_CLICK_MS);
+}
+
+/// Check whether the popup re-show suppression window is still active.
+fn is_popup_suppressed() -> bool {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64;
+    POPUP_SUPPRESS_UNTIL_MS.load(Ordering::Relaxed) > now
+}
 
 // ─── DismissReason ───────────────────────────────────────────────────────────
 
@@ -669,6 +700,17 @@ pub fn start_selection_engine(app_handle: AppHandle, state: Arc<AppState>) {
                                 >= Duration::from_millis(DEBOUNCE_MS);
 
                         if instant || debounced {
+                            // Skip showing popup if we're in the suppression window
+                            // after a right-click pass-through (otherwise the synthetic
+                            // mouseup re-triggers the popup at the same selection).
+                            if is_popup_suppressed() {
+                                info!("Skip show_popup_icon: suppressed after right-click pass-through");
+                                ms.debounce_text = None;
+                                ms.mouseup_time = None;
+                                std::thread::sleep(Duration::from_millis(poll_interval));
+                                continue;
+                            }
+
                             // Validate that the foreground window hasn't changed since
                             // selection was detected (user may have alt-tabbed during debounce)
                             let current_fg = unsafe { GetForegroundWindow().0 as isize };

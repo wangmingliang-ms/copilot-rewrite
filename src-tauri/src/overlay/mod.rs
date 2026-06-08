@@ -19,6 +19,15 @@ use windows::Win32::UI::WindowsAndMessaging::{
     GWL_EXSTYLE, GWL_STYLE, HWND_TOP, SW_HIDE, SW_SHOWNOACTIVATE,
     SWP_FRAMECHANGED, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, WS_CAPTION, WS_EX_NOACTIVATE,
     WS_EX_TOOLWINDOW, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_SYSMENU, WS_THICKFRAME,
+    GetCursorPos, WindowFromPoint, GetAncestor, GA_ROOT,
+    GetSystemMetrics, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN,
+    SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, AllowSetForegroundWindow,
+    SetForegroundWindow, ASFW_ANY,
+};
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    SendInput, INPUT, INPUT_0, INPUT_MOUSE, MOUSEINPUT,
+    MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP,
+    MOUSEEVENTF_ABSOLUTE, MOUSEEVENTF_VIRTUALDESK, MOUSE_EVENT_FLAGS,
 };
 
 /// Icon/spinner size (physical pixels)
@@ -373,6 +382,107 @@ pub fn hide_popup(app_handle: &AppHandle) {
     // Note: icon size + WS_EX_NOACTIVATE are set in show_popup_icon() before the
     // next show, so we don't need to reset them here. This avoids a redundant
     // DPI calculation and SetWindowPos call on a hidden window.
+}
+
+/// Handle a right-click on the popup window:
+///   1. Capture current cursor position
+///   2. Hide the popup synchronously (Win32 ShowWindow SW_HIDE for immediacy)
+///   3. Find the window under the cursor (excluding our popup) and bring it forward
+///   4. SendInput a synthetic right-button down+up at the same position
+///   5. Set a brief suppression flag so the imminent mouseup won't re-trigger
+///      the popup
+pub fn forward_right_click_to_source(app_handle: &AppHandle) {
+    // Step 1: cursor position
+    let mut point = POINT { x: 0, y: 0 };
+    unsafe {
+        if GetCursorPos(&mut point).is_err() {
+            warn!("forward_right_click: GetCursorPos failed");
+            return;
+        }
+    }
+    info!("forward_right_click: cursor at ({}, {})", point.x, point.y);
+
+    // Step 2: hide popup IMMEDIATELY (Win32 path; Tauri's hide is async-ish)
+    if let Some(window) = get_popup(app_handle) {
+        if let Ok(hwnd) = window.hwnd() {
+            let hwnd_win = HWND(hwnd.0 as *mut _);
+            unsafe { let _ = ShowWindow(hwnd_win, SW_HIDE); }
+        }
+        let _ = window.hide();
+    }
+
+    // Step 3: WindowFromPoint then walk up to the top-level owner; skip our own popup HWND
+    let popup_hwnd: isize = get_popup(app_handle)
+        .and_then(|w| w.hwnd().ok())
+        .map(|h| h.0 as isize)
+        .unwrap_or(0);
+
+    let target = unsafe {
+        let mut hwnd = WindowFromPoint(point);
+        // Walk up to top-level (parent==null)
+        loop {
+            let parent = GetAncestor(hwnd, GA_ROOT);
+            if parent.0.is_null() || parent == hwnd { break; }
+            hwnd = parent;
+        }
+        hwnd
+    };
+
+    if target.0.is_null() || target.0 as isize == popup_hwnd {
+        warn!("forward_right_click: no valid target window under cursor");
+        // Still notify the suppression flag so monitor doesn't flap.
+        crate::selection::monitor::suppress_popup_briefly();
+        return;
+    }
+    info!("forward_right_click: target HWND={:?}", target.0);
+
+    // Step 4: bring target to foreground, then SendInput right-click
+    unsafe {
+        let _ = AllowSetForegroundWindow(ASFW_ANY);
+        let _ = SetForegroundWindow(target);
+    }
+
+    // Step 4: SendInput RIGHTDOWN + RIGHTUP at current absolute coords.
+    // We use MOUSEEVENTF_ABSOLUTE with normalized screen coordinates (0..65535).
+    let (sx, sy) = unsafe {
+        let cx = GetSystemMetrics(SM_CXVIRTUALSCREEN);
+        let cy = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+        let ox = GetSystemMetrics(SM_XVIRTUALSCREEN);
+        let oy = GetSystemMetrics(SM_YVIRTUALSCREEN);
+        let nx = ((point.x - ox) as f64 / cx as f64 * 65535.0).round() as i32;
+        let ny = ((point.y - oy) as f64 / cy as f64 * 65535.0).round() as i32;
+        (nx, ny)
+    };
+
+    let inputs = [
+        make_mouse_input(sx, sy, MOUSEEVENTF_RIGHTDOWN | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK),
+        make_mouse_input(sx, sy, MOUSEEVENTF_RIGHTUP   | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK),
+    ];
+    let size = std::mem::size_of::<INPUT>() as i32;
+    let sent = unsafe { SendInput(&inputs, size) };
+    if sent != 2 {
+        let err = std::io::Error::last_os_error();
+        warn!("forward_right_click: SendInput returned {} (expected 2), err={:?}", sent, err);
+    }
+
+    // Step 5: suppression flag — don't re-show popup on the upcoming mouseup
+    crate::selection::monitor::suppress_popup_briefly();
+}
+
+fn make_mouse_input(dx: i32, dy: i32, flags: MOUSE_EVENT_FLAGS) -> INPUT {
+    INPUT {
+        r#type: INPUT_MOUSE,
+        Anonymous: INPUT_0 {
+            mi: MOUSEINPUT {
+                dx,
+                dy,
+                mouseData: 0,
+                dwFlags: flags,
+                time: 0,
+                dwExtraInfo: 0,
+            },
+        },
+    }
 }
 
 /// Toggle WS_EX_NOACTIVATE on the popup window

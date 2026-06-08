@@ -1125,6 +1125,13 @@ async fn resize_popup_content(app: tauri::AppHandle, height: f64) -> Result<(), 
     Ok(())
 }
 
+/// Right-click pass-through: dismiss popup and re-send right-click to the window under the cursor.
+#[tauri::command]
+async fn forward_right_click_to_source(app: tauri::AppHandle) -> Result<(), String> {
+    overlay::forward_right_click_to_source(&app);
+    Ok(())
+}
+
 // ─── App Entry Point ──────────────────────────────────────────────
 
 pub fn run() {
@@ -1226,6 +1233,7 @@ pub fn run() {
             toggle_enabled,
             is_enabled,
             dismiss_popup,
+            forward_right_click_to_source,
             resize_popup_content,
             start_github_login,
             poll_github_login,
