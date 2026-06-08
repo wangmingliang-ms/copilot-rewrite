@@ -700,6 +700,14 @@ const Popup: FC<PopupProps> = ({ selection }) => {
     }
   }, [outputText, outputHtml, replaceMode]);
 
+  // Right-click pass-through: dismiss popup, suppress WebView2 menu, and
+  // re-send the right-click to the window now under the cursor (source app).
+  const handleRightClickPassthrough = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    void invoke("forward_right_click_to_source");
+  }, []);
+
   const handleDismiss = useCallback(async () => {
     if (stateRef.current === "streaming" || stateRef.current === "loading") {
       invoke("cancel_request").catch(() => {});
@@ -1063,7 +1071,7 @@ const Popup: FC<PopupProps> = ({ selection }) => {
   // ── Icon state (48×48) ──
   if (state === "icon") {
     return (
-      <div className="w-screen h-screen flex items-center justify-center" onContextMenu={(e) => e.preventDefault()} style={{ padding: "20px", background: "transparent", pointerEvents: "none" }}>
+      <div className="w-screen h-screen flex items-center justify-center" onContextMenu={handleRightClickPassthrough} style={{ padding: "20px", background: "transparent", pointerEvents: "none" }}>
         <div className="w-full h-full flex items-center justify-center"
           style={{
             pointerEvents: "auto",
@@ -1093,7 +1101,7 @@ const Popup: FC<PopupProps> = ({ selection }) => {
   // ── Loading state (expanded UI with centered spinner) ──
   if (state === "loading") {
     return (
-      <div className="w-screen h-screen" style={{ padding: "20px", background: "transparent" }}>
+      <div className="w-screen h-screen" onContextMenu={handleRightClickPassthrough} style={{ padding: "20px", background: "transparent" }}>
         <div ref={contentRef} className="flex flex-col rounded-lg overflow-hidden h-full" style={cardStyle}>
           {renderTopToolbar()}
           <div className={`flex-1 flex items-center justify-center mx-4 my-2 ${contentCardClass}`}>
@@ -1111,7 +1119,7 @@ const Popup: FC<PopupProps> = ({ selection }) => {
   // ── Streaming state (expanded UI with flowing text) ──
   if (state === "streaming") {
     return (
-      <div className="w-screen h-screen" style={{ padding: "20px", background: "transparent" }}>
+      <div className="w-screen h-screen" onContextMenu={handleRightClickPassthrough} style={{ padding: "20px", background: "transparent" }}>
         <div ref={contentRef} className="flex flex-col rounded-lg overflow-hidden h-full" style={cardStyle}>
           {renderTopToolbar()}
           <div className={`flex-1 min-h-0 overflow-auto px-5 pt-4 pb-3 mx-4 my-2 ${contentCardClass}`} style={{ userSelect: "text", WebkitUserSelect: "text" }}>
@@ -1151,7 +1159,7 @@ const Popup: FC<PopupProps> = ({ selection }) => {
   // ── Error state ──
   if (state === "error") {
     return (
-      <div className="w-screen h-screen" style={{ padding: "20px", background: "transparent" }}>
+      <div className="w-screen h-screen" onContextMenu={handleRightClickPassthrough} style={{ padding: "20px", background: "transparent" }}>
         <div className="flex flex-col rounded-lg h-full overflow-hidden" style={cardStyle}>
           {renderTopToolbar()}
           <div className={`flex-1 px-5 py-4 flex items-start gap-2.5 mx-4 my-2 ${contentCardClass}`}>
@@ -1168,7 +1176,7 @@ const Popup: FC<PopupProps> = ({ selection }) => {
 
   // ── Expanded state (final result) ──
   return (
-    <div className="w-screen h-screen" style={{ padding: "20px", background: "transparent" }}>
+    <div className="w-screen h-screen" onContextMenu={handleRightClickPassthrough} style={{ padding: "20px", background: "transparent" }}>
       <div ref={contentRef} className="flex flex-col rounded-lg overflow-hidden h-full" style={cardStyle}>
         {renderTopToolbar()}
 
