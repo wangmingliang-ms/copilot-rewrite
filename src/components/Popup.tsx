@@ -467,20 +467,6 @@ const Popup: FC<PopupProps> = ({ selection }) => {
     setPopupState("loading");
     await refreshSettings();
 
-    try {
-      const auth = await invoke<{ logged_in: boolean }>("get_auth_status");
-      if (!auth.logged_in) {
-        invoke("log_action", { action: "Icon clicked — Azure CLI sign-in required" }).catch(() => {});
-        setPopupState("icon");
-        await invoke("open_settings");
-        return;
-      }
-    } catch {
-      setError("Sign in with Azure CLI in Settings to use Foundry Agents.");
-      setPopupState("error");
-      return;
-    }
-
     if (!selection) { setPopupState("icon"); return; }
 
     const readMode = selection.is_input_element === false;

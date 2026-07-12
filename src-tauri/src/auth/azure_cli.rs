@@ -175,7 +175,7 @@ impl AzureCliAuth {
     }
 
     pub(crate) async fn login(&self, attempt: AzureCliLoginAttempt) -> Result<AuthStatus> {
-        let _command_guard = self.command_lock.lock().await;
+        let command_guard = self.command_lock.lock().await;
         info!("Starting Azure CLI browser login");
         let result = if attempt.cancel.is_cancelled() {
             Err(anyhow::anyhow!("Azure CLI sign-in was cancelled."))
@@ -197,19 +197,29 @@ impl AzureCliAuth {
                 TENANT_ID
             );
         }
-        Ok(auth_status(Some(account.user.name), true))
+        let status = auth_status(Some(account.user.name), true);
+        drop(command_guard);
+
+        self.access_token()
+            .await
+            .context("Azure CLI login succeeded, but Foundry token prefetch failed")?;
+        info!("[AUTH TOKEN] Foundry token prefetched after login");
+        Ok(status)
     }
 
     pub async fn access_token(&self) -> Result<String> {
         if let Some(token) = self.cached_access_token().await? {
+            info!("[AUTH TOKEN] memory cache hit");
             return Ok(token);
         }
 
         let _command_guard = self.command_lock.lock().await;
         if let Some(token) = self.cached_access_token().await? {
+            info!("[AUTH TOKEN] memory cache hit after waiting for CLI");
             return Ok(token);
         }
 
+        info!("[AUTH TOKEN] cache miss; acquiring token from Azure CLI");
         let output = run_az(&[
             "account",
             "get-access-token",
@@ -238,6 +248,10 @@ impl AzureCliAuth {
             expires_at: token.expires_on.into_i64()?,
         };
         let value = cached.value.clone();
+        info!(
+            "[AUTH TOKEN] cached Foundry token until Unix timestamp {}",
+            cached.expires_at
+        );
         *self.access_token_cache.lock().await = Some(cached);
         Ok(value)
     }

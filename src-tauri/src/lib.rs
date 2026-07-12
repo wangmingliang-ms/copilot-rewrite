@@ -449,9 +449,18 @@ async fn process_and_show_preview(
     state: tauri::State<'_, Arc<AppState>>,
     request: ProcessRequest,
 ) -> Result<(), String> {
+    let t0 = std::time::Instant::now();
     let settings = state.settings.lock().clone();
     let endpoint = foundry_project_endpoint();
+    let creative_mode = request.creative_mode.unwrap_or(settings.creative_mode);
+    info!("[PERF] process_and_show_preview START (action={:?}, backend=foundry-agent, creative={}, refresh={}, text_len={})",
+        request.action, creative_mode, request.is_refresh, request.text.len());
+
     let access_token = foundry_access_token(&state).await?;
+    info!(
+        "[PERF] +{}ms — Foundry access token ready",
+        t0.elapsed().as_millis()
+    );
 
     // Create a fresh cancellation token for this request
     let cancel_token = tokio_util::sync::CancellationToken::new();
@@ -459,11 +468,6 @@ async fn process_and_show_preview(
 
     // Mark popup as "processing" to pause UIA monitoring
     *state.preview_visible.lock() = true;
-
-    let t0 = std::time::Instant::now();
-    let creative_mode = request.creative_mode.unwrap_or(settings.creative_mode);
-    info!("[PERF] process_and_show_preview START (action={:?}, backend=foundry-agent, creative={}, refresh={}, text_len={})",
-        request.action, creative_mode, request.is_refresh, request.text.len());
 
     // Emit loading event (frontend switches to loading state)
     app.emit("show-preview-loading", ())
@@ -622,6 +626,14 @@ async fn get_auth_status(
         return Ok(status);
     }
     let status = state.azure_cli_auth.status().await;
+    if status.logged_in {
+        let state = Arc::clone(state.inner());
+        tauri::async_runtime::spawn(async move {
+            if let Err(error) = state.azure_cli_auth.access_token().await {
+                warn!("[AUTH TOKEN] background prefetch failed: {error:#}");
+            }
+        });
+    }
     info!(
         "[AUTH IPC #{check_id}] status check completed: logged_in={}, username={}",
         status.logged_in,
