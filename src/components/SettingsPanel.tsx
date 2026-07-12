@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, type FC } from "react";
+import { useState, useEffect, useCallback, useRef, type FC } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-shell";
 import { getVersion } from "@tauri-apps/api/app";
@@ -7,6 +7,15 @@ import * as Select from "@radix-ui/react-select";
 import * as Checkbox from "@radix-ui/react-checkbox";
 import * as Progress from "@radix-ui/react-progress";
 import { Check, ChevronDown, ArrowUpLeft, ArrowUp, ArrowUpRight, ArrowDownLeft, ArrowDown, ArrowDownRight, Plus, Trash2 } from "lucide-react";
+
+const MicrosoftIcon = ({ size = 16 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 20 20" aria-hidden="true">
+    <path fill="#f25022" d="M1 1h8.5v8.5H1z" />
+    <path fill="#7fba00" d="M10.5 1H19v8.5h-8.5z" />
+    <path fill="#00a4ef" d="M1 10.5h8.5V19H1z" />
+    <path fill="#ffb900" d="M10.5 10.5H19V19h-8.5z" />
+  </svg>
+);
 
 type Theme = "system" | "light" | "dark";
 
@@ -29,7 +38,6 @@ interface Settings {
   auto_start: boolean;
   poll_interval_ms: number;
   creative_mode: boolean;
-  model: string;
   global_replace_mode: ReplaceMode;
   replace_rules: ReplaceRule[];
   theme: string;
@@ -38,6 +46,17 @@ interface Settings {
   read_mode_sub: string;
   popup_icon_position: string;
   debug_mode: boolean;
+}
+
+interface AuthStatus {
+  logged_in: boolean;
+  username: string | null;
+  display_name: string | null;
+  environment_override: boolean;
+}
+
+interface AuthorizationRequest {
+  authorization_url: string;
 }
 
 const LANGUAGES = [
@@ -58,12 +77,17 @@ const TABS: { id: SettingsTab; label: string; icon: string }[] = [
 
 const SettingsPanel: FC<{ themeCtx: ThemeCtx }> = ({ themeCtx }) => {
   const [activeTab, setActiveTab] = useState<SettingsTab>("general");
+  const [authStatus, setAuthStatus] = useState<AuthStatus>({
+    logged_in: false,
+    username: null,
+    display_name: null,
+    environment_override: false,
+  });
   const [settings, setSettings] = useState<Settings>({
     target_language: "English",
     auto_start: false,
     poll_interval_ms: 100,
     creative_mode: false,
-    model: "claude-sonnet-4",
     global_replace_mode: "Rendered",
     replace_rules: [],
     theme: "system",
@@ -73,6 +97,10 @@ const SettingsPanel: FC<{ themeCtx: ThemeCtx }> = ({ themeCtx }) => {
     popup_icon_position: "top-left",
     debug_mode: false,
   });
+  const [loginStep, setLoginStep] = useState<"idle" | "loading" | "waiting" | "error">("idle");
+  const [loginError, setLoginError] = useState<string | null>(null);
+  const loginPollingRef = useRef(false);
+  const loginFlowRef = useRef(0);
   const [saved, setSaved] = useState(false);
   const [appVersion, setAppVersion] = useState("0.0.0");
   const updater = useUpdater(5_000); // auto-check 5s after settings opens
@@ -86,15 +114,27 @@ const SettingsPanel: FC<{ themeCtx: ThemeCtx }> = ({ themeCtx }) => {
       if (!initialLoaded) setInitialLoaded(true);
     }).catch(() => { if (!initialLoaded) setInitialLoaded(true); });
   }, [initialLoaded]);
+  const loadAuthStatus = useCallback(() => {
+    invoke<AuthStatus>("get_auth_status")
+      .then((status) => {
+        setAuthStatus(status);
+        if (status.logged_in) setLoginStep("idle");
+      })
+      .catch((error) => console.error("Failed to load Microsoft auth status:", error));
+  }, []);
   useEffect(() => {
     getVersion().then(setAppVersion).catch(() => {});
     loadSettings();
+    loadAuthStatus();
   }, []);
   useEffect(() => {
-    const onFocus = () => { loadSettings(); };
+    const onFocus = () => {
+      loadSettings();
+      loadAuthStatus();
+    };
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
-  }, [loadSettings]);
+  }, [loadSettings, loadAuthStatus]);
 
   // Auto-save settings on any change (skip initial load)
   useEffect(() => {
@@ -109,10 +149,145 @@ const SettingsPanel: FC<{ themeCtx: ThemeCtx }> = ({ themeCtx }) => {
     return () => clearTimeout(timer);
   }, [settings, initialLoaded]);
 
+  const handleLogin = useCallback(async () => {
+    const flowId = ++loginFlowRef.current;
+    invoke("log_action", { action: "Microsoft login started" }).catch(() => {});
+    setLoginStep("loading");
+    setLoginError(null);
+    try {
+      const request = await invoke<AuthorizationRequest>("start_microsoft_login");
+      if (loginFlowRef.current !== flowId) return;
+      loginPollingRef.current = true;
+      setLoginStep("waiting");
+      try {
+        await open(request.authorization_url);
+      } catch {
+        await invoke("open_url", { url: request.authorization_url });
+      }
+
+      const status = await invoke<AuthStatus>("poll_microsoft_login");
+      if (loginFlowRef.current !== flowId) return;
+      setAuthStatus(status);
+      setLoginStep("idle");
+    } catch (error) {
+      if (loginFlowRef.current !== flowId) return;
+      setLoginError(String(error));
+      setLoginStep("error");
+    } finally {
+      if (loginFlowRef.current === flowId) {
+        loginPollingRef.current = false;
+      }
+    }
+  }, []);
+
+  const handleCancelLogin = useCallback(async () => {
+    loginFlowRef.current += 1;
+    loginPollingRef.current = false;
+    await invoke("cancel_microsoft_login").catch(() => {});
+    setLoginError(null);
+    setLoginStep("idle");
+  }, []);
+
+  const handleLogout = useCallback(async () => {
+    loginFlowRef.current += 1;
+    invoke("log_action", { action: "Microsoft logout clicked" }).catch(() => {});
+    try {
+      await invoke("logout");
+      setAuthStatus({
+        logged_in: false,
+        username: null,
+        display_name: null,
+        environment_override: false,
+      });
+      setLoginStep("idle");
+    } catch (error) {
+      setLoginError(String(error));
+      setLoginStep("error");
+    }
+  }, []);
+
   // ── Tab content render functions ──
 
   const renderGeneralTab = () => (
     <>
+      {/* Microsoft Account */}
+      <section className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 px-4 py-3 mb-3">
+        <h2 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase mb-2 flex items-center gap-2">
+          <MicrosoftIcon size={14} />
+          Microsoft Account
+        </h2>
+
+        {authStatus.logged_in ? (
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 min-w-0">
+              <div className="w-8 h-8 rounded-full bg-copilot-blue/10 text-copilot-blue flex items-center justify-center flex-shrink-0">
+                <MicrosoftIcon size={16} />
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
+                  {authStatus.display_name || authStatus.username || "Microsoft user"}
+                </p>
+                <p className="text-[11px] text-gray-500 dark:text-gray-400 truncate">
+                  {authStatus.username || "Connected to Microsoft Foundry"}
+                </p>
+                <p className="text-[10px] text-green-600 dark:text-green-400">{"\u25CF"} Foundry access connected</p>
+              </div>
+            </div>
+            {!authStatus.environment_override && (
+              <button
+                onClick={handleLogout}
+                className="ml-3 text-xs text-red-500 hover:text-red-700 transition-colors flex-shrink-0"
+              >
+                Sign out
+              </button>
+            )}
+          </div>
+        ) : loginStep === "idle" ? (
+          <div>
+            <button
+              onClick={handleLogin}
+              className="w-full rounded-lg bg-gray-900 dark:bg-gray-100 px-4 py-2.5 text-sm font-medium text-white dark:text-gray-900 transition-colors hover:bg-gray-800 dark:hover:bg-gray-200 active:scale-[0.98] flex items-center justify-center gap-2"
+            >
+              <MicrosoftIcon size={16} />
+              Sign in with Microsoft
+            </button>
+            <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-2 text-center">
+              Access is limited to users assigned by the administrator.
+            </p>
+          </div>
+        ) : loginStep === "loading" ? (
+          <div className="flex items-center justify-center py-4">
+            <div className="h-5 w-5 animate-spin rounded-full border-2 border-gray-300 dark:border-gray-600 border-t-gray-900 dark:border-t-gray-100" />
+            <span className="ml-3 text-sm text-gray-500 dark:text-gray-400">Connecting...</span>
+          </div>
+        ) : loginStep === "waiting" ? (
+          <div className="text-center py-3">
+            <div className="flex items-center justify-center">
+              <div className="h-5 w-5 animate-spin rounded-full border-2 border-copilot-blue border-t-transparent" />
+              <span className="ml-3 text-sm text-gray-500 dark:text-gray-400">Complete sign-in in your browser...</span>
+            </div>
+            <button
+              onClick={handleCancelLogin}
+              className="mt-3 text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+            >
+              Cancel
+            </button>
+          </div>
+        ) : loginStep === "error" ? (
+          <div>
+            <div className="rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 p-3 mb-3">
+              <p className="text-sm text-red-700 dark:text-red-400 break-words">{loginError}</p>
+            </div>
+            <button
+              onClick={handleLogin}
+              className="w-full rounded-lg bg-gray-900 dark:bg-gray-100 px-4 py-2.5 text-sm font-medium text-white dark:text-gray-900 hover:bg-gray-800 dark:hover:bg-gray-200"
+            >
+              Try Again
+            </button>
+          </div>
+        ) : null}
+      </section>
+
       {/* Theme / Appearance */}
       <section className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 px-4 py-3 mb-3">
         <h2 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase mb-1.5">Appearance</h2>

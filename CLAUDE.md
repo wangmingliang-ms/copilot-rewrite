@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-Copilot Rewrite is a **Windows-only system-level** text translation and polishing tool. When a user selects text in any application, a floating popup appears near the cursor. Clicking it calls the GitHub Copilot API to translate/polish the text. The app has two modes:
+Copilot Rewrite is a **Windows-only system-level** text translation and polishing tool. When a user selects text in any application, a floating popup appears near the cursor. Clicking it calls one of seven Microsoft Foundry Prompt Agents to translate/polish the text. The app has two modes:
 
 - **Write Mode** — Triggered on input elements (`<input>`, `<textarea>`, `contentEditable`). Polishes + translates text. User can replace original text in-place via simulated Ctrl+V.
 - **Read Mode** — Triggered on non-input elements (webpage text, PDFs). Translates and optionally summarizes. Result is display-only (Copy, no Replace).
@@ -50,7 +50,7 @@ There are **three Tauri webview windows** defined in `tauri.conf.json`:
 
 - **`splashscreen`** — 320x280 transparent splash, always-on-top, auto-closes after 1.5s.
 - **`popup`** — The floating overlay. Starts as a 48x48 icon, transitions to spinning, then expands to show results. Uses `WS_EX_NOACTIVATE` to avoid stealing focus. Routes to `#/popup` in the React app.
-- **`settings`** — Standard decorated window for login, model selection, and preferences. Routes to `#/settings`. Hidden on close (not destroyed), re-shown from tray.
+- **`settings`** — Standard decorated window for Microsoft login and preferences. Routes to `#/settings`. Hidden on close (not destroyed), re-shown from tray.
 
 The frontend (`src/components/App.tsx`) uses `window.location.hash` to decide which view to render — there is no React Router.
 
@@ -93,26 +93,24 @@ COM is initialized per-thread (`CoInitializeEx`), so UIA must stay on its dedica
 
 ### IPC Communication
 
-**Frontend → Backend (invoke):** `process_and_show_preview`, `dismiss_popup`, `cancel_request`, `replace_text`, `copy_to_clipboard`, `copy_html_to_clipboard`, `resize_popup_content`, `get_settings`, `update_settings`, `get_auth_status`, `start_github_login`, `poll_github_login`, `logout`, `list_models`, `open_settings`, `log_action`
+**Frontend → Backend (invoke):** `process_and_show_preview`, `dismiss_popup`, `cancel_request`, `replace_text`, `copy_to_clipboard`, `copy_html_to_clipboard`, `resize_popup_content`, `get_settings`, `update_settings`, `get_auth_status`, `start_microsoft_login`, `poll_microsoft_login`, `cancel_microsoft_login`, `logout`, `open_settings`, `log_action`
 
 **Backend → Frontend (events):** `selection-detected`, `selection-cleared`, `show-preview-loading`, `show-preview-result` (carries `ProcessResponse`), `show-preview-error`, `request-cancelled`
 
-### Copilot API Token Exchange
+### Microsoft Entra Authentication
 
-The app uses a **two-step token flow** (`copilot/client.rs`):
+The app is a single-tenant Entra public client and uses **Authorization Code Flow with PKCE** (`auth/microsoft.rs`):
 
-1. GitHub personal token → `GET /copilot_internal/v2/token` → short-lived Copilot session token
-2. Session token → `POST /chat/completions` with SSE streaming (assembled into full response)
+1. Start a temporary localhost callback and open the Microsoft authorization page in the system browser
+2. Request `https://ai.azure.com/.default offline_access openid profile` using PKCE
+3. Cache the access and refresh tokens in DPAPI-protected `auth.dat`
+4. Refresh access tokens before expiry and send them to the Foundry Responses endpoint
 
-Session tokens are cached in memory with expiry tracking. The GitHub token is obtained via **OAuth Device Flow** (`copilot/oauth.rs`) using VS Code's well-known client ID.
+Enterprise Application assignment controls who may sign in. Project-scoped `Foundry User` RBAC controls who may invoke the Agents. The desktop public client has no client secret.
 
-### System Prompts
+### Foundry Prompt Agents
 
-The Copilot client has **three prompt tiers** in `copilot/client.rs`:
-
-- **Normal mode** (Write): translate, polish, or translate+polish. The translate+polish mode returns JSON `{"reorganized": "...", "translated": "..."}`.
-- **Creative mode** (Write): same three actions but with full creative rewrite freedom. Toggled via popup toolbar.
-- **Read mode**: `read_mode_translate_prompt` (faithful translation, plain text output) and `read_mode_translate_summarize_prompt` (returns JSON `{"summary": "...", "translation": "..."}`).
+System instructions and the fixed `gpt-5.6-sol` deployment live in seven Prompt Agents: normal and creative variants for translate, polish, and translate+polish, plus one Read Mode Agent. The client sends only selected text and an `agent_reference`.
 
 ### Text Replacement
 
@@ -132,13 +130,14 @@ All cross-module state lives in `Arc<AppState>` using `parking_lot::Mutex`:
 - `current_selection` — the `SelectionInfo` including source HWND, app name, `is_input_element`
 - `selection_generation` — atomic counter bumped on dismiss for monitor reset
 - `settings` — persisted to `%APPDATA%/copilot-rewrite/settings.json`
+- `microsoft_auth` — Entra Authorization Code Flow with PKCE, DPAPI credential cache, and access-token refresh
 
 ### Persistent Storage
 
 All config files go under `%APPDATA%/copilot-rewrite/`:
 
-- `settings.json` — user settings (model, languages, creative_mode, read_mode_enabled, read_mode_sub, etc.)
-- `auth.json` — saved GitHub token + username
+- `settings.json` — user settings (languages, creative_mode, read_mode_enabled, read_mode_sub, etc.)
+- `auth.dat` — DPAPI-protected Microsoft access/refresh token and display identity
 - `logs/YYYY-MM-DD.log` — date-rotated log files (INFO+ level)
 - `replace-debug.log` — detailed replacement engine debug log
 - `.lock` — single-instance enforcement (exclusive file lock)

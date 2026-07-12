@@ -17,6 +17,7 @@ The entire flow is non-intrusive: the popup never steals focus from the applicat
 - **Translate + Polish** — Auto-detects the source language, translates to your target language, and polishes the text in one step
 - **Beast Mode** — Enable full creative rewriting with restructuring, examples, and best-version output
 - **Prompt Agent backend** — Prompts and model selection are managed in Microsoft Foundry
+- **Microsoft sign-in** — Uses the system browser with Entra Authorization Code Flow + PKCE and automatic access-token refresh
 - **13 target languages** — English, Chinese (Simplified/Traditional), Japanese, Korean, French, German, Spanish, Portuguese, Russian, Arabic, Hindi, Italian
 - **In-place replacement** — Simulates Ctrl+V to paste results directly into the focused application
 - **Markdown rendering** — Results are rendered as rich Markdown with toggle to view raw source
@@ -35,7 +36,7 @@ The entire flow is non-intrusive: the popup never steals focus from the applicat
 
 - **Windows 10/11** (x64)
 - **WebView2 Runtime** (pre-installed on Windows 10 21H2+ and Windows 11)
-- A Microsoft Foundry project endpoint and access to its Prompt Agents
+- A Microsoft account assigned to the `Copilot Rewrite Foundry` enterprise application and the Foundry project
 
 ### For Development
 
@@ -50,11 +51,11 @@ Download the latest installer from [Releases](https://github.com/wangmingliang-m
 ### First-Time Setup
 
 1. Right-click the tray icon → **Settings**
-2. Set `FOUNDRY_ACCESS_TOKEN` to a valid short-lived Entra token before launching
+2. Click **Sign in with Microsoft** and complete sign-in in your browser
 3. Select your preferred **target language**
 4. Close settings — you're ready to go!
 
-This Hackathon branch defaults to the `wangmi-ai-project` endpoint. Developers can override it through `FOUNDRY_PROJECT_ENDPOINT`.
+This Hackathon branch defaults to the isolated `copilot-rewrite-project` endpoint. Only users assigned to both the enterprise application and the project's `Foundry User` role can use the Agents.
 
 ## Development
 
@@ -94,7 +95,7 @@ cd src-tauri && cargo test --test foundry_agents_e2e -- --ignored --test-threads
 | Frontend | React 19 + TypeScript + Tailwind CSS |
 | Backend | Rust with `windows` crate for Win32/COM APIs |
 | API | Microsoft Foundry Agent Responses endpoint |
-| Auth | Short-lived Microsoft Entra bearer token |
+| Auth | Microsoft Entra Authorization Code Flow + PKCE with refresh-token renewal |
 
 ### Two-Process Model
 
@@ -105,7 +106,7 @@ The app runs as a Rust process hosting a WebView2 frontend. They communicate via
 | Window | Purpose |
 |--------|---------|
 | `popup` | Floating overlay — starts as 48×48 icon, expands to show results. Uses `WS_EX_NOACTIVATE` to avoid stealing focus. |
-| `settings` | Standard window for login, model selection, and preferences. Hidden on close, re-shown from tray. |
+| `settings` | Standard window for Microsoft login and preferences. Hidden on close, re-shown from tray. |
 
 ### Popup State Machine
 
@@ -120,9 +121,10 @@ icon (48×48) → spinning (48×48) → expanded (auto-sized) → dismissed
 src-tauri/src/
 ├── lib.rs              # App state, Tauri commands, entry point
 ├── main.rs             # Windows entry point
+├── auth/
+│   └── microsoft.rs    # Entra browser login with PKCE, token cache, and refresh
 ├── foundry/
 │   └── client.rs       # Foundry Responses client and Agent routing contract
-├── copilot/            # Legacy Copilot implementation retained on the MVP branch
 ├── selection/
 │   ├── monitor.rs      # Selection detection loop (dedicated OS thread)
 │   └── uia.rs          # UI Automation TextPattern polling
@@ -147,10 +149,9 @@ src/
 ├── components/
 │   ├── App.tsx                 # Hash-based routing (popup vs settings)
 │   ├── Popup.tsx               # Popup state machine (icon → spinning → expanded)
-│   ├── SettingsPanel.tsx       # Foundry endpoint, language, and behavior settings
+│   ├── SettingsPanel.tsx       # Microsoft account, language, and behavior settings
 │   ├── Toolbar.tsx             # Action toolbar
-│   ├── Preview.tsx             # Result preview
-│   └── LoginDialog.tsx         # GitHub OAuth login UI
+│   └── Preview.tsx             # Result preview
 ├── hooks/
 │   ├── useSelection.ts        # Selection event listener
 │   └── useUpdater.ts          # Auto-update hook
@@ -172,7 +173,6 @@ Settings are stored in `%APPDATA%/copilot-rewrite/settings.json`:
 
 ```json
 {
-  "foundry_project_endpoint": "https://example.services.ai.azure.com/api/projects/example",
   "target_language": "English",
   "auto_start": false,
   "creative_mode": false,
@@ -180,14 +180,17 @@ Settings are stored in `%APPDATA%/copilot-rewrite/settings.json`:
 }
 ```
 
+Microsoft access and refresh tokens are stored separately in `%APPDATA%/copilot-rewrite/auth.dat`, protected for the current Windows user with DPAPI. The app refreshes an expiring access token before calling Foundry and removes the file on sign-out.
+
 The app posts to `<project-endpoint>/openai/v1/responses` with `stream: false`, the selected text in `input`, and an `agent_reference` selected from the current write/read and creative modes. Prompts and model configuration are not sent by the client.
 
 For compatibility with the existing popup, the Agent should return write-mode Translate + Polish output separated by `---TRANSLATED---`. Read-mode output can optionally append `---VOCABULARY---` and `---SUMMARY---` sections.
 
-For local development, obtain a token before starting Tauri:
+The normal app flow does not require environment variables. Developers can bypass interactive login with a short-lived token and can override the project endpoint:
 
 ```powershell
 $env:FOUNDRY_ACCESS_TOKEN = az account get-access-token --resource https://ai.azure.com --query accessToken --output tsv
+$env:FOUNDRY_PROJECT_ENDPOINT = "https://example.services.ai.azure.com/api/projects/example"
 npm run tauri dev
 ```
 

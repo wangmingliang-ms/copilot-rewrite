@@ -2,8 +2,8 @@
 // System-level text translation and polishing tool for Windows
 
 pub mod autostart;
+pub mod auth;
 pub mod clipboard;
-pub mod copilot;
 pub mod foundry;
 pub mod overlay;
 pub mod replacement;
@@ -35,31 +35,17 @@ pub struct AppState {
     pub selection_generation: std::sync::atomic::AtomicU64,
     /// User settings
     pub settings: Mutex<Settings>,
-    /// Copilot API client (for chat completions — has its own HTTP client with 30s timeout)
-    pub copilot_client: copilot::CopilotClient,
-    /// Public Microsoft Foundry Prompt Agent client used by the Hackathon MVP
+    /// Microsoft identity session used to authorize Foundry calls
+    pub microsoft_auth: auth::MicrosoftAuth,
+    /// Microsoft Foundry Prompt Agent client
     pub foundry_client: foundry::FoundryClient,
-    /// Shared HTTP client for lightweight requests (OAuth, GitHub API, etc.)
-    pub http_client: reqwest::Client,
-    /// Pending OAuth device code (during login flow)
-    pub pending_device_code: Mutex<Option<copilot::DeviceCodeResponse>>,
     /// Cancellation token for in-flight LLM requests
     pub cancel_token: Mutex<tokio_util::sync::CancellationToken>,
 }
 
 impl AppState {
     pub fn new() -> Self {
-        // Load settings from disk (or defaults)
-        let mut settings = Settings::load();
-
-        // Override token from saved auth if available
-        if let Some(saved_auth) = copilot::oauth::load_saved_auth() {
-            settings.api_token = saved_auth.github_token;
-            info!(
-                "Loaded saved GitHub token for user: {:?}",
-                saved_auth.username
-            );
-        }
+        let settings = Settings::load();
 
         // Initialize global debug mode flag from settings
         DEBUG_MODE.store(settings.debug_mode, Ordering::Relaxed);
@@ -70,10 +56,8 @@ impl AppState {
             current_selection: Mutex::new(None),
             selection_generation: std::sync::atomic::AtomicU64::new(0),
             settings: Mutex::new(settings),
-            copilot_client: copilot::CopilotClient::new(),
+            microsoft_auth: auth::MicrosoftAuth::new(),
             foundry_client: foundry::FoundryClient::new(),
-            http_client: reqwest::Client::new(),
-            pending_device_code: Mutex::new(None),
             cancel_token: Mutex::new(tokio_util::sync::CancellationToken::new()),
         }
     }
@@ -165,18 +149,11 @@ pub struct Settings {
     pub auto_start: bool,
     /// List of process names to ignore (app blacklist)
     pub blacklisted_apps: Vec<String>,
-    /// Copilot API token
-    pub api_token: String,
-    /// Microsoft Foundry project endpoint
-    #[serde(default, alias = "foundry_agent_endpoint")]
-    pub foundry_project_endpoint: String,
     /// Polling interval in milliseconds (50-500)
     pub poll_interval_ms: u64,
     /// "More Creative" mode — LLM freely rewrites with full creative freedom
     #[serde(default)]
     pub creative_mode: bool,
-    /// AI model to use (e.g. "gpt-4o", "claude-3.5-sonnet")
-    pub model: String,
     /// Global default replace mode when no rule matches
     #[serde(default)]
     pub global_replace_mode: ReplaceMode,
@@ -268,6 +245,25 @@ impl Settings {
                     Ok(json) => match serde_json::from_str::<Settings>(&json) {
                         Ok(s) => {
                             info!("Loaded settings from {:?}", path);
+                            let contains_legacy_fields = serde_json::from_str::<serde_json::Value>(&json)
+                                .ok()
+                                .and_then(|value| value.as_object().cloned())
+                                .is_some_and(|settings| {
+                                    [
+                                        "api_token",
+                                        "model",
+                                        "foundry_project_endpoint",
+                                        "foundry_agent_endpoint",
+                                    ]
+                                    .iter()
+                                    .any(|key| settings.contains_key(*key))
+                                });
+                            if contains_legacy_fields {
+                                match s.save() {
+                                    Ok(()) => info!("Removed legacy credential/backend fields from settings.json"),
+                                    Err(error) => warn!("Failed to sanitize legacy settings: {}", error),
+                                }
+                            }
                             return s;
                         }
                         Err(e) => warn!("Failed to parse settings.json: {}", e),
@@ -301,11 +297,8 @@ impl Default for Settings {
             target_language: "English".to_string(),
             auto_start: false,
             blacklisted_apps: vec![],
-            api_token: String::new(),
-            foundry_project_endpoint: String::new(),
             poll_interval_ms: 100,
             creative_mode: true,
-            model: "claude-sonnet-4".to_string(),
             global_replace_mode: ReplaceMode::Rendered,
             replace_rules: default_replace_rules(),
             theme: "system".to_string(),
@@ -355,31 +348,32 @@ pub struct ProcessResponse {
     pub action: RewriteAction,
 }
 
-/// Auth status for the frontend
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AuthStatus {
-    pub logged_in: bool,
-    pub username: Option<String>,
-}
-
 // ─── Tauri Commands ───────────────────────────────────────────────
 
 const FOUNDRY_MODEL_DEPLOYMENT: &str = "gpt-5.6-sol";
 const DEFAULT_FOUNDRY_PROJECT_ENDPOINT: &str =
-    "https://wangmi-ai.services.ai.azure.com/api/projects/wangmi-ai-project";
+    "https://wangmi-ai.services.ai.azure.com/api/projects/copilot-rewrite-project";
 
-fn foundry_project_endpoint(settings: &Settings) -> String {
+fn foundry_project_endpoint() -> String {
     std::env::var("FOUNDRY_PROJECT_ENDPOINT")
         .ok()
         .filter(|value| !value.trim().is_empty())
-        .or_else(|| {
-            (!settings.foundry_project_endpoint.trim().is_empty())
-                .then(|| settings.foundry_project_endpoint.clone())
-        })
         .unwrap_or_else(|| DEFAULT_FOUNDRY_PROJECT_ENDPOINT.to_string())
 }
 
-fn foundry_access_token() -> Option<String> {
+async fn foundry_access_token(state: &AppState) -> Result<String, String> {
+    if let Some(token) = environment_access_token() {
+        return Ok(token);
+    }
+
+    state
+        .microsoft_auth
+        .access_token()
+        .await
+        .map_err(|error| format!("Microsoft sign-in required: {error:#}"))
+}
+
+fn environment_access_token() -> Option<String> {
     std::env::var("FOUNDRY_ACCESS_TOKEN")
         .ok()
         .filter(|value| !value.trim().is_empty())
@@ -406,8 +400,8 @@ async fn process_text(
     request: ProcessRequest,
 ) -> Result<ProcessResponse, String> {
     let settings = state.settings.lock().clone();
-    let endpoint = foundry_project_endpoint(&settings);
-    let access_token = foundry_access_token();
+    let endpoint = foundry_project_endpoint();
+    let access_token = foundry_access_token(&state).await?;
     let creative_mode = request.creative_mode.unwrap_or(settings.creative_mode);
     let agent_name = foundry_agent_name(&request.action, creative_mode);
 
@@ -418,7 +412,7 @@ async fn process_text(
             FOUNDRY_MODEL_DEPLOYMENT,
             agent_name,
             &request.text,
-            access_token.as_deref(),
+            Some(&access_token),
             None,
             None,
         )
@@ -441,8 +435,8 @@ async fn process_and_show_preview(
     request: ProcessRequest,
 ) -> Result<(), String> {
     let settings = state.settings.lock().clone();
-    let endpoint = foundry_project_endpoint(&settings);
-    let access_token = foundry_access_token();
+    let endpoint = foundry_project_endpoint();
+    let access_token = foundry_access_token(&state).await?;
 
     // Create a fresh cancellation token for this request
     let cancel_token = tokio_util::sync::CancellationToken::new();
@@ -496,7 +490,7 @@ async fn process_and_show_preview(
             FOUNDRY_MODEL_DEPLOYMENT,
             agent_name,
             &request.text,
-            access_token.as_deref(),
+            Some(&access_token),
             None,
             Some(&cancel_token),
         )
@@ -548,135 +542,63 @@ fn cancel_request(state: tauri::State<'_, Arc<AppState>>) {
     state.cancel_token.lock().cancel();
 }
 
-/// Start GitHub OAuth Device Flow - returns device code info for user
+/// Start Microsoft OAuth authorization code flow with PKCE.
 #[tauri::command]
-async fn start_github_login(
+async fn start_microsoft_login(
     state: tauri::State<'_, Arc<AppState>>,
-) -> Result<copilot::DeviceCodeResponse, String> {
-    let device_code = copilot::oauth::request_device_code(&state.http_client)
+) -> Result<auth::AuthorizationRequest, String> {
+    state
+        .microsoft_auth
+        .start_authorization_flow()
         .await
-        .map_err(|e| format!("Login failed: {}", e))?;
-
-    // Store device code in state for polling
-    *state.pending_device_code.lock() = Some(device_code.clone());
-
-    Ok(device_code)
+        .map_err(|error| format!("Login failed: {error:#}"))
 }
 
-/// Poll for GitHub OAuth token completion
+/// Wait for the browser to return the Microsoft authorization code.
 #[tauri::command]
-async fn poll_github_login(state: tauri::State<'_, Arc<AppState>>) -> Result<AuthStatus, String> {
-    let device_info = state.pending_device_code.lock().clone();
+async fn poll_microsoft_login(
+    state: tauri::State<'_, Arc<AppState>>,
+) -> Result<auth::AuthStatus, String> {
+    state
+        .microsoft_auth
+        .complete_authorization_flow()
+        .await
+        .map_err(|error| format!("Login failed: {error:#}"))
+}
 
-    let device_info = device_info.ok_or("No pending login. Call start_github_login first.")?;
-
-    let token =
-        copilot::oauth::poll_for_token(&state.http_client, &device_info.device_code, device_info.interval)
-            .await
-            .map_err(|e| format!("Login failed: {}", e))?;
-
-    // Save token to settings (in memory and to disk)
-    {
-        let mut settings = state.settings.lock();
-        settings.api_token = token;
-        if let Err(e) = settings.save() {
-            warn!("Failed to save settings after login: {}", e);
-        }
-    }
-
-    // Clear pending device code
-    *state.pending_device_code.lock() = None;
-
-    // Load saved auth for username
-    let username = copilot::oauth::load_saved_auth().and_then(|a| a.username);
-
-    Ok(AuthStatus {
-        logged_in: true,
-        username,
-    })
+/// Cancel a pending Microsoft authorization flow.
+#[tauri::command]
+async fn cancel_microsoft_login(
+    state: tauri::State<'_, Arc<AppState>>,
+) -> Result<(), String> {
+    state.microsoft_auth.cancel_authorization_flow().await;
+    Ok(())
 }
 
 /// Check current auth status
 #[tauri::command]
-async fn get_auth_status(state: tauri::State<'_, Arc<AppState>>) -> Result<AuthStatus, String> {
-    let settings = state.settings.lock().clone();
-    let has_token = !settings.api_token.is_empty();
-
-    let username = if has_token {
-        // Try loading from saved auth file first
-        let saved = copilot::oauth::load_saved_auth().and_then(|a| a.username);
-        if saved.is_some() {
-            saved
-        } else {
-            // auth.json missing or has no username — fetch from GitHub API
-            match state.http_client
-                .get("https://api.github.com/user")
-                .header("Authorization", format!("token {}", settings.api_token))
-                .header("User-Agent", "CopilotRewrite/0.1.0")
-                .header("Accept", "application/json")
-                .send()
-                .await
-            {
-                Ok(resp) if resp.status().is_success() => {
-                    #[derive(Deserialize)]
-                    struct GhUser {
-                        login: String,
-                    }
-                    match resp.json::<GhUser>().await {
-                        Ok(user) => {
-                            // Re-save auth.json with username
-                            let auth = copilot::oauth::SavedAuth {
-                                github_token: settings.api_token.clone(),
-                                username: Some(user.login.clone()),
-                            };
-                            let _ = copilot::oauth::save_auth(&auth);
-                            Some(user.login)
-                        }
-                        Err(_) => None,
-                    }
-                }
-                _ => None,
-            }
-        }
-    } else {
-        None
-    };
-
-    Ok(AuthStatus {
-        logged_in: has_token,
-        username,
-    })
-}
-
-/// Log out - clear saved auth
-#[tauri::command]
-fn logout(state: tauri::State<'_, Arc<AppState>>) -> Result<(), String> {
-    // Clear token and model from settings (in memory)
-    {
-        let mut settings = state.settings.lock();
-        settings.api_token.clear();
-        settings.model.clear();
-        // Save cleared settings to disk so token doesn't persist across restart
-        if let Err(e) = settings.save() {
-            warn!("Failed to save settings after logout: {}", e);
-        }
-    }
-    // Delete saved auth file
-    copilot::oauth::delete_saved_auth().map_err(|e| format!("Logout failed: {}", e))?;
-    Ok(())
-}
-
-/// List available AI models from Copilot API
-#[tauri::command]
-async fn list_models(
+async fn get_auth_status(
     state: tauri::State<'_, Arc<AppState>>,
-) -> Result<Vec<copilot::client::CopilotModel>, String> {
-    let token = state.settings.lock().api_token.clone();
+) -> Result<auth::AuthStatus, String> {
+    if environment_access_token().is_some() {
+        return Ok(auth::AuthStatus {
+            logged_in: true,
+            username: None,
+            display_name: Some("Development token".to_string()),
+            environment_override: true,
+        });
+    }
+    Ok(state.microsoft_auth.status().await)
+}
+
+/// Log out and clear the cached Microsoft session.
+#[tauri::command]
+async fn logout(state: tauri::State<'_, Arc<AppState>>) -> Result<(), String> {
     state
-        .copilot_client
-        .list_models(&token)
+        .microsoft_auth
+        .logout()
         .await
-        .map_err(|e| format!("Failed to list models: {}", e))
+        .map_err(|error| format!("Logout failed: {error:#}"))
 }
 
 /// Open a URL in the default browser (fallback for shell plugin)
@@ -1224,11 +1146,11 @@ pub fn run() {
             dismiss_popup,
             forward_right_click_to_source,
             resize_popup_content,
-            start_github_login,
-            poll_github_login,
+            start_microsoft_login,
+            poll_microsoft_login,
+            cancel_microsoft_login,
             get_auth_status,
             logout,
-            list_models,
             open_url,
             open_settings,
             open_log_file,

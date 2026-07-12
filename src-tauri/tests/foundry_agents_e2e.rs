@@ -3,7 +3,7 @@ use std::process::Command;
 use std::sync::OnceLock;
 
 const DEFAULT_PROJECT_ENDPOINT: &str =
-    "https://wangmi-ai.services.ai.azure.com/api/projects/wangmi-ai-project";
+    "https://wangmi-ai.services.ai.azure.com/api/projects/copilot-rewrite-project";
 const DEFAULT_MODEL: &str = "gpt-5.6-sol";
 
 static ACCESS_TOKEN: OnceLock<String> = OnceLock::new();

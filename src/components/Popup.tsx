@@ -450,6 +450,11 @@ const Popup: FC<PopupProps> = ({ selection }) => {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       if (msg.includes("cancelled")) return;
+      if (msg.includes("Microsoft sign-in required") || msg.includes("Microsoft session expired")) {
+        setPopupState("icon");
+        invoke("open_settings").catch(() => {});
+        return;
+      }
       setError(msg);
       setPopupState("error");
       setRefreshing(false);
@@ -461,6 +466,20 @@ const Popup: FC<PopupProps> = ({ selection }) => {
   const handleIconClick = useCallback(async () => {
     setPopupState("loading");
     await refreshSettings();
+
+    try {
+      const auth = await invoke<{ logged_in: boolean }>("get_auth_status");
+      if (!auth.logged_in) {
+        invoke("log_action", { action: "Icon clicked — Microsoft sign-in required" }).catch(() => {});
+        setPopupState("icon");
+        await invoke("open_settings");
+        return;
+      }
+    } catch {
+      setError("Sign in with Microsoft in Settings to use Foundry Agents.");
+      setPopupState("error");
+      return;
+    }
 
     if (!selection) { setPopupState("icon"); return; }
 

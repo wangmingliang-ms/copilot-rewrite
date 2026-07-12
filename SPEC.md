@@ -2,7 +2,7 @@
 
 > **Purpose:** This is the living design spec for Copilot Rewrite. Every design decision and directive from Miller is recorded here. AI agents MUST read this before making changes.
 
-**Last Updated:** 2026-04-09
+**Last Updated:** 2026-07-12
 
 ---
 
@@ -135,7 +135,10 @@ When text selection is cleared (UIA returns no selection):
 ## 6. LLM Backend
 
 - **API:** Microsoft Foundry project Responses endpoint routed by `agent_reference`
-- **Authentication:** Short-lived Microsoft Entra bearer token for direct project access
+- **Authentication:** Single-tenant Microsoft Entra Authorization Code Flow with PKCE using the `Copilot Rewrite Foundry` public client and a localhost callback
+- **Authorization:** Enterprise Application assignment controls who can sign in; project-scoped `Foundry User` RBAC controls who can invoke Agents
+- **Token lifecycle:** Access and refresh tokens are cached in DPAPI-protected `auth.dat`; access tokens are refreshed before expiry and deleted on sign-out
+- **Client secret:** None. The desktop application is a public client and cannot safely hold a secret
 - **Prompt ownership:** System instructions and model selection live in the Foundry Agent
 - **Client input:** Selected text only; mode selection determines the Agent reference
 - **Streaming:** Disabled for the MVP; the existing loading and final-result popup states remain unchanged
