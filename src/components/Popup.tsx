@@ -450,7 +450,7 @@ const Popup: FC<PopupProps> = ({ selection }) => {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       if (msg.includes("cancelled")) return;
-      if (msg.includes("Microsoft sign-in required") || msg.includes("Microsoft session expired")) {
+      if (msg.includes("Azure CLI sign-in required")) {
         setPopupState("icon");
         invoke("open_settings").catch(() => {});
         return;
@@ -470,13 +470,13 @@ const Popup: FC<PopupProps> = ({ selection }) => {
     try {
       const auth = await invoke<{ logged_in: boolean }>("get_auth_status");
       if (!auth.logged_in) {
-        invoke("log_action", { action: "Icon clicked — Microsoft sign-in required" }).catch(() => {});
+        invoke("log_action", { action: "Icon clicked — Azure CLI sign-in required" }).catch(() => {});
         setPopupState("icon");
         await invoke("open_settings");
         return;
       }
     } catch {
-      setError("Sign in with Microsoft in Settings to use Foundry Agents.");
+      setError("Sign in with Azure CLI in Settings to use Foundry Agents.");
       setPopupState("error");
       return;
     }

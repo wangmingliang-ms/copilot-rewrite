@@ -35,8 +35,8 @@ pub struct AppState {
     pub selection_generation: std::sync::atomic::AtomicU64,
     /// User settings
     pub settings: Mutex<Settings>,
-    /// Microsoft identity session used to authorize Foundry calls
-    pub microsoft_auth: auth::MicrosoftAuth,
+    /// Azure CLI identity session used to authorize Foundry calls
+    pub azure_cli_auth: auth::AzureCliAuth,
     /// Microsoft Foundry Prompt Agent client
     pub foundry_client: foundry::FoundryClient,
     /// Cancellation token for in-flight LLM requests
@@ -56,7 +56,7 @@ impl AppState {
             current_selection: Mutex::new(None),
             selection_generation: std::sync::atomic::AtomicU64::new(0),
             settings: Mutex::new(settings),
-            microsoft_auth: auth::MicrosoftAuth::new(),
+            azure_cli_auth: auth::AzureCliAuth::new(),
             foundry_client: foundry::FoundryClient::new(),
             cancel_token: Mutex::new(tokio_util::sync::CancellationToken::new()),
         }
@@ -367,10 +367,10 @@ async fn foundry_access_token(state: &AppState) -> Result<String, String> {
     }
 
     state
-        .microsoft_auth
+        .azure_cli_auth
         .access_token()
         .await
-        .map_err(|error| format!("Microsoft sign-in required: {error:#}"))
+        .map_err(|error| format!("Azure CLI sign-in required: {error:#}"))
 }
 
 fn environment_access_token() -> Option<String> {
@@ -542,36 +542,24 @@ fn cancel_request(state: tauri::State<'_, Arc<AppState>>) {
     state.cancel_token.lock().cancel();
 }
 
-/// Start Microsoft OAuth authorization code flow with PKCE.
+/// Sign in to the Microsoft tenant through Azure CLI.
 #[tauri::command]
 async fn start_microsoft_login(
     state: tauri::State<'_, Arc<AppState>>,
-) -> Result<auth::AuthorizationRequest, String> {
-    state
-        .microsoft_auth
-        .start_authorization_flow()
-        .await
-        .map_err(|error| format!("Login failed: {error:#}"))
-}
-
-/// Wait for the browser to return the Microsoft authorization code.
-#[tauri::command]
-async fn poll_microsoft_login(
-    state: tauri::State<'_, Arc<AppState>>,
 ) -> Result<auth::AuthStatus, String> {
     state
-        .microsoft_auth
-        .complete_authorization_flow()
+        .azure_cli_auth
+        .login()
         .await
         .map_err(|error| format!("Login failed: {error:#}"))
 }
 
-/// Cancel a pending Microsoft authorization flow.
+/// Cancel a pending Azure CLI browser login.
 #[tauri::command]
 async fn cancel_microsoft_login(
     state: tauri::State<'_, Arc<AppState>>,
 ) -> Result<(), String> {
-    state.microsoft_auth.cancel_authorization_flow().await;
+    state.azure_cli_auth.cancel_login().await;
     Ok(())
 }
 
@@ -586,29 +574,10 @@ async fn get_auth_status(
             username: None,
             display_name: Some("Development token".to_string()),
             environment_override: true,
+            cli_available: true,
         });
     }
-    Ok(state.microsoft_auth.status().await)
-}
-
-/// Log out and clear the cached Microsoft session.
-#[tauri::command]
-async fn logout(state: tauri::State<'_, Arc<AppState>>) -> Result<(), String> {
-    state
-        .microsoft_auth
-        .logout()
-        .await
-        .map_err(|error| format!("Logout failed: {error:#}"))
-}
-
-/// Open a URL in the default browser (fallback for shell plugin)
-#[tauri::command]
-fn open_url(url: String) -> Result<(), String> {
-    std::process::Command::new("cmd")
-        .args(["/C", "start", &url])
-        .spawn()
-        .map_err(|e| format!("Failed to open URL: {}", e))?;
-    Ok(())
+    Ok(state.azure_cli_auth.status().await)
 }
 
 /// Open the settings window
@@ -1147,11 +1116,8 @@ pub fn run() {
             forward_right_click_to_source,
             resize_popup_content,
             start_microsoft_login,
-            poll_microsoft_login,
             cancel_microsoft_login,
             get_auth_status,
-            logout,
-            open_url,
             open_settings,
             open_log_file,
             open_log_dir,

@@ -1,3 +1,3 @@
-mod microsoft;
+mod azure_cli;
 
-pub use microsoft::{AuthStatus, AuthorizationRequest, MicrosoftAuth};
+pub use azure_cli::{AuthStatus, AzureCliAuth};

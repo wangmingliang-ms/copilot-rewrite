@@ -53,10 +53,7 @@ interface AuthStatus {
   username: string | null;
   display_name: string | null;
   environment_override: boolean;
-}
-
-interface AuthorizationRequest {
-  authorization_url: string;
+  cli_available: boolean;
 }
 
 const LANGUAGES = [
@@ -82,6 +79,7 @@ const SettingsPanel: FC<{ themeCtx: ThemeCtx }> = ({ themeCtx }) => {
     username: null,
     display_name: null,
     environment_override: false,
+    cli_available: false,
   });
   const [settings, setSettings] = useState<Settings>({
     target_language: "English",
@@ -97,9 +95,8 @@ const SettingsPanel: FC<{ themeCtx: ThemeCtx }> = ({ themeCtx }) => {
     popup_icon_position: "top-left",
     debug_mode: false,
   });
-  const [loginStep, setLoginStep] = useState<"idle" | "loading" | "waiting" | "error">("idle");
+  const [loginStep, setLoginStep] = useState<"idle" | "waiting" | "error">("idle");
   const [loginError, setLoginError] = useState<string | null>(null);
-  const loginPollingRef = useRef(false);
   const loginFlowRef = useRef(0);
   const [saved, setSaved] = useState(false);
   const [appVersion, setAppVersion] = useState("0.0.0");
@@ -120,7 +117,7 @@ const SettingsPanel: FC<{ themeCtx: ThemeCtx }> = ({ themeCtx }) => {
         setAuthStatus(status);
         if (status.logged_in) setLoginStep("idle");
       })
-      .catch((error) => console.error("Failed to load Microsoft auth status:", error));
+      .catch((error) => console.error("Failed to load Azure CLI auth status:", error));
   }, []);
   useEffect(() => {
     getVersion().then(setAppVersion).catch(() => {});
@@ -151,21 +148,11 @@ const SettingsPanel: FC<{ themeCtx: ThemeCtx }> = ({ themeCtx }) => {
 
   const handleLogin = useCallback(async () => {
     const flowId = ++loginFlowRef.current;
-    invoke("log_action", { action: "Microsoft login started" }).catch(() => {});
-    setLoginStep("loading");
+    invoke("log_action", { action: "Azure CLI login started" }).catch(() => {});
+    setLoginStep("waiting");
     setLoginError(null);
     try {
-      const request = await invoke<AuthorizationRequest>("start_microsoft_login");
-      if (loginFlowRef.current !== flowId) return;
-      loginPollingRef.current = true;
-      setLoginStep("waiting");
-      try {
-        await open(request.authorization_url);
-      } catch {
-        await invoke("open_url", { url: request.authorization_url });
-      }
-
-      const status = await invoke<AuthStatus>("poll_microsoft_login");
+      const status = await invoke<AuthStatus>("start_microsoft_login");
       if (loginFlowRef.current !== flowId) return;
       setAuthStatus(status);
       setLoginStep("idle");
@@ -174,47 +161,25 @@ const SettingsPanel: FC<{ themeCtx: ThemeCtx }> = ({ themeCtx }) => {
       setLoginError(String(error));
       setLoginStep("error");
     } finally {
-      if (loginFlowRef.current === flowId) {
-        loginPollingRef.current = false;
-      }
     }
   }, []);
 
   const handleCancelLogin = useCallback(async () => {
     loginFlowRef.current += 1;
-    loginPollingRef.current = false;
     await invoke("cancel_microsoft_login").catch(() => {});
     setLoginError(null);
     setLoginStep("idle");
-  }, []);
-
-  const handleLogout = useCallback(async () => {
-    loginFlowRef.current += 1;
-    invoke("log_action", { action: "Microsoft logout clicked" }).catch(() => {});
-    try {
-      await invoke("logout");
-      setAuthStatus({
-        logged_in: false,
-        username: null,
-        display_name: null,
-        environment_override: false,
-      });
-      setLoginStep("idle");
-    } catch (error) {
-      setLoginError(String(error));
-      setLoginStep("error");
-    }
   }, []);
 
   // ── Tab content render functions ──
 
   const renderGeneralTab = () => (
     <>
-      {/* Microsoft Account */}
+      {/* Azure CLI Account */}
       <section className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 px-4 py-3 mb-3">
         <h2 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase mb-2 flex items-center gap-2">
           <MicrosoftIcon size={14} />
-          Microsoft Account
+          Azure CLI Account
         </h2>
 
         {authStatus.logged_in ? (
@@ -228,43 +193,43 @@ const SettingsPanel: FC<{ themeCtx: ThemeCtx }> = ({ themeCtx }) => {
                   {authStatus.display_name || authStatus.username || "Microsoft user"}
                 </p>
                 <p className="text-[11px] text-gray-500 dark:text-gray-400 truncate">
-                  {authStatus.username || "Connected to Microsoft Foundry"}
+                  {authStatus.username || "Development token"}
                 </p>
-                <p className="text-[10px] text-green-600 dark:text-green-400">{"\u25CF"} Foundry access connected</p>
+                <p className="text-[10px] text-green-600 dark:text-green-400">
+                  {"\u25CF"} {authStatus.environment_override ? "Foundry development token connected" : "Signed in through Azure CLI"}
+                </p>
               </div>
             </div>
-            {!authStatus.environment_override && (
-              <button
-                onClick={handleLogout}
-                className="ml-3 text-xs text-red-500 hover:text-red-700 transition-colors flex-shrink-0"
-              >
-                Sign out
-              </button>
-            )}
           </div>
         ) : loginStep === "idle" ? (
           <div>
-            <button
-              onClick={handleLogin}
-              className="w-full rounded-lg bg-gray-900 dark:bg-gray-100 px-4 py-2.5 text-sm font-medium text-white dark:text-gray-900 transition-colors hover:bg-gray-800 dark:hover:bg-gray-200 active:scale-[0.98] flex items-center justify-center gap-2"
-            >
-              <MicrosoftIcon size={16} />
-              Sign in with Microsoft
-            </button>
+            {authStatus.cli_available ? (
+              <button
+                onClick={handleLogin}
+                className="w-full rounded-lg bg-gray-900 dark:bg-gray-100 px-4 py-2.5 text-sm font-medium text-white dark:text-gray-900 transition-colors hover:bg-gray-800 dark:hover:bg-gray-200 active:scale-[0.98] flex items-center justify-center gap-2"
+              >
+                <MicrosoftIcon size={16} />
+                Sign in with Azure CLI
+              </button>
+            ) : (
+              <button
+                onClick={() => open("https://aka.ms/installazurecliwindows")}
+                className="w-full rounded-lg bg-gray-900 dark:bg-gray-100 px-4 py-2.5 text-sm font-medium text-white dark:text-gray-900 transition-colors hover:bg-gray-800 dark:hover:bg-gray-200 active:scale-[0.98]"
+              >
+                Install Azure CLI
+              </button>
+            )}
             <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-2 text-center">
-              Access is limited to users assigned by the administrator.
+              {authStatus.cli_available
+                ? "A browser window will open. Foundry project access is controlled by Azure RBAC."
+                : "Azure CLI is required. Restart Copilot Rewrite after installation."}
             </p>
-          </div>
-        ) : loginStep === "loading" ? (
-          <div className="flex items-center justify-center py-4">
-            <div className="h-5 w-5 animate-spin rounded-full border-2 border-gray-300 dark:border-gray-600 border-t-gray-900 dark:border-t-gray-100" />
-            <span className="ml-3 text-sm text-gray-500 dark:text-gray-400">Connecting...</span>
           </div>
         ) : loginStep === "waiting" ? (
           <div className="text-center py-3">
             <div className="flex items-center justify-center">
               <div className="h-5 w-5 animate-spin rounded-full border-2 border-copilot-blue border-t-transparent" />
-              <span className="ml-3 text-sm text-gray-500 dark:text-gray-400">Complete sign-in in your browser...</span>
+              <span className="ml-3 text-sm text-gray-500 dark:text-gray-400">Waiting for Azure CLI browser sign-in...</span>
             </div>
             <button
               onClick={handleCancelLogin}

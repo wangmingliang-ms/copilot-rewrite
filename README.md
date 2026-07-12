@@ -17,7 +17,7 @@ The entire flow is non-intrusive: the popup never steals focus from the applicat
 - **Translate + Polish** — Auto-detects the source language, translates to your target language, and polishes the text in one step
 - **Beast Mode** — Enable full creative rewriting with restructuring, examples, and best-version output
 - **Prompt Agent backend** — Prompts and model selection are managed in Microsoft Foundry
-- **Microsoft sign-in** — Uses the system browser with Entra Authorization Code Flow + PKCE and automatic access-token refresh
+- **Microsoft sign-in** — Uses Azure CLI browser login and its managed Entra token cache
 - **13 target languages** — English, Chinese (Simplified/Traditional), Japanese, Korean, French, German, Spanish, Portuguese, Russian, Arabic, Hindi, Italian
 - **In-place replacement** — Simulates Ctrl+V to paste results directly into the focused application
 - **Markdown rendering** — Results are rendered as rich Markdown with toggle to view raw source
@@ -36,7 +36,8 @@ The entire flow is non-intrusive: the popup never steals focus from the applicat
 
 - **Windows 10/11** (x64)
 - **WebView2 Runtime** (pre-installed on Windows 10 21H2+ and Windows 11)
-- A Microsoft account assigned to the `Copilot Rewrite Foundry` enterprise application and the Foundry project
+- [Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli-windows)
+- A Microsoft account with the `Foundry User` role on `copilot-rewrite-project`
 
 ### For Development
 
@@ -51,11 +52,11 @@ Download the latest installer from [Releases](https://github.com/wangmingliang-m
 ### First-Time Setup
 
 1. Right-click the tray icon → **Settings**
-2. Click **Sign in with Microsoft** and complete sign-in in your browser
+2. Click **Sign in with Azure CLI** and complete sign-in in your browser
 3. Select your preferred **target language**
 4. Close settings — you're ready to go!
 
-This Hackathon branch defaults to the isolated `copilot-rewrite-project` endpoint. Only users assigned to both the enterprise application and the project's `Foundry User` role can use the Agents.
+This Hackathon branch defaults to the isolated `copilot-rewrite-project` endpoint. Azure CLI supplies the signed-in user's token, and project-scoped `Foundry User` RBAC determines who can invoke the Agents.
 
 ## Development
 
@@ -95,7 +96,7 @@ cd src-tauri && cargo test --test foundry_agents_e2e -- --ignored --test-threads
 | Frontend | React 19 + TypeScript + Tailwind CSS |
 | Backend | Rust with `windows` crate for Win32/COM APIs |
 | API | Microsoft Foundry Agent Responses endpoint |
-| Auth | Microsoft Entra Authorization Code Flow + PKCE with refresh-token renewal |
+| Auth | Azure CLI browser login and Entra token acquisition |
 
 ### Two-Process Model
 
@@ -122,7 +123,7 @@ src-tauri/src/
 ├── lib.rs              # App state, Tauri commands, entry point
 ├── main.rs             # Windows entry point
 ├── auth/
-│   └── microsoft.rs    # Entra browser login with PKCE, token cache, and refresh
+│   └── azure_cli.rs    # Azure CLI account detection, login, and Foundry tokens
 ├── foundry/
 │   └── client.rs       # Foundry Responses client and Agent routing contract
 ├── selection/
@@ -180,13 +181,13 @@ Settings are stored in `%APPDATA%/copilot-rewrite/settings.json`:
 }
 ```
 
-Microsoft access and refresh tokens are stored separately in `%APPDATA%/copilot-rewrite/auth.dat`, protected for the current Windows user with DPAPI. The app refreshes an expiring access token before calling Foundry and removes the file on sign-out.
+The app does not store Microsoft access or refresh tokens. Before each Foundry request, it asks Azure CLI for a token scoped to `https://ai.azure.com`; Azure CLI owns its login and token cache.
 
 The app posts to `<project-endpoint>/openai/v1/responses` with `stream: false`, the selected text in `input`, and an `agent_reference` selected from the current write/read and creative modes. Prompts and model configuration are not sent by the client.
 
 For compatibility with the existing popup, the Agent should return write-mode Translate + Polish output separated by `---TRANSLATED---`. Read-mode output can optionally append `---VOCABULARY---` and `---SUMMARY---` sections.
 
-The normal app flow does not require environment variables. Developers can bypass interactive login with a short-lived token and can override the project endpoint:
+The normal app flow requires Azure CLI. Developers can bypass Azure CLI with a short-lived token and can override the project endpoint:
 
 ```powershell
 $env:FOUNDRY_ACCESS_TOKEN = az account get-access-token --resource https://ai.azure.com --query accessToken --output tsv

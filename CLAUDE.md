@@ -93,20 +93,20 @@ COM is initialized per-thread (`CoInitializeEx`), so UIA must stay on its dedica
 
 ### IPC Communication
 
-**Frontend → Backend (invoke):** `process_and_show_preview`, `dismiss_popup`, `cancel_request`, `replace_text`, `copy_to_clipboard`, `copy_html_to_clipboard`, `resize_popup_content`, `get_settings`, `update_settings`, `get_auth_status`, `start_microsoft_login`, `poll_microsoft_login`, `cancel_microsoft_login`, `logout`, `open_settings`, `log_action`
+**Frontend → Backend (invoke):** `process_and_show_preview`, `dismiss_popup`, `cancel_request`, `replace_text`, `copy_to_clipboard`, `copy_html_to_clipboard`, `resize_popup_content`, `get_settings`, `update_settings`, `get_auth_status`, `start_microsoft_login`, `cancel_microsoft_login`, `open_settings`, `log_action`
 
 **Backend → Frontend (events):** `selection-detected`, `selection-cleared`, `show-preview-loading`, `show-preview-result` (carries `ProcessResponse`), `show-preview-error`, `request-cancelled`
 
-### Microsoft Entra Authentication
+### Microsoft Entra Authentication through Azure CLI
 
-The app is a single-tenant Entra public client and uses **Authorization Code Flow with PKCE** (`auth/microsoft.rs`):
+The app delegates interactive authentication and token caching to **Azure CLI** (`auth/azure_cli.rs`):
 
-1. Start a temporary localhost callback and open the Microsoft authorization page in the system browser
-2. Request `https://ai.azure.com/.default offline_access openid profile` using PKCE
-3. Cache the access and refresh tokens in DPAPI-protected `auth.dat`
-4. Refresh access tokens before expiry and send them to the Foundry Responses endpoint
+1. Check the active Azure CLI account and required Microsoft tenant
+2. If needed, run `az login --tenant <tenant> --allow-no-subscriptions`, which opens the system browser
+3. Request a short-lived token with `az account get-access-token --resource https://ai.azure.com`
+4. Send that token to the Foundry Responses endpoint
 
-Enterprise Application assignment controls who may sign in. Project-scoped `Foundry User` RBAC controls who may invoke the Agents. The desktop public client has no client secret.
+Project-scoped `Foundry User` RBAC controls who may invoke the Agents. The app does not store Microsoft access or refresh tokens.
 
 ### Foundry Prompt Agents
 
@@ -130,14 +130,13 @@ All cross-module state lives in `Arc<AppState>` using `parking_lot::Mutex`:
 - `current_selection` — the `SelectionInfo` including source HWND, app name, `is_input_element`
 - `selection_generation` — atomic counter bumped on dismiss for monitor reset
 - `settings` — persisted to `%APPDATA%/copilot-rewrite/settings.json`
-- `microsoft_auth` — Entra Authorization Code Flow with PKCE, DPAPI credential cache, and access-token refresh
+- `azure_cli_auth` — Azure CLI account detection, browser login, and Foundry token acquisition
 
 ### Persistent Storage
 
 All config files go under `%APPDATA%/copilot-rewrite/`:
 
 - `settings.json` — user settings (languages, creative_mode, read_mode_enabled, read_mode_sub, etc.)
-- `auth.dat` — DPAPI-protected Microsoft access/refresh token and display identity
 - `logs/YYYY-MM-DD.log` — date-rotated log files (INFO+ level)
 - `replace-debug.log` — detailed replacement engine debug log
 - `.lock` — single-instance enforcement (exclusive file lock)
