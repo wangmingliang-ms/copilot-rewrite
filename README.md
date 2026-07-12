@@ -1,12 +1,12 @@
 # Copilot Rewrite
 
-A **Windows-only system-level** text translation and polishing tool powered by GitHub Copilot. Select text in any application, click the floating popup, and get instant AI-powered translation, polishing, or both — then replace the original text in-place with a single click.
+A **Windows-only system-level** text translation and polishing tool powered by seven Microsoft Foundry Prompt Agents.
 
 ## How It Works
 
 1. **Select text** in any application (Teams, Outlook, Edge, etc.)
 2. A small **floating icon** appears near your cursor
-3. **Click the icon** — it spins while calling the Copilot API
+3. **Click the icon** — it spins while calling the Foundry Agent
 4. The popup **expands** to show the translated/polished result rendered as Markdown
 5. Click **Replace** to paste the result back into the original application, or **Copy** to clipboard
 
@@ -16,7 +16,7 @@ The entire flow is non-intrusive: the popup never steals focus from the applicat
 
 - **Translate + Polish** — Auto-detects the source language, translates to your target language, and polishes the text in one step
 - **Beast Mode** — Enable full creative rewriting with restructuring, examples, and best-version output
-- **Multi-model support** — Choose from available Copilot models (GPT-4o, Claude Sonnet, etc.)
+- **Prompt Agent backend** — Prompts and model selection are managed in Microsoft Foundry
 - **13 target languages** — English, Chinese (Simplified/Traditional), Japanese, Korean, French, German, Spanish, Portuguese, Russian, Arabic, Hindi, Italian
 - **In-place replacement** — Simulates Ctrl+V to paste results directly into the focused application
 - **Markdown rendering** — Results are rendered as rich Markdown with toggle to view raw source
@@ -35,7 +35,7 @@ The entire flow is non-intrusive: the popup never steals focus from the applicat
 
 - **Windows 10/11** (x64)
 - **WebView2 Runtime** (pre-installed on Windows 10 21H2+ and Windows 11)
-- **GitHub account** with [Copilot](https://github.com/features/copilot) access
+- A Microsoft Foundry project endpoint and access to its Prompt Agents
 
 ### For Development
 
@@ -50,10 +50,11 @@ Download the latest installer from [Releases](https://github.com/wangmingliang-m
 ### First-Time Setup
 
 1. Right-click the tray icon → **Settings**
-2. Click **Sign in with GitHub** — a device code flow opens in your browser
-3. Authorize the app on GitHub
-4. Select your preferred **AI model** and **target language**
-5. Close settings — you're ready to go!
+2. Set `FOUNDRY_ACCESS_TOKEN` to a valid short-lived Entra token before launching
+3. Select your preferred **target language**
+4. Close settings — you're ready to go!
+
+This Hackathon branch defaults to the `wangmi-ai-project` endpoint. Developers can override it through `FOUNDRY_PROJECT_ENDPOINT`.
 
 ## Development
 
@@ -78,6 +79,9 @@ npx tsc --noEmit
 
 # Run a single Rust test
 cd src-tauri && cargo test clipboard::manager::tests::test_clipboard_roundtrip
+
+# Run the seven live Foundry Agent E2E tests (requires az login)
+cd src-tauri && cargo test --test foundry_agents_e2e -- --ignored --test-threads=1
 ```
 
 ## Architecture
@@ -89,8 +93,8 @@ cd src-tauri && cargo test clipboard::manager::tests::test_clipboard_roundtrip
 | Framework | [Tauri 2.0](https://v2.tauri.app/) (Rust + WebView2) |
 | Frontend | React 19 + TypeScript + Tailwind CSS |
 | Backend | Rust with `windows` crate for Win32/COM APIs |
-| API | GitHub Copilot Chat Completions (SSE streaming) |
-| Auth | GitHub OAuth Device Flow (VS Code client ID) |
+| API | Microsoft Foundry Agent Responses endpoint |
+| Auth | Short-lived Microsoft Entra bearer token |
 
 ### Two-Process Model
 
@@ -116,9 +120,9 @@ icon (48×48) → spinning (48×48) → expanded (auto-sized) → dismissed
 src-tauri/src/
 ├── lib.rs              # App state, Tauri commands, entry point
 ├── main.rs             # Windows entry point
-├── copilot/
-│   ├── client.rs       # Copilot API client (token exchange, SSE streaming, system prompts)
-│   └── oauth.rs        # GitHub OAuth Device Flow (login, token persistence)
+├── foundry/
+│   └── client.rs       # Foundry Responses client and Agent routing contract
+├── copilot/            # Legacy Copilot implementation retained on the MVP branch
 ├── selection/
 │   ├── monitor.rs      # Selection detection loop (dedicated OS thread)
 │   └── uia.rs          # UI Automation TextPattern polling
@@ -143,7 +147,7 @@ src/
 ├── components/
 │   ├── App.tsx                 # Hash-based routing (popup vs settings)
 │   ├── Popup.tsx               # Popup state machine (icon → spinning → expanded)
-│   ├── SettingsPanel.tsx       # Login, model, language, beast mode settings
+│   ├── SettingsPanel.tsx       # Foundry endpoint, language, and behavior settings
 │   ├── Toolbar.tsx             # Action toolbar
 │   ├── Preview.tsx             # Result preview
 │   └── LoginDialog.tsx         # GitHub OAuth login UI
@@ -168,15 +172,24 @@ Settings are stored in `%APPDATA%/copilot-rewrite/settings.json`:
 
 ```json
 {
+  "foundry_project_endpoint": "https://example.services.ai.azure.com/api/projects/example",
   "target_language": "English",
   "auto_start": false,
-  "beast_mode": false,
-  "model": "claude-sonnet-4",
+  "creative_mode": false,
   "poll_interval_ms": 100
 }
 ```
 
-Auth credentials are stored separately in `%APPDATA%/copilot-rewrite/auth.json`.
+The app posts to `<project-endpoint>/openai/v1/responses` with `stream: false`, the selected text in `input`, and an `agent_reference` selected from the current write/read and creative modes. Prompts and model configuration are not sent by the client.
+
+For compatibility with the existing popup, the Agent should return write-mode Translate + Polish output separated by `---TRANSLATED---`. Read-mode output can optionally append `---VOCABULARY---` and `---SUMMARY---` sections.
+
+For local development, obtain a token before starting Tauri:
+
+```powershell
+$env:FOUNDRY_ACCESS_TOKEN = az account get-access-token --resource https://ai.azure.com --query accessToken --output tsv
+npm run tauri dev
+```
 
 ## License
 

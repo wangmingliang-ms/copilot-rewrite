@@ -7,7 +7,6 @@ import iconImg from "../assets/icon-48.png";
 import { SelectionInfo, ProcessResponse } from "../hooks/useSelection";
 import { extractJsonStringValue, stripCodeFences, extractVocabulary, parseReadModeSeparator } from "../utils/jsonParser";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
-import * as Select from "@radix-ui/react-select";
 import { Square, RefreshCw, ChevronDown, ChevronLeft, ChevronRight, Check, Sparkles, X, Settings, Copy, FileText, AlertCircle, Code, Type } from "lucide-react";
 
 // ── State machine ──
@@ -29,14 +28,6 @@ const READ_ACTIONS: { value: ReadAction; label: string }[] = [
   { value: "simple_translate", label: "Only Translate" },
 ];
 
-interface CopilotModel {
-  id: string;
-  name: string;
-  vendor: string;
-  preview: boolean;
-  category: string;
-}
-
 interface PopupProps {
   selection: SelectionInfo | null;
 }
@@ -48,10 +39,6 @@ const Popup: FC<PopupProps> = ({ selection }) => {
   const [result, setResult] = useState<ProcessResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showRaw, setShowRaw] = useState(false);
-  const [currentModel, setCurrentModel] = useState<string>("");
-  const [currentModelId, setCurrentModelId] = useState<string>("");
-  const [modelDropMaxH, setModelDropMaxH] = useState(300);
-  const [models, setModels] = useState<CopilotModel[]>([]);
   const [creativeMode, setCreativeMode] = useState<boolean>(false);
   // Replace mode — resolved at selection time, user can manually switch
   type SmartReplaceMode = "markdown" | "rendered" | "plain";
@@ -119,11 +106,11 @@ const Popup: FC<PopupProps> = ({ selection }) => {
     return () => observer.disconnect();
   }, []);
 
-  // Refresh settings (model name + creative mode + theme + read mode + write action) from backend
+  // Refresh behavior settings from the backend.
   const refreshSettings = useCallback(async () => {
     try {
       const s = await invoke<{
-        model: string; creative_mode: boolean; theme?: string;
+        creative_mode: boolean; theme?: string;
         native_language?: string; target_language?: string; read_mode_enabled?: boolean; read_mode_sub?: string;
         write_action?: string;
       }>("get_settings");
@@ -141,26 +128,6 @@ const Popup: FC<PopupProps> = ({ selection }) => {
       };
       setReadModeSettings(rms);
       setCurrentReadAction(rms.read_mode_sub === "simple_translate" ? "simple_translate" : "translate_summarize");
-      if (!s.model) { setCurrentModel(""); setCurrentModelId(""); return; }
-      setCurrentModelId(s.model);
-      try {
-        const fetchedModels = await invoke<CopilotModel[]>("list_models");
-        setModels(fetchedModels);
-        const match = fetchedModels.find((m) => m.id === s.model);
-        setCurrentModel(match ? match.name : s.model);
-      } catch (err) {
-        // If models failed to load, retry after a short delay (token might not be ready yet)
-        console.warn("Failed to load models, will retry:", err);
-        setTimeout(async () => {
-          try {
-            const retried = await invoke<CopilotModel[]>("list_models");
-            setModels(retried);
-          } catch {
-            // Still failed - set empty but user can try manually via Settings
-          }
-        }, 2000);
-        setCurrentModel(s.model);
-      }
     } catch { /* ignore */ }
   }, []);
 
@@ -495,20 +462,6 @@ const Popup: FC<PopupProps> = ({ selection }) => {
     setPopupState("loading");
     await refreshSettings();
 
-    try {
-      const auth = await invoke<{ logged_in: boolean }>("get_auth_status");
-      if (!auth.logged_in) {
-        invoke("log_action", { action: "Icon clicked — not logged in, opening Settings" }).catch(() => {});
-        setPopupState("icon");
-        await invoke("open_settings");
-        return;
-      }
-    } catch {
-      setError("Please login via tray → Settings");
-      setPopupState("error");
-      return;
-    }
-
     if (!selection) { setPopupState("icon"); return; }
 
     const readMode = selection.is_input_element === false;
@@ -563,32 +516,6 @@ const Popup: FC<PopupProps> = ({ selection }) => {
     }
     setPopupState("expanded");
   }, [history]);
-
-  // ── Model change → persist + auto-regenerate ──
-  const handleModelChange = useCallback(async (modelId: string) => {
-    if (!modelId || modelId === currentModelId) return;
-    setCurrentModelId(modelId);
-    const match = models.find((m) => m.id === modelId);
-    setCurrentModel(match ? match.name : modelId);
-    invoke("log_action", { action: `Model changed to: ${modelId}` }).catch(() => {});
-
-    // Persist
-    try {
-      const s = await invoke<Record<string, unknown>>("get_settings");
-      await invoke("update_settings", { settings: { ...s, model: modelId } });
-    } catch { /* non-critical */ }
-
-    // Auto-regenerate if we have a result
-    if (state === "expanded" || state === "error") {
-      await invoke("cancel_request").catch(() => {});
-      setPopupState("loading");
-      setStreamingText(null);
-      setResult(null);
-      setRefreshing(true);
-      refreshingRef.current = true;
-      await invokeProcess({ isRefresh: true });
-    }
-  }, [currentModelId, models, state, invokeProcess]);
 
   // ── Action dropdown change → persist + auto-regenerate ──
   const handleWriteActionChange = useCallback(async (action: WriteAction) => {
@@ -832,68 +759,9 @@ const Popup: FC<PopupProps> = ({ selection }) => {
           </DropdownMenu.Root>
         </div>
 
-        {/* Model dropdown */}
-        <div className={`${disabledClass}`}>
-          <Select.Root value={currentModelId} onValueChange={handleModelChange} onOpenChange={(open) => {
-            if (open) {
-              // Cap dropdown height to fit within the window regardless of pop direction
-              setModelDropMaxH(Math.max(window.innerHeight - 60, 60));
-            }
-          }}>
-            <Select.Trigger
-              className={`flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-mono text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors max-w-[150px] ${toolbarBtnClass}`}
-              disabled={isGenerating}
-            >
-              <Select.Value placeholder="Select model">
-                {currentModel || currentModelId || "No model"}
-              </Select.Value>
-              <Select.Icon>
-                <ChevronDown size={10} className="flex-shrink-0" />
-              </Select.Icon>
-            </Select.Trigger>
-            <Select.Portal>
-              <Select.Content
-                className="bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 overflow-hidden z-50"
-                position="popper"
-                sideOffset={4}
-              >
-                <Select.Viewport className="p-1 overflow-y-auto" style={{ maxHeight: `${modelDropMaxH}px` }}>
-                  {(() => {
-                    const grouped = models.reduce<Record<string, CopilotModel[]>>((acc, m) => {
-                      const vendor = m.vendor || "Other";
-                      (acc[vendor] = acc[vendor] || []).push(m);
-                      return acc;
-                    }, {});
-                    const sortedVendors = Object.keys(grouped).sort();
-                    return sortedVendors.map((vendor) => (
-                      <Select.Group key={vendor}>
-                        <Select.Label className="px-2.5 py-1 text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase">{vendor}</Select.Label>
-                        {grouped[vendor].sort((a, b) => a.name.localeCompare(b.name)).map((model) => (
-                          <Select.Item
-                            key={model.id}
-                            value={model.id}
-                            className="px-2.5 py-1.5 text-xs text-gray-900 dark:text-gray-100 rounded cursor-pointer outline-none data-[highlighted]:bg-gray-100 dark:data-[highlighted]:bg-gray-700 flex items-center gap-2"
-                          >
-                            <Select.ItemText>
-                              {model.name}{model.preview ? " (Preview)" : ""}{model.category === "powerful" ? " ⚡" : ""}
-                            </Select.ItemText>
-                            <Select.ItemIndicator>
-                              <Check size={12} className="text-copilot-blue" />
-                            </Select.ItemIndicator>
-                          </Select.Item>
-                        ))}
-                      </Select.Group>
-                    ));
-                  })()}
-                  {models.length === 0 && currentModelId && (
-                    <Select.Item value={currentModelId} className="px-2.5 py-1.5 text-xs text-gray-900 dark:text-gray-100">
-                      <Select.ItemText>{currentModel || currentModelId}</Select.ItemText>
-                    </Select.Item>
-                  )}
-                </Select.Viewport>
-              </Select.Content>
-            </Select.Portal>
-          </Select.Root>
+        {/* Backend badge */}
+        <div className={`px-2 py-1 rounded-md text-[10px] font-mono text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 ${disabledClass}`}>
+          Foundry Agent
         </div>
 
         {/* Settings gear */}

@@ -10,7 +10,7 @@
 
 System-level text translation and polishing tool for Windows. Works across all applications (Teams, Outlook, Edge, GitHub, etc.) via Windows UI Automation.
 
-- **Tech Stack:** Tauri 2.0 (Rust + WebView2), React + Tailwind, Copilot API
+- **Tech Stack:** Tauri 2.0 (Rust + WebView2), React + Tailwind, Microsoft Foundry Agent
 - **Project:** `C:\Users\wangmi\projects\copilot-rewrite`
 
 ---
@@ -134,10 +134,11 @@ When text selection is cleared (UIA returns no selection):
 
 ## 6. LLM Backend
 
-- **API:** GitHub Copilot API (via OAuth device flow)
-- **Streaming:** Results stream progressively into popup
-- **Beast Mode:** More aggressive rewriting (restructure, fix factual errors)
-- **Error correction:** Silently fixes typos, wrong product names, incorrect terminology
+- **API:** Microsoft Foundry project Responses endpoint routed by `agent_reference`
+- **Authentication:** Short-lived Microsoft Entra bearer token for direct project access
+- **Prompt ownership:** System instructions and model selection live in the Foundry Agent
+- **Client input:** Selected text only; mode selection determines the Agent reference
+- **Streaming:** Disabled for the MVP; the existing loading and final-result popup states remain unchanged
 
 ---
 

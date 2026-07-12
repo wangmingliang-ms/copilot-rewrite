@@ -4,6 +4,7 @@
 pub mod autostart;
 pub mod clipboard;
 pub mod copilot;
+pub mod foundry;
 pub mod overlay;
 pub mod replacement;
 pub mod selection;
@@ -36,6 +37,8 @@ pub struct AppState {
     pub settings: Mutex<Settings>,
     /// Copilot API client (for chat completions — has its own HTTP client with 30s timeout)
     pub copilot_client: copilot::CopilotClient,
+    /// Public Microsoft Foundry Prompt Agent client used by the Hackathon MVP
+    pub foundry_client: foundry::FoundryClient,
     /// Shared HTTP client for lightweight requests (OAuth, GitHub API, etc.)
     pub http_client: reqwest::Client,
     /// Pending OAuth device code (during login flow)
@@ -68,6 +71,7 @@ impl AppState {
             selection_generation: std::sync::atomic::AtomicU64::new(0),
             settings: Mutex::new(settings),
             copilot_client: copilot::CopilotClient::new(),
+            foundry_client: foundry::FoundryClient::new(),
             http_client: reqwest::Client::new(),
             pending_device_code: Mutex::new(None),
             cancel_token: Mutex::new(tokio_util::sync::CancellationToken::new()),
@@ -163,6 +167,9 @@ pub struct Settings {
     pub blacklisted_apps: Vec<String>,
     /// Copilot API token
     pub api_token: String,
+    /// Microsoft Foundry project endpoint
+    #[serde(default, alias = "foundry_agent_endpoint")]
+    pub foundry_project_endpoint: String,
     /// Polling interval in milliseconds (50-500)
     pub poll_interval_ms: u64,
     /// "More Creative" mode — LLM freely rewrites with full creative freedom
@@ -295,6 +302,7 @@ impl Default for Settings {
             auto_start: false,
             blacklisted_apps: vec![],
             api_token: String::new(),
+            foundry_project_endpoint: String::new(),
             poll_interval_ms: 100,
             creative_mode: true,
             model: "claude-sonnet-4".to_string(),
@@ -339,7 +347,7 @@ pub struct ProcessRequest {
     pub creative_mode: Option<bool>,
 }
 
-/// Response from the Copilot API processing
+/// Response from the configured LLM backend
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProcessResponse {
     pub original: String,
@@ -356,53 +364,66 @@ pub struct AuthStatus {
 
 // ─── Tauri Commands ───────────────────────────────────────────────
 
-/// Process selected text with Copilot API
+const FOUNDRY_MODEL_DEPLOYMENT: &str = "gpt-5.6-sol";
+const DEFAULT_FOUNDRY_PROJECT_ENDPOINT: &str =
+    "https://wangmi-ai.services.ai.azure.com/api/projects/wangmi-ai-project";
+
+fn foundry_project_endpoint(settings: &Settings) -> String {
+    std::env::var("FOUNDRY_PROJECT_ENDPOINT")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| {
+            (!settings.foundry_project_endpoint.trim().is_empty())
+                .then(|| settings.foundry_project_endpoint.clone())
+        })
+        .unwrap_or_else(|| DEFAULT_FOUNDRY_PROJECT_ENDPOINT.to_string())
+}
+
+fn foundry_access_token() -> Option<String> {
+    std::env::var("FOUNDRY_ACCESS_TOKEN")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+}
+
+fn foundry_agent_name(action: &RewriteAction, creative_mode: bool) -> &'static str {
+    match (action, creative_mode) {
+        (RewriteAction::Translate, false) => "copilot-rewrite-translate",
+        (RewriteAction::Polish, false) => "copilot-rewrite-polish",
+        (RewriteAction::TranslateAndPolish, false) => "copilot-rewrite-translate-polish",
+        (RewriteAction::Translate, true) => "copilot-rewrite-creative-translate",
+        (RewriteAction::Polish, true) => "copilot-rewrite-creative-polish",
+        (RewriteAction::TranslateAndPolish, true) => {
+            "copilot-rewrite-creative-translate-polish"
+        }
+        (RewriteAction::ReadModeTranslate, _) => "copilot-rewrite-read",
+    }
+}
+
+/// Process selected text with the public Microsoft Foundry Agent
 #[tauri::command]
 async fn process_text(
     state: tauri::State<'_, Arc<AppState>>,
     request: ProcessRequest,
 ) -> Result<ProcessResponse, String> {
     let settings = state.settings.lock().clone();
+    let endpoint = foundry_project_endpoint(&settings);
+    let access_token = foundry_access_token();
+    let creative_mode = request.creative_mode.unwrap_or(settings.creative_mode);
+    let agent_name = foundry_agent_name(&request.action, creative_mode);
 
-    if settings.api_token.is_empty() {
-        return Err("Not logged in. Please click the ⚙ button to log in with GitHub.".to_string());
-    }
-
-    let result = match &request.action {
-        RewriteAction::ReadModeTranslate => {
-            state
-                .copilot_client
-                .process_read_mode(
-                    &request.text,
-                    &settings.native_language,
-                    &settings.target_language,
-                    &settings.api_token,
-                    &settings.model,
-                    None,
-                    None,
-                )
-                .await
-                .map_err(|e| format!("Copilot API error: {}", e))?
-        }
-        _ => {
-            state
-                .copilot_client
-                .process(
-                    &request.text,
-                    &request.action,
-                    &settings.native_language,
-                    &settings.target_language,
-                    &settings.api_token,
-                    &settings.model,
-                    settings.creative_mode,
-                    "",
-                    None,
-                    None,
-                )
-                .await
-                .map_err(|e| format!("Copilot API error: {}", e))?
-        }
-    };
+    let result = state
+        .foundry_client
+        .process(
+            &endpoint,
+            FOUNDRY_MODEL_DEPLOYMENT,
+            agent_name,
+            &request.text,
+            access_token.as_deref(),
+            None,
+            None,
+        )
+        .await
+        .map_err(|e| format!("Microsoft Foundry Agent error: {}", e))?;
 
     Ok(ProcessResponse {
         original: request.text,
@@ -420,18 +441,8 @@ async fn process_and_show_preview(
     request: ProcessRequest,
 ) -> Result<(), String> {
     let settings = state.settings.lock().clone();
-
-    if settings.api_token.is_empty() {
-        return Err("Not logged in. Please sign in via Settings.".to_string());
-    }
-
-    // Get app context from current selection for prompt contextualization
-    let app_context = {
-        let sel = state.current_selection.lock();
-        sel.as_ref()
-            .map(|s| format!("App: {}, Window: {}", s.app_name, s.window_title))
-            .unwrap_or_default()
-    };
+    let endpoint = foundry_project_endpoint(&settings);
+    let access_token = foundry_access_token();
 
     // Create a fresh cancellation token for this request
     let cancel_token = tokio_util::sync::CancellationToken::new();
@@ -442,8 +453,8 @@ async fn process_and_show_preview(
 
     let t0 = std::time::Instant::now();
     let creative_mode = request.creative_mode.unwrap_or(settings.creative_mode);
-    info!("[PERF] process_and_show_preview START (action={:?}, model={}, creative={}, refresh={}, text_len={})",
-        request.action, settings.model, creative_mode, request.is_refresh, request.text.len());
+    info!("[PERF] process_and_show_preview START (action={:?}, backend=foundry-agent, creative={}, refresh={}, text_len={})",
+        request.action, creative_mode, request.is_refresh, request.text.len());
 
     // Emit loading event (frontend switches to loading state)
     app.emit("show-preview-loading", ())
@@ -457,7 +468,7 @@ async fn process_and_show_preview(
 
     // Resolve replace mode only for Write Mode (Read Mode has no Replace button).
     // Done at icon-click time so the cost is hidden behind the LLM wait.
-    if !matches!(request.action, RewriteAction::ReadModeTranslate) {
+    if !matches!(&request.action, RewriteAction::ReadModeTranslate) {
         let sel = state.current_selection.lock();
         let (app_name, window_title) = match sel.as_ref() {
             Some(s) => (s.app_name.as_str(), s.window_title.as_str()),
@@ -473,45 +484,23 @@ async fn process_and_show_preview(
         let _ = app.emit("replace-mode-resolved", mode_str);
     }
 
-    // Call Copilot API with cancellation support
-    let native_lang = settings.native_language.clone();
-    let target_lang = settings.target_language.clone();
+    // Call the public Foundry Agent with cancellation support.
+    let agent_name = foundry_agent_name(&request.action, creative_mode);
 
-    // Build chunk callback that emits streaming events
-    let app_clone = app.clone();
-    let chunk_callback = move |accumulated: &str| {
-        let _ = app_clone.emit("show-preview-chunk", accumulated);
-    };
+    info!("[PERF] +{}ms — Foundry Agent call starting...", t0.elapsed().as_millis());
 
-    info!("[PERF] +{}ms — LLM call starting with streaming...", t0.elapsed().as_millis());
-
-    let process_result: anyhow::Result<String> = match &request.action {
-        RewriteAction::ReadModeTranslate => {
-            state.copilot_client.process_read_mode(
-                &request.text,
-                &native_lang,
-                &target_lang,
-                &settings.api_token,
-                &settings.model,
-                Some(&chunk_callback),
-                Some(&cancel_token),
-            ).await
-        }
-        _ => {
-            state.copilot_client.process(
-                &request.text,
-                &request.action,
-                &native_lang,
-                &target_lang,
-                &settings.api_token,
-                &settings.model,
-                creative_mode,
-                &app_context,
-                Some(&chunk_callback),
-                Some(&cancel_token),
-            ).await
-        }
-    };
+    let process_result = state
+        .foundry_client
+        .process(
+            &endpoint,
+            FOUNDRY_MODEL_DEPLOYMENT,
+            agent_name,
+            &request.text,
+            access_token.as_deref(),
+            None,
+            Some(&cancel_token),
+        )
+        .await;
 
     let llm_ms = t0.elapsed().as_millis();
     match process_result {
@@ -542,7 +531,7 @@ async fn process_and_show_preview(
                 let _ = app.emit("request-cancelled", ());
                 Err("Request cancelled".to_string())
             } else {
-                let err_msg = format!("Copilot API error: {}", e);
+                let err_msg = format!("Microsoft Foundry Agent error: {}", e);
                 warn!("[PERF] +{}ms — LLM ERROR: {}", llm_ms, err_msg);
                 *state.preview_visible.lock() = false;
                 let _ = app.emit("show-preview-error", &err_msg);
@@ -1338,12 +1327,6 @@ pub fn run() {
                             ))
                             .show();
 
-                        // Auto-open Settings window so user can update immediately
-                        // (Windows toast notifications don't support reliable click callbacks)
-                        if let Some(settings_win) = update_handle.get_webview_window("settings") {
-                            let _ = settings_win.show();
-                            let _ = settings_win.set_focus();
-                        }
                     }
                     Ok(None) => {
                         info!("App is up to date");
