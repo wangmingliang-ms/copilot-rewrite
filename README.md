@@ -181,7 +181,7 @@ Settings are stored in `%APPDATA%/copilot-rewrite/settings.json`:
 }
 ```
 
-The app does not store Microsoft access or refresh tokens. Before each Foundry request, it asks Azure CLI for a token scoped to `https://ai.azure.com`; Azure CLI owns its login and token cache.
+The app does not persist Microsoft access or refresh tokens. It requests a token scoped to `https://ai.azure.com` from Azure CLI, caches it in process memory, and refreshes it five minutes before expiration. Azure CLI owns the durable login and token cache.
 
 The app posts to `<project-endpoint>/openai/v1/responses` with `stream: false`, the selected text in `input`, and an `agent_reference` selected from the current write/read and creative modes. Prompts and model configuration are not sent by the client.
 

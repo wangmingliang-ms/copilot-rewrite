@@ -137,7 +137,7 @@ When text selection is cleared (UIA returns no selection):
 - **API:** Microsoft Foundry project Responses endpoint routed by `agent_reference`
 - **Authentication:** Azure CLI browser login in the Microsoft tenant; the app requests `https://ai.azure.com` tokens from the CLI
 - **Authorization:** Project-scoped `Foundry User` RBAC controls who can invoke Agents
-- **Token lifecycle:** Azure CLI owns token caching and renewal; the app does not persist Microsoft credentials
+- **Token lifecycle:** The app keeps the current access token in memory and refreshes it through Azure CLI five minutes before expiration; it does not persist Microsoft credentials
 - **Client secret:** None
 - **Prompt ownership:** System instructions and model selection live in the Foundry Agent
 - **Client input:** Selected text only; mode selection determines the Agent reference

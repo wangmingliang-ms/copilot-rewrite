@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef, type FC } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-shell";
 import { getVersion } from "@tauri-apps/api/app";
 import { useUpdater } from "../hooks/useUpdater";
@@ -56,6 +57,16 @@ interface AuthStatus {
   cli_available: boolean;
 }
 
+interface AzureCliLoginCompleted {
+  flowId: number;
+  status: AuthStatus;
+}
+
+interface AzureCliLoginError {
+  flowId: number;
+  message: string;
+}
+
 const LANGUAGES = [
   "English", "Chinese (Simplified)", "Chinese (Traditional)",
   "Japanese", "Korean", "French", "German", "Spanish",
@@ -98,6 +109,8 @@ const SettingsPanel: FC<{ themeCtx: ThemeCtx }> = ({ themeCtx }) => {
   const [loginStep, setLoginStep] = useState<"idle" | "waiting" | "error">("idle");
   const [loginError, setLoginError] = useState<string | null>(null);
   const loginFlowRef = useRef(0);
+  const loginWaitingRef = useRef(false);
+  const [loginCancelReady, setLoginCancelReady] = useState(false);
   const [saved, setSaved] = useState(false);
   const [appVersion, setAppVersion] = useState("0.0.0");
   const updater = useUpdater(5_000); // auto-check 5s after settings opens
@@ -127,11 +140,11 @@ const SettingsPanel: FC<{ themeCtx: ThemeCtx }> = ({ themeCtx }) => {
   useEffect(() => {
     const onFocus = () => {
       loadSettings();
-      loadAuthStatus();
+      if (loginStep !== "waiting") loadAuthStatus();
     };
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
-  }, [loadSettings, loadAuthStatus]);
+  }, [loadSettings, loadAuthStatus, loginStep]);
 
   // Auto-save settings on any change (skip initial load)
   useEffect(() => {
@@ -148,27 +161,68 @@ const SettingsPanel: FC<{ themeCtx: ThemeCtx }> = ({ themeCtx }) => {
 
   const handleLogin = useCallback(async () => {
     const flowId = ++loginFlowRef.current;
-    invoke("log_action", { action: "Azure CLI login started" }).catch(() => {});
+    invoke("log_action", { action: `[AUTH UI flow=${flowId}] login requested` }).catch(() => {});
+    loginWaitingRef.current = true;
+    setLoginCancelReady(false);
     setLoginStep("waiting");
     setLoginError(null);
     try {
-      const status = await invoke<AuthStatus>("start_microsoft_login");
-      if (loginFlowRef.current !== flowId) return;
-      setAuthStatus(status);
-      setLoginStep("idle");
+      await invoke("start_microsoft_login", { flowId });
+      if (loginFlowRef.current === flowId && loginWaitingRef.current) setLoginCancelReady(true);
+      invoke("log_action", { action: `[AUTH UI flow=${flowId}] login task accepted` }).catch(() => {});
     } catch (error) {
       if (loginFlowRef.current !== flowId) return;
+      loginWaitingRef.current = false;
+      setLoginCancelReady(false);
+      invoke("log_action", { action: `[AUTH UI flow=${flowId}] login task failed: ${String(error)}` }).catch(() => {});
       setLoginError(String(error));
       setLoginStep("error");
-    } finally {
     }
   }, []);
 
   const handleCancelLogin = useCallback(async () => {
     loginFlowRef.current += 1;
+    loginWaitingRef.current = false;
+    setLoginCancelReady(false);
     await invoke("cancel_microsoft_login").catch(() => {});
     setLoginError(null);
     setLoginStep("idle");
+  }, []);
+
+  useEffect(() => {
+    let disposed = false;
+    let unlistenCompleted: (() => void) | undefined;
+    let unlistenError: (() => void) | undefined;
+
+    listen<AzureCliLoginCompleted>("azure-cli-login-completed", (event) => {
+      if (!loginWaitingRef.current || event.payload.flowId !== loginFlowRef.current) return;
+      loginWaitingRef.current = false;
+      setLoginCancelReady(false);
+      invoke("log_action", { action: `[AUTH UI flow=${event.payload.flowId}] completion event: ${event.payload.status.username || "<none>"}` }).catch(() => {});
+      setAuthStatus(event.payload.status);
+      setLoginError(null);
+      setLoginStep("idle");
+    }).then((unlisten) => {
+      if (disposed) unlisten();
+      else unlistenCompleted = unlisten;
+    });
+    listen<AzureCliLoginError>("azure-cli-login-error", (event) => {
+      if (!loginWaitingRef.current || event.payload.flowId !== loginFlowRef.current) return;
+      loginWaitingRef.current = false;
+      setLoginCancelReady(false);
+      invoke("log_action", { action: `[AUTH UI flow=${event.payload.flowId}] error event: ${event.payload.message}` }).catch(() => {});
+      setLoginError(event.payload.message);
+      setLoginStep("error");
+    }).then((unlisten) => {
+      if (disposed) unlisten();
+      else unlistenError = unlisten;
+    });
+
+    return () => {
+      disposed = true;
+      unlistenCompleted?.();
+      unlistenError?.();
+    };
   }, []);
 
   // ── Tab content render functions ──
@@ -233,7 +287,8 @@ const SettingsPanel: FC<{ themeCtx: ThemeCtx }> = ({ themeCtx }) => {
             </div>
             <button
               onClick={handleCancelLogin}
-              className="mt-3 text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+              disabled={!loginCancelReady}
+              className="mt-3 text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 disabled:cursor-wait disabled:opacity-50"
             >
               Cancel
             </button>

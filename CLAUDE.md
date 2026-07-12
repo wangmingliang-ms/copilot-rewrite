@@ -104,7 +104,8 @@ The app delegates interactive authentication and token caching to **Azure CLI** 
 1. Check the active Azure CLI account and required Microsoft tenant
 2. If needed, run `az login --tenant <tenant> --allow-no-subscriptions`, which opens the system browser
 3. Request a short-lived token with `az account get-access-token --resource https://ai.azure.com`
-4. Send that token to the Foundry Responses endpoint
+4. Cache the token in process memory and refresh it five minutes before expiration
+5. Send that token to the Foundry Responses endpoint
 
 Project-scoped `Foundry User` RBAC controls who may invoke the Agents. The app does not store Microsoft access or refresh tokens.
 

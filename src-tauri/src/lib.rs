@@ -14,12 +14,13 @@ use log::{info, warn, LevelFilter};
 use parking_lot::Mutex;
 use pulldown_cmark::{Event, Parser, Tag, TagEnd};
 use serde::{Deserialize, Serialize};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
 /// Global debug mode flag — checked by the log formatter to decide whether
 /// DEBUG-level messages should be written to the log file.
 pub static DEBUG_MODE: AtomicBool = AtomicBool::new(false);
+static AUTH_STATUS_CHECK_ID: AtomicU64 = AtomicU64::new(0);
 use tauri::{Emitter, Manager};
 
 /// Global application state shared across all modules
@@ -41,6 +42,20 @@ pub struct AppState {
     pub foundry_client: foundry::FoundryClient,
     /// Cancellation token for in-flight LLM requests
     pub cancel_token: Mutex<tokio_util::sync::CancellationToken>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AzureCliLoginCompleted {
+    flow_id: u64,
+    status: auth::AuthStatus,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AzureCliLoginError {
+    flow_id: u64,
+    message: String,
 }
 
 impl AppState {
@@ -545,13 +560,38 @@ fn cancel_request(state: tauri::State<'_, Arc<AppState>>) {
 /// Sign in to the Microsoft tenant through Azure CLI.
 #[tauri::command]
 async fn start_microsoft_login(
+    app: tauri::AppHandle,
     state: tauri::State<'_, Arc<AppState>>,
-) -> Result<auth::AuthStatus, String> {
-    state
-        .azure_cli_auth
-        .login()
-        .await
-        .map_err(|error| format!("Login failed: {error:#}"))
+    flow_id: u64,
+) -> Result<(), String> {
+    let state = Arc::clone(state.inner());
+    let attempt = state.azure_cli_auth.begin_login().await;
+    info!("[AUTH IPC] scheduling Azure CLI login task");
+    tauri::async_runtime::spawn(async move {
+        info!("[AUTH TASK] Azure CLI login task started");
+        match state.azure_cli_auth.login(attempt).await {
+            Ok(status) => {
+                info!(
+                    "[AUTH TASK] login completed for {}",
+                    status.username.as_deref().unwrap_or("<unknown>")
+                );
+                let event = AzureCliLoginCompleted { flow_id, status };
+                if let Err(error) = app.emit("azure-cli-login-completed", event) {
+                    warn!("[AUTH TASK] failed to emit login completion: {error}");
+                }
+            }
+            Err(error) => {
+                let message = format!("Login failed: {error:#}");
+                warn!("[AUTH TASK] {message}");
+                let event = AzureCliLoginError { flow_id, message };
+                if let Err(error) = app.emit("azure-cli-login-error", event) {
+                    warn!("[AUTH TASK] failed to emit login error: {error}");
+                }
+            }
+        }
+    });
+    info!("[AUTH IPC] Azure CLI login task scheduled");
+    Ok(())
 }
 
 /// Cancel a pending Azure CLI browser login.
@@ -568,16 +608,26 @@ async fn cancel_microsoft_login(
 async fn get_auth_status(
     state: tauri::State<'_, Arc<AppState>>,
 ) -> Result<auth::AuthStatus, String> {
+    let check_id = AUTH_STATUS_CHECK_ID.fetch_add(1, Ordering::Relaxed) + 1;
+    info!("[AUTH IPC #{check_id}] status check started");
     if environment_access_token().is_some() {
-        return Ok(auth::AuthStatus {
+        let status = auth::AuthStatus {
             logged_in: true,
             username: None,
             display_name: Some("Development token".to_string()),
             environment_override: true,
             cli_available: true,
-        });
+        };
+        info!("[AUTH IPC #{check_id}] development token is active");
+        return Ok(status);
     }
-    Ok(state.azure_cli_auth.status().await)
+    let status = state.azure_cli_auth.status().await;
+    info!(
+        "[AUTH IPC #{check_id}] status check completed: logged_in={}, username={}",
+        status.logged_in,
+        status.username.as_deref().unwrap_or("<none>")
+    );
+    Ok(status)
 }
 
 /// Open the settings window
