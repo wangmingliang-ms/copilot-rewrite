@@ -188,11 +188,11 @@ impl MonitorState {
         match reason {
             DismissReason::ForegroundChanged => {
                 *state.preview_visible.lock() = false;
-                state.cancel_token.lock().cancel();
+                state.cancel_generation_request();
             }
             DismissReason::SelectionCleared => {
                 *state.preview_visible.lock() = false;
-                state.cancel_token.lock().cancel();
+                state.cancel_generation_request();
                 state.selection_generation.fetch_add(1, Ordering::Relaxed);
             }
             DismissReason::MousedownElsewhere | DismissReason::GenerationChanged => {

@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use futures_util::StreamExt;
 use log::{info, warn};
 use reqwest::Client;
 use serde::Serialize;
@@ -59,7 +60,7 @@ impl FoundryClient {
                 name: agent_name,
                 reference_type: "agent_reference",
             },
-            stream: false,
+            stream: true,
         };
 
         info!(
@@ -80,12 +81,11 @@ impl FoundryClient {
                 .context("Failed to connect to Microsoft Foundry Agent")?;
 
             let status = response.status();
-            let body = response
-                .text()
-                .await
-                .context("Failed to read Microsoft Foundry Agent response")?;
-
             if !status.is_success() {
+                let body = response
+                    .text()
+                    .await
+                    .context("Failed to read Microsoft Foundry Agent error response")?;
                 anyhow::bail!(
                     "Microsoft Foundry Agent returned HTTP {}: {}",
                     status.as_u16(),
@@ -93,7 +93,25 @@ impl FoundryClient {
                 );
             }
 
-            parse_response_text(&body)
+            let is_event_stream = response
+                .headers()
+                .get(reqwest::header::CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok())
+                .is_some_and(|value| value.starts_with("text/event-stream"));
+
+            if is_event_stream {
+                consume_event_stream(response, on_chunk).await
+            } else {
+                let body = response
+                    .text()
+                    .await
+                    .context("Failed to read Microsoft Foundry Agent response")?;
+                let result = parse_response_text(&body)?;
+                if let Some(callback) = on_chunk {
+                    callback(&result);
+                }
+                Ok(result)
+            }
         };
 
         let result = if let Some(token) = cancel_token {
@@ -105,10 +123,6 @@ impl FoundryClient {
         } else {
             call.await?
         };
-
-        if let Some(callback) = on_chunk {
-            callback(&result);
-        }
 
         Ok(result)
     }
@@ -129,6 +143,137 @@ fn responses_endpoint(project_endpoint: &str) -> String {
     } else {
         format!("{endpoint}/openai/v1/responses")
     }
+}
+
+async fn consume_event_stream(
+    response: reqwest::Response,
+    on_chunk: Option<&(dyn Fn(&str) + Send + Sync)>,
+) -> Result<String> {
+    let mut stream = response.bytes_stream();
+    let mut buffer = Vec::new();
+    let mut accumulated = StreamingResponse::default();
+
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.context("Failed while reading Microsoft Foundry Agent stream")?;
+        buffer.extend_from_slice(&chunk);
+
+        while let Some((event_end, delimiter_len)) = find_sse_event_end(&buffer) {
+            let remainder = buffer.split_off(event_end + delimiter_len);
+            buffer.truncate(event_end);
+            apply_stream_event(&buffer, &mut accumulated, on_chunk)?;
+            buffer = remainder;
+        }
+    }
+
+    if buffer.iter().any(|byte| !byte.is_ascii_whitespace()) {
+        apply_stream_event(&buffer, &mut accumulated, on_chunk)?;
+    }
+
+    if !accumulated.completed {
+        anyhow::bail!("Microsoft Foundry Agent stream ended before completion");
+    }
+
+    let result = accumulated.output.trim();
+    if result.is_empty() {
+        anyhow::bail!("Microsoft Foundry Agent returned an empty streamed response");
+    }
+
+    Ok(result.to_string())
+}
+
+fn find_sse_event_end(buffer: &[u8]) -> Option<(usize, usize)> {
+    let lf = buffer.windows(2).position(|window| window == b"\n\n");
+    let crlf = buffer.windows(4).position(|window| window == b"\r\n\r\n");
+
+    match (lf, crlf) {
+        (Some(lf), Some(crlf)) if lf <= crlf => Some((lf, 2)),
+        (Some(_), Some(crlf)) => Some((crlf, 4)),
+        (Some(lf), None) => Some((lf, 2)),
+        (None, Some(crlf)) => Some((crlf, 4)),
+        (None, None) => None,
+    }
+}
+
+#[derive(Debug, Default)]
+struct StreamingResponse {
+    output: String,
+    completed: bool,
+}
+
+fn apply_stream_event(
+    event_bytes: &[u8],
+    accumulated: &mut StreamingResponse,
+    on_chunk: Option<&(dyn Fn(&str) + Send + Sync)>,
+) -> Result<()> {
+    let event = std::str::from_utf8(event_bytes)
+        .context("Microsoft Foundry Agent stream contained invalid UTF-8")?;
+    let mut event_name = None;
+    let mut data_lines = Vec::new();
+
+    for line in event.lines() {
+        let line = line.trim_end_matches('\r');
+        if let Some(value) = line.strip_prefix("event:") {
+            event_name = Some(value.trim());
+        } else if let Some(value) = line.strip_prefix("data:") {
+            data_lines.push(value.trim_start());
+        }
+    }
+
+    if data_lines.is_empty() {
+        return Ok(());
+    }
+
+    let data = data_lines.join("\n");
+    if data.trim() == "[DONE]" {
+        accumulated.completed = true;
+        return Ok(());
+    }
+
+    let value: Value = serde_json::from_str(&data)
+        .with_context(|| format!("Failed to parse Microsoft Foundry stream event: {data}"))?;
+    let event_type = value
+        .get("type")
+        .and_then(Value::as_str)
+        .or(event_name)
+        .unwrap_or_default();
+
+    match event_type {
+        "response.output_text.delta" => {
+            if let Some(delta) = value.get("delta").and_then(Value::as_str) {
+                accumulated.output.push_str(delta);
+                if let Some(callback) = on_chunk {
+                    callback(&accumulated.output);
+                }
+            }
+        }
+        "response.completed" => {
+            accumulated.completed = true;
+            if accumulated.output.is_empty() {
+                accumulated.output = value
+                    .get("response")
+                    .and_then(extract_response_text)
+                    .unwrap_or_default()
+                    .to_string();
+                if !accumulated.output.is_empty() {
+                    if let Some(callback) = on_chunk {
+                        callback(&accumulated.output);
+                    }
+                }
+            }
+        }
+        "response.failed" | "error" => {
+            let message = value
+                .pointer("/response/error/message")
+                .or_else(|| value.pointer("/error/message"))
+                .or_else(|| value.get("message"))
+                .and_then(Value::as_str)
+                .unwrap_or("Unknown streaming error");
+            anyhow::bail!("Microsoft Foundry Agent stream failed: {message}");
+        }
+        _ => {}
+    }
+
+    Ok(())
 }
 
 fn parse_response_text(body: &str) -> Result<String> {
@@ -205,7 +350,10 @@ fn extract_content_text(content: &Value) -> Option<&str> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_response_text, responses_endpoint, AgentReference, ResponsesRequest};
+    use super::{
+        apply_stream_event, find_sse_event_end, parse_response_text, responses_endpoint,
+        AgentReference, ResponsesRequest, StreamingResponse,
+    };
 
     #[test]
     fn request_delegates_version_and_model_selection_to_agent() {
@@ -215,13 +363,14 @@ mod tests {
                 name: "demo-agent",
                 reference_type: "agent_reference",
             },
-            stream: false,
+            stream: true,
         };
         let value = serde_json::to_value(request).unwrap();
 
         assert!(value.get("model").is_none());
         assert!(value["agent_reference"].get("version").is_none());
         assert_eq!(value["agent_reference"]["name"], "demo-agent");
+        assert_eq!(value["stream"], true);
     }
 
     #[test]
@@ -274,5 +423,66 @@ mod tests {
     #[test]
     fn rejects_json_without_output() {
         assert!(parse_response_text(r#"{"id":"response-1"}"#).is_err());
+    }
+
+    #[test]
+    fn finds_lf_and_crlf_sse_event_boundaries() {
+        assert_eq!(find_sse_event_end(b"data: one\n\ndata: two"), Some((9, 2)));
+        assert_eq!(
+            find_sse_event_end(b"data: one\r\n\r\ndata: two"),
+            Some((9, 4))
+        );
+    }
+
+    #[test]
+    fn accumulates_streaming_text_and_completion() {
+        let mut response = StreamingResponse::default();
+        apply_stream_event(
+            br#"event: response.output_text.delta
+data: {"type":"response.output_text.delta","delta":"Hello"}"#,
+            &mut response,
+            None,
+        )
+        .unwrap();
+        apply_stream_event(
+            br#"event: response.output_text.delta
+data: {"type":"response.output_text.delta","delta":" world"}"#,
+            &mut response,
+            None,
+        )
+        .unwrap();
+        apply_stream_event(b"data: [DONE]", &mut response, None).unwrap();
+
+        assert_eq!(response.output, "Hello world");
+        assert!(response.completed);
+    }
+
+    #[test]
+    fn uses_completed_response_when_no_delta_events_arrive() {
+        let mut response = StreamingResponse::default();
+        apply_stream_event(
+            br#"event: response.completed
+data: {"type":"response.completed","response":{"output":[{"type":"message","content":[{"type":"output_text","text":"complete text"}]}]}}"#,
+            &mut response,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(response.output, "complete text");
+        assert!(response.completed);
+    }
+
+    #[test]
+    fn surfaces_streaming_failures() {
+        let mut response = StreamingResponse::default();
+        let error = apply_stream_event(
+            br#"event: response.failed
+data: {"type":"response.failed","response":{"error":{"message":"agent failed"}}}"#,
+            &mut response,
+            None,
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("agent failed"));
     }
 }

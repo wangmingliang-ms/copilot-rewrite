@@ -142,7 +142,7 @@ When text selection is cleared (UIA returns no selection):
 - **Prompt ownership:** System instructions and model selection live in the Foundry Agent
 - **Agent selection:** The client omits Agent version and model so Foundry always resolves the latest Agent version and its configured model
 - **Client input:** Selected text only; mode selection determines the Agent reference
-- **Streaming:** Disabled for the MVP; the existing loading and final-result popup states remain unchanged
+- **Streaming:** Enabled through the Foundry Responses SSE stream. The backend owns the accumulated result, emits cumulative `show-preview-chunk` snapshots for the existing frontend streaming state, and still emits one authoritative final result on completion.
 
 ---
 

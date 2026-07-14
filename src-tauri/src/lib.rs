@@ -40,6 +40,8 @@ pub struct AppState {
     pub azure_cli_auth: auth::AzureCliAuth,
     /// Microsoft Foundry Prompt Agent client
     pub foundry_client: foundry::FoundryClient,
+    /// Identifies the one generation request currently allowed to update the popup
+    pub request_generation: AtomicU64,
     /// Cancellation token for in-flight LLM requests
     pub cancel_token: Mutex<tokio_util::sync::CancellationToken>,
 }
@@ -73,8 +75,30 @@ impl AppState {
             settings: Mutex::new(settings),
             azure_cli_auth: auth::AzureCliAuth::new(),
             foundry_client: foundry::FoundryClient::new(),
+            request_generation: AtomicU64::new(0),
             cancel_token: Mutex::new(tokio_util::sync::CancellationToken::new()),
         }
+    }
+
+    pub fn begin_generation_request(
+        &self,
+        cancel_token: tokio_util::sync::CancellationToken,
+    ) -> u64 {
+        let mut current_token = self.cancel_token.lock();
+        let generation = self.request_generation.fetch_add(1, Ordering::AcqRel) + 1;
+        current_token.cancel();
+        *current_token = cancel_token;
+        generation
+    }
+
+    pub fn cancel_generation_request(&self) {
+        let current_token = self.cancel_token.lock();
+        self.request_generation.fetch_add(1, Ordering::AcqRel);
+        current_token.cancel();
+    }
+
+    pub fn is_current_generation_request(&self, generation: u64) -> bool {
+        self.request_generation.load(Ordering::Acquire) == generation
     }
 }
 
@@ -454,15 +478,15 @@ async fn process_and_show_preview(
     info!("[PERF] process_and_show_preview START (action={:?}, backend=foundry-agent, creative={}, refresh={}, text_len={})",
         request.action, creative_mode, request.is_refresh, request.text.len());
 
+    // Starting a new generation atomically supersedes any prior request.
+    let cancel_token = tokio_util::sync::CancellationToken::new();
+    let request_generation = state.begin_generation_request(cancel_token.clone());
+
     let access_token = foundry_access_token(&state).await?;
     info!(
         "[PERF] +{}ms — Foundry access token ready",
         t0.elapsed().as_millis()
     );
-
-    // Create a fresh cancellation token for this request
-    let cancel_token = tokio_util::sync::CancellationToken::new();
-    *state.cancel_token.lock() = cancel_token.clone();
 
     // Mark popup as "processing" to pause UIA monitoring
     *state.preview_visible.lock() = true;
@@ -500,6 +524,22 @@ async fn process_and_show_preview(
 
     info!("[PERF] +{}ms — Foundry Agent call starting...", t0.elapsed().as_millis());
 
+    let first_chunk_received = AtomicBool::new(false);
+    let on_chunk = |text: &str| {
+        if !state.is_current_generation_request(request_generation) {
+            return;
+        }
+        if !first_chunk_received.swap(true, Ordering::Relaxed) {
+            info!(
+                "[PERF] +{}ms — first streamed text received",
+                t0.elapsed().as_millis()
+            );
+        }
+        if let Err(error) = app.emit("show-preview-chunk", text) {
+            warn!("Failed to emit streamed preview chunk: {}", error);
+        }
+    };
+
     let process_result = state
         .foundry_client
         .process(
@@ -507,12 +547,20 @@ async fn process_and_show_preview(
             agent_name,
             &request.text,
             Some(&access_token),
-            None,
+            Some(&on_chunk),
             Some(&cancel_token),
         )
         .await;
 
     let llm_ms = t0.elapsed().as_millis();
+    if !state.is_current_generation_request(request_generation) {
+        info!(
+            "[PERF] +{}ms — superseded request stopped without emitting late events",
+            llm_ms
+        );
+        return Err("Request cancelled".to_string());
+    }
+
     match process_result {
         Ok(result_text) => {
             info!("[PERF] +{}ms — LLM response received ({} chars)", llm_ms, result_text.len());
@@ -555,7 +603,7 @@ async fn process_and_show_preview(
 #[tauri::command]
 fn cancel_request(state: tauri::State<'_, Arc<AppState>>) {
     info!("[POPUP] Cancel requested by user");
-    state.cancel_token.lock().cancel();
+    state.cancel_generation_request();
 }
 
 /// Sign in to the Microsoft tenant through Azure CLI.
@@ -1050,6 +1098,7 @@ async fn dismiss_popup(
     overlay::hide_popup(&app);
     *state.preview_visible.lock() = false;
     *state.current_selection.lock() = None;
+    state.cancel_generation_request();
     // Bump generation — monitor will clear its local state when it sees this
     state
         .selection_generation

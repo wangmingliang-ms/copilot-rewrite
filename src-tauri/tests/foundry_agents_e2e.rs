@@ -38,6 +38,14 @@ fn azure_access_token() -> &'static str {
 }
 
 async fn invoke(agent_name: &str, input: &str) -> String {
+    invoke_with_callback(agent_name, input, None).await
+}
+
+async fn invoke_with_callback(
+    agent_name: &str,
+    input: &str,
+    on_chunk: Option<&(dyn Fn(&str) + Send + Sync)>,
+) -> String {
     let project_endpoint = std::env::var("FOUNDRY_PROJECT_ENDPOINT")
         .unwrap_or_else(|_| DEFAULT_PROJECT_ENDPOINT.to_string());
 
@@ -47,7 +55,7 @@ async fn invoke(agent_name: &str, input: &str) -> String {
             agent_name,
             input,
             Some(azure_access_token()),
-            None,
+            on_chunk,
             None,
         )
         .await
@@ -64,10 +72,20 @@ fn contains_chinese(text: &str) -> bool {
 #[tokio::test]
 #[ignore = "calls the live Microsoft Foundry project"]
 async fn translate_agent_translates_chinese_to_english() {
-    let output = invoke("copilot-rewrite-translate", "这是一个端到端测试。").await;
+    let chunks = std::sync::Mutex::new(Vec::<String>::new());
+    let on_chunk = |text: &str| chunks.lock().unwrap().push(text.to_string());
+    let output = invoke_with_callback(
+        "copilot-rewrite-translate",
+        "这是一个端到端测试。",
+        Some(&on_chunk),
+    )
+    .await;
 
     assert!(!output.trim().is_empty());
     assert!(!contains_chinese(&output), "Expected English: {output}");
+    let chunks = chunks.into_inner().unwrap();
+    assert!(!chunks.is_empty(), "Expected streamed output chunks");
+    assert_eq!(chunks.last(), Some(&output));
 }
 
 #[tokio::test]
