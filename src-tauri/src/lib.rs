@@ -365,9 +365,8 @@ pub struct ProcessResponse {
 
 // ─── Tauri Commands ───────────────────────────────────────────────
 
-const FOUNDRY_MODEL_DEPLOYMENT: &str = "gpt-5.6-sol";
 const DEFAULT_FOUNDRY_PROJECT_ENDPOINT: &str =
-    "https://wangmi-ai.services.ai.azure.com/api/projects/copilot-rewrite-project";
+    "https://wangmi-ai.services.ai.azure.com/api/projects/wangmi-ai-project";
 
 fn foundry_project_endpoint() -> String {
     std::env::var("FOUNDRY_PROJECT_ENDPOINT")
@@ -424,7 +423,6 @@ async fn process_text(
         .foundry_client
         .process(
             &endpoint,
-            FOUNDRY_MODEL_DEPLOYMENT,
             agent_name,
             &request.text,
             Some(&access_token),
@@ -506,7 +504,6 @@ async fn process_and_show_preview(
         .foundry_client
         .process(
             &endpoint,
-            FOUNDRY_MODEL_DEPLOYMENT,
             agent_name,
             &request.text,
             Some(&access_token),

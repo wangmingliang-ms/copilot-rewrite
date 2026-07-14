@@ -37,7 +37,7 @@ The entire flow is non-intrusive: the popup never steals focus from the applicat
 - **Windows 10/11** (x64)
 - **WebView2 Runtime** (pre-installed on Windows 10 21H2+ and Windows 11)
 - [Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli-windows)
-- A Microsoft account with the `Foundry User` role on `copilot-rewrite-project`
+- A Microsoft account with the `Foundry User` role on `wangmi-ai-project`
 
 ### For Development
 
@@ -56,7 +56,7 @@ Download the latest installer from [Releases](https://github.com/wangmingliang-m
 3. Select your preferred **target language**
 4. Close settings — you're ready to go!
 
-This Hackathon branch defaults to the isolated `copilot-rewrite-project` endpoint. Azure CLI supplies the signed-in user's token, and project-scoped `Foundry User` RBAC determines who can invoke the Agents.
+This Hackathon branch defaults to the `wangmi-ai-project` endpoint. Azure CLI supplies the signed-in user's token, and project-scoped `Foundry User` RBAC determines who can invoke the Agents.
 
 ## Development
 
@@ -183,7 +183,7 @@ Settings are stored in `%APPDATA%/copilot-rewrite/settings.json`:
 
 The app does not persist Microsoft access or refresh tokens. It requests a token scoped to `https://ai.azure.com` from Azure CLI, caches it in process memory, and refreshes it five minutes before expiration. Azure CLI owns the durable login and token cache.
 
-The app posts to `<project-endpoint>/openai/v1/responses` with `stream: false`, the selected text in `input`, and an `agent_reference` selected from the current write/read and creative modes. Prompts and model configuration are not sent by the client.
+The app posts to `<project-endpoint>/openai/v1/responses` with `stream: false`, the selected text in `input`, and an unversioned `agent_reference` selected from the current write/read and creative modes. Foundry resolves the latest Agent version, including its prompt and model configuration; the client sends neither a version nor a model.
 
 For compatibility with the existing popup, the Agent should return write-mode Translate + Polish output separated by `---TRANSLATED---`. Read-mode output can optionally append `---VOCABULARY---` and `---SUMMARY---` sections.
 

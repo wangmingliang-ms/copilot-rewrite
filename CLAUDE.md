@@ -111,7 +111,7 @@ Project-scoped `Foundry User` RBAC controls who may invoke the Agents. The app d
 
 ### Foundry Prompt Agents
 
-System instructions and the fixed `gpt-5.6-sol` deployment live in seven Prompt Agents: normal and creative variants for translate, polish, and translate+polish, plus one Read Mode Agent. The client sends only selected text and an `agent_reference`.
+System instructions and model selection live in seven versioned Prompt Agents in `wangmi-ai-project`: normal and creative variants for translate, polish, and translate+polish, plus one Read Mode Agent. The client sends only selected text and an unversioned `agent_reference`, so Foundry resolves the latest Agent version and its configured model.
 
 ### Text Replacement
 

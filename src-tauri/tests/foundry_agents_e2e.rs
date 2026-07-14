@@ -3,8 +3,7 @@ use std::process::Command;
 use std::sync::OnceLock;
 
 const DEFAULT_PROJECT_ENDPOINT: &str =
-    "https://wangmi-ai.services.ai.azure.com/api/projects/copilot-rewrite-project";
-const DEFAULT_MODEL: &str = "gpt-5.6-sol";
+    "https://wangmi-ai.services.ai.azure.com/api/projects/wangmi-ai-project";
 
 static ACCESS_TOKEN: OnceLock<String> = OnceLock::new();
 
@@ -41,13 +40,10 @@ fn azure_access_token() -> &'static str {
 async fn invoke(agent_name: &str, input: &str) -> String {
     let project_endpoint = std::env::var("FOUNDRY_PROJECT_ENDPOINT")
         .unwrap_or_else(|_| DEFAULT_PROJECT_ENDPOINT.to_string());
-    let model =
-        std::env::var("FOUNDRY_MODEL_DEPLOYMENT").unwrap_or_else(|_| DEFAULT_MODEL.to_string());
 
     FoundryClient::new()
         .process(
             &project_endpoint,
-            &model,
             agent_name,
             input,
             Some(azure_access_token()),

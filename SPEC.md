@@ -134,12 +134,13 @@ When text selection is cleared (UIA returns no selection):
 
 ## 6. LLM Backend
 
-- **API:** Microsoft Foundry project Responses endpoint routed by `agent_reference`
+- **API:** Microsoft Foundry `wangmi-ai-project` Responses endpoint routed by an unversioned `agent_reference`
 - **Authentication:** Azure CLI browser login in the Microsoft tenant; the app requests `https://ai.azure.com` tokens from the CLI
 - **Authorization:** Project-scoped `Foundry User` RBAC controls who can invoke Agents
 - **Token lifecycle:** The app keeps the current access token in memory and refreshes it through Azure CLI five minutes before expiration; it does not persist Microsoft credentials
 - **Client secret:** None
 - **Prompt ownership:** System instructions and model selection live in the Foundry Agent
+- **Agent selection:** The client omits Agent version and model so Foundry always resolves the latest Agent version and its configured model
 - **Client input:** Selected text only; mode selection determines the Agent reference
 - **Streaming:** Disabled for the MVP; the existing loading and final-result popup states remain unchanged
 

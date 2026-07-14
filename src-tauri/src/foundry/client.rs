@@ -15,7 +15,6 @@ struct AgentReference<'a> {
 
 #[derive(Debug, Serialize)]
 struct ResponsesRequest<'a> {
-    model: &'a str,
     input: &'a str,
     agent_reference: AgentReference<'a>,
     stream: bool,
@@ -41,7 +40,6 @@ impl FoundryClient {
     pub async fn process(
         &self,
         project_endpoint: &str,
-        model: &str,
         agent_name: &str,
         input: &str,
         bearer_token: Option<&str>,
@@ -56,7 +54,6 @@ impl FoundryClient {
 
         let endpoint = responses_endpoint(project_endpoint);
         let request = ResponsesRequest {
-            model,
             input,
             agent_reference: AgentReference {
                 name: agent_name,
@@ -66,9 +63,8 @@ impl FoundryClient {
         };
 
         info!(
-            "Calling Microsoft Foundry Agent (agent={}, model={}, text_len={})",
+            "Calling latest Microsoft Foundry Agent version (agent={}, text_len={})",
             agent_name,
-            model,
             input.len()
         );
 
@@ -209,7 +205,24 @@ fn extract_content_text(content: &Value) -> Option<&str> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_response_text, responses_endpoint};
+    use super::{parse_response_text, responses_endpoint, AgentReference, ResponsesRequest};
+
+    #[test]
+    fn request_delegates_version_and_model_selection_to_agent() {
+        let request = ResponsesRequest {
+            input: "hello",
+            agent_reference: AgentReference {
+                name: "demo-agent",
+                reference_type: "agent_reference",
+            },
+            stream: false,
+        };
+        let value = serde_json::to_value(request).unwrap();
+
+        assert!(value.get("model").is_none());
+        assert!(value["agent_reference"].get("version").is_none());
+        assert_eq!(value["agent_reference"]["name"], "demo-agent");
+    }
 
     #[test]
     fn builds_responses_endpoint_from_project_endpoint() {
