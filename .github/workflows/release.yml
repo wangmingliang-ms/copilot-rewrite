@@ -3,7 +3,7 @@ name: Release
 on:
   push:
     tags:
-      - "v*"
+      - "v*-hackathon.*"
 
 jobs:
   build:
@@ -32,21 +32,54 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Prepare release metadata
+        id: release_meta
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $version = $tag -replace '^v', ''
+          $isHackathon = $version -match '-hackathon\.\d+$'
+
+          if (-not $isHackathon) {
+            throw "The Hackathon release workflow accepts only v*-hackathon.N tags: $tag"
+          }
+
+          $packageVersion = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $tauriVersion = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          $cargoVersion = if ((Get-Content src-tauri/Cargo.toml -Raw) -match '(?m)^version = "([^"]+)"') {
+            $Matches[1]
+          } else {
+            throw "Could not read the Cargo package version"
+          }
+
+          foreach ($declaredVersion in @($packageVersion, $tauriVersion, $cargoVersion)) {
+            if ($declaredVersion -ne $version) {
+              throw "Tag version $version does not match declared version $declaredVersion"
+            }
+          }
+
+          "version=$version" | Out-File -Append $env:GITHUB_OUTPUT
+          "release_name=Copilot Rewrite Hackathon $tag" | Out-File -Append $env:GITHUB_OUTPUT
+
       - name: Extract changelog
         id: changelog
         shell: pwsh
         run: |
+          $version = "${{ steps.release_meta.outputs.version }}"
           $content = Get-Content CHANGELOG.md -Raw
-          if ($content -match '(?s)## \[[\d.]+\][^\n]*\n(.*?)(?=\n## |\z)') {
+          $escapedVersion = [regex]::Escape($version)
+          $pattern = "(?ms)^## \[$escapedVersion\][^\r\n]*\r?\n(.*?)(?=^## |\z)"
+          if ($content -match $pattern) {
             $body = $Matches[1].Trim()
           } else {
-            $body = "See the assets to download and install Copilot Rewrite."
+            throw "CHANGELOG.md does not contain an entry for $version"
           }
           "RELEASE_BODY<<EOF" | Out-File -Append $env:GITHUB_OUTPUT
           $body | Out-File -Append $env:GITHUB_OUTPUT
           "EOF" | Out-File -Append $env:GITHUB_OUTPUT
 
       - name: Build Tauri app
+        id: tauri
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -54,7 +87,47 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: "Copilot Rewrite ${{ github.ref_name }}"
+          releaseName: ${{ steps.release_meta.outputs.release_name }}
           releaseBody: ${{ steps.changelog.outputs.RELEASE_BODY }}
           releaseDraft: false
-          prerelease: false
+          prerelease: true
+
+      - name: Publish Hackathon update channel
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $channelTag = "hackathon-channel"
+          $channelTitle = "Copilot Rewrite Hackathon Update Channel"
+          $channelNotes = @'
+          This release is the update feed for Copilot Rewrite Hackathon editions.
+
+          Installers and release notes are published in the numbered `*-hackathon.N` prereleases.
+          The `latest.json` asset here is maintained automatically and must remain available.
+          '@
+
+          $tempDirectory = Join-Path $env:RUNNER_TEMP "hackathon-channel"
+          New-Item -ItemType Directory -Path $tempDirectory -Force | Out-Null
+          gh release download $tag --repo $env:GITHUB_REPOSITORY --pattern latest.json --dir $tempDirectory
+
+          gh release view $channelTag --repo $env:GITHUB_REPOSITORY *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release edit $channelTag `
+              --repo $env:GITHUB_REPOSITORY `
+              --title $channelTitle `
+              --notes $channelNotes `
+              --prerelease
+          } else {
+            gh release create $channelTag `
+              --repo $env:GITHUB_REPOSITORY `
+              --target $env:GITHUB_SHA `
+              --title $channelTitle `
+              --notes $channelNotes `
+              --prerelease
+          }
+
+          gh release upload $channelTag `
+            (Join-Path $tempDirectory "latest.json") `
+            --repo $env:GITHUB_REPOSITORY `
+            --clobber

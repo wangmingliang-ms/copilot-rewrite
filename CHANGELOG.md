@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.16.5-hackathon.1] - 2026-07-17
+
+### 🧪 Hackathon Edition
+
+- **Microsoft Foundry Prompt Agents** — Replaced the GitHub Copilot SDK backend with seven Prompt Agents in `wangmi-ai-project`. Agent instructions and model selection now live in Foundry, and unversioned Agent references automatically follow the latest deployed Agent version.
+- **Azure CLI Microsoft sign-in** — Uses the signed-in Azure CLI account to obtain short-lived `https://ai.azure.com` access tokens. Project-scoped `Foundry User` RBAC remains the authorization boundary; no client secret or Microsoft token is persisted by the app.
+- **In-memory token reuse** — Access tokens are cached until five minutes before expiry and prefetched after sign-in/startup, removing repeated Azure CLI token acquisition from normal popup requests.
+- **Foundry response streaming** — Responses stream into the existing popup token-by-token through SSE, substantially improving perceived latency while preserving one authoritative final result.
+- **Cancellation-safe generation ownership** — Superseded or dismissed requests cannot emit late chunks, results, or errors into a newer popup generation.
+- **Dedicated Hackathon update channel** — This edition uses numbered versions such as `0.16.5-hackathon.1`, follows only the fixed Hackathon update manifest, and rejects stable or other prerelease versions even when their base version is newer.
+
+### ⚠️ Requirements
+
+- Windows 10/11 x64 with WebView2.
+- Azure CLI installed and signed in with a Microsoft account that has the `Foundry User` role on `wangmi-ai-project`.
+- This is an experimental Hackathon prerelease and does not replace the stable Copilot Rewrite release.
+
 ## [0.16.5] - 2026-06-08
 
 ### 🐛 Bug Fixes

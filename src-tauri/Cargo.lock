@@ -569,7 +569,7 @@ dependencies = [
 
 [[package]]
 name = "copilot-rewrite"
-version = "0.16.5"
+version = "0.16.5-hackathon.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -581,6 +581,7 @@ dependencies = [
  "parking_lot",
  "pulldown-cmark",
  "reqwest 0.12.28",
+ "semver",
  "serde",
  "serde_json",
  "tauri",

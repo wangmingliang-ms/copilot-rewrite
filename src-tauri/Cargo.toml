@@ -1,6 +1,6 @@
 [package]
 name = "copilot-rewrite"
-version = "0.16.5"
+version = "0.16.5-hackathon.1"
 description = "System-level text translation and polishing tool for Windows"
 authors = ["Miller Wang"]
 license = "MIT"
@@ -14,6 +14,7 @@ crate-type = ["lib", "cdylib", "staticlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+semver = "1"
 
 [dependencies]
 tauri = { version = "2", features = ["tray-icon"] }
@@ -21,6 +22,7 @@ tauri-plugin-shell = "2"
 tauri-plugin-updater = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+semver = "1"
 tokio = { version = "1", features = ["full"] }
 tokio-util = "0.7"
 reqwest = { version = "0.12", features = ["json", "stream"] }

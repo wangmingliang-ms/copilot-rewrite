@@ -21,7 +21,24 @@ use std::sync::Arc;
 /// DEBUG-level messages should be written to the log file.
 pub static DEBUG_MODE: AtomicBool = AtomicBool::new(false);
 static AUTH_STATUS_CHECK_ID: AtomicU64 = AtomicU64::new(0);
+const HACKATHON_CHANNEL: &str = "hackathon";
 use tauri::{Emitter, Manager};
+
+fn is_hackathon_version(version: &semver::Version) -> bool {
+    let mut identifiers = version.pre.as_str().split('.');
+    matches!(identifiers.next(), Some(HACKATHON_CHANNEL))
+        && identifiers.next().is_some_and(|revision| {
+            !revision.is_empty() && revision.chars().all(|character| character.is_ascii_digit())
+        })
+        && identifiers.next().is_none()
+}
+
+fn should_offer_hackathon_update(
+    current: &semver::Version,
+    remote: &semver::Version,
+) -> bool {
+    is_hackathon_version(current) && is_hackathon_version(remote) && remote > current
+}
 
 /// Global application state shared across all modules
 #[derive(Debug)]
@@ -1205,7 +1222,13 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_shell::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(
+            tauri_plugin_updater::Builder::new()
+                .default_version_comparator(|current, remote| {
+                    should_offer_hackathon_update(&current, &remote.version)
+                })
+                .build(),
+        )
         .manage(app_state.clone())
         .invoke_handler(tauri::generate_handler![
             process_text,
@@ -1305,18 +1328,18 @@ pub fn run() {
             let update_handle = app_handle.clone();
             tauri::async_runtime::spawn(async move {
                 tokio::time::sleep(std::time::Duration::from_secs(10)).await;
-                info!("Checking for updates on startup...");
+                info!("Checking for Hackathon channel updates on startup...");
                 use tauri_plugin_updater::UpdaterExt;
                 match update_handle.updater().expect("updater").check().await {
                     Ok(Some(update)) => {
                         let new_version = update.version.clone();
-                        info!("Update available: v{}", new_version);
+                        info!("Hackathon update available: v{}", new_version);
 
                         // Show system notification
                         use tauri_plugin_notification::NotificationExt;
                         let _ = update_handle.notification()
                             .builder()
-                            .title("🔄 Copilot Rewrite Update Available")
+                            .title("🔄 Copilot Rewrite Hackathon Update Available")
                             .body(format!(
                                 "v{} is ready! Open Settings to update.",
                                 new_version
@@ -1337,4 +1360,49 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running Copilot Rewrite");
+}
+
+#[cfg(test)]
+mod release_channel_tests {
+    use super::{is_hackathon_version, should_offer_hackathon_update};
+    use semver::Version;
+
+    fn version(value: &str) -> Version {
+        Version::parse(value).unwrap()
+    }
+
+    #[test]
+    fn recognizes_only_numbered_hackathon_versions() {
+        assert!(is_hackathon_version(&version("0.16.5-hackathon.1")));
+        assert!(!is_hackathon_version(&version("0.16.5")));
+        assert!(!is_hackathon_version(&version("0.16.5-beta.1")));
+        assert!(!is_hackathon_version(&version("0.16.5-hackathon.preview")));
+        assert!(!is_hackathon_version(&version("0.16.5-hackathon.1.extra")));
+    }
+
+    #[test]
+    fn offers_only_newer_hackathon_updates() {
+        let current = version("0.16.5-hackathon.1");
+
+        assert!(should_offer_hackathon_update(
+            &current,
+            &version("0.16.5-hackathon.2")
+        ));
+        assert!(should_offer_hackathon_update(
+            &current,
+            &version("0.17.0-hackathon.1")
+        ));
+        assert!(!should_offer_hackathon_update(
+            &current,
+            &version("0.17.0")
+        ));
+        assert!(!should_offer_hackathon_update(
+            &current,
+            &version("0.16.5-hackathon.1")
+        ));
+        assert!(!should_offer_hackathon_update(
+            &current,
+            &version("0.16.4-hackathon.9")
+        ));
+    }
 }

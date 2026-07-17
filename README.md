@@ -2,6 +2,8 @@
 
 A **Windows-only system-level** text translation and polishing tool powered by seven Microsoft Foundry Prompt Agents.
 
+> **Hackathon Edition:** Versions ending in `-hackathon.N` are an independent prerelease channel. They update only to newer Hackathon editions and never follow the stable `latest` release.
+
 ## How It Works
 
 1. **Select text** in any application (Teams, Outlook, Edge, etc.)
@@ -25,7 +27,7 @@ The entire flow is non-intrusive: the popup never steals focus from the applicat
 - **Regenerate** — Re-run the translation without dismissing the popup
 - **System tray** — Runs in the background with enable/disable toggle
 - **Auto-start** — Optionally launch on Windows login
-- **Auto-update** — Built-in updater checks for and installs new versions
+- **Hackathon auto-update channel** — Built-in updater accepts only newer `-hackathon.N` releases from the dedicated Hackathon manifest
 - **Date-rotated logs** — Detailed logs stored in `%APPDATA%/copilot-rewrite/logs/`
 
 ## Screenshots
@@ -47,7 +49,7 @@ The entire flow is non-intrusive: the popup never steals focus from the applicat
 
 ## Installation
 
-Download the latest installer from [Releases](https://github.com/wangmingliang-ms/copilot-rewrite/releases) and run it. The app will appear in your system tray.
+Download the latest **Copilot Rewrite Hackathon** prerelease installer from [Releases](https://github.com/wangmingliang-ms/copilot-rewrite/releases) and run it. The app will appear in your system tray.
 
 ### First-Time Setup
 

@@ -143,6 +143,8 @@ When text selection is cleared (UIA returns no selection):
 - **Agent selection:** The client omits Agent version and model so Foundry always resolves the latest Agent version and its configured model
 - **Client input:** Selected text only; mode selection determines the Agent reference
 - **Streaming:** Enabled through the Foundry Responses SSE stream. The backend owns the accumulated result, emits cumulative `show-preview-chunk` snapshots for the existing frontend streaming state, and still emits one authoritative final result on completion.
+- **Release identity:** This branch is the Hackathon edition and uses SemVer versions ending in `-hackathon.N`.
+- **Update channel:** The Hackathon client reads only the fixed `hackathon-channel/latest.json` manifest and accepts an update only when both current and remote versions match `*-hackathon.N` and the remote version is newer. Stable releases and other prerelease channels are rejected.
 
 ---
 
