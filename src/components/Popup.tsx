@@ -449,6 +449,7 @@ const Popup: FC<PopupProps> = ({ selection }) => {
     creative?: boolean;
     isRefresh?: boolean;
     readMode?: boolean;
+    previousResult?: string;
   } = {}) => {
     if (!selection) return;
     const writeAction = opts.action ?? currentWriteAction;
@@ -456,6 +457,7 @@ const Popup: FC<PopupProps> = ({ selection }) => {
     const creative = opts.creative ?? creativeMode;
     const isRefresh = opts.isRefresh ?? false;
     const effectiveReadMode = opts.readMode ?? isReadMode;
+    const previousResult = opts.previousResult ?? "";
 
     try {
       if (effectiveReadMode) {
@@ -477,6 +479,7 @@ const Popup: FC<PopupProps> = ({ selection }) => {
             action: writeAction,
             creative_mode: creative,
             is_refresh: isRefresh,
+            previous_result: previousResult,
           },
         });
       }
@@ -540,12 +543,15 @@ const Popup: FC<PopupProps> = ({ selection }) => {
   const handleRegenerate = useCallback(async () => {
     if (!selection || isGenerating) return;
     invoke("log_action", { action: "Regenerate clicked" }).catch(() => {});
+    // Capture the currently-displayed result BEFORE clearing it, so the backend can
+    // feed it back to the model as the "rejected" version and produce something different.
+    const previousResult = result?.result ?? "";
     setPopupState("loading");
     setError(null);
     setResult(null);
     setStreamingText(null);
-    await invokeProcess({ isRefresh: true });
-  }, [selection, isGenerating, invokeProcess]);
+    await invokeProcess({ isRefresh: true, previousResult });
+  }, [selection, isGenerating, invokeProcess, result]);
 
   // ── Stop generating ──
   const handleStop = useCallback(() => {

@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.16.6] - 2026-07-22
+
+### 🐛 Bug Fixes
+
+- **Regenerate now produces a genuinely different result** — Clicking Regenerate (Write Mode) previously re-sent an identical request at a low, near-deterministic temperature, so the model almost always returned the same text. Now the previous (rejected) output is fed back to the model with an explicit "the user was not satisfied, produce a meaningfully different version" instruction, and the sampling temperature is raised on regeneration. Read Mode is unchanged.
+
 ## [0.16.5] - 2026-06-08
 
 ### 🐛 Bug Fixes

@@ -383,6 +383,7 @@ impl CopilotClient {
         model: &str,
         system_prompt: String,
         user_text: &str,
+        temperature: f32,
         on_chunk: Option<&(dyn Fn(&str) + Send + Sync)>,
         cancel_token: Option<&tokio_util::sync::CancellationToken>,
     ) -> Result<String> {
@@ -404,7 +405,7 @@ impl CopilotClient {
                     content: user_text.to_string(),
                 },
             ],
-            temperature: 0.3,
+            temperature,
             stream: true,
         };
 
@@ -602,6 +603,8 @@ impl CopilotClient {
         model: &str,
         creative_mode: bool,
         app_context: &str,
+        is_refresh: bool,
+        previous_result: &str,
         on_chunk: Option<&(dyn Fn(&str) + Send + Sync)>,
         cancel_token: Option<&tokio_util::sync::CancellationToken>,
     ) -> Result<String> {
@@ -644,6 +647,24 @@ impl CopilotClient {
             system_prompt
         };
 
+        // On regenerate (user was unsatisfied with the previous output), append a
+        // meta-instruction + the rejected version to the SYSTEM prompt (never as a
+        // user message — the user message is reserved for text-to-be-rewritten). This
+        // gives the model new context so it produces a genuinely different result.
+        let system_prompt = if is_refresh && !previous_result.trim().is_empty() {
+            format!(
+                "{}\n\nREGENERATION: The user was NOT satisfied with your previous output below and asked to regenerate. Produce a MEANINGFULLY DIFFERENT version — rephrase, restructure, choose different wording. Do NOT simply repeat the previous version with minor tweaks. Keep the same meaning and follow all rules above.\n\n--- PREVIOUS OUTPUT (rejected) ---\n{}\n--- END PREVIOUS OUTPUT ---",
+                system_prompt,
+                previous_result.trim()
+            )
+        } else {
+            system_prompt
+        };
+
+        // Higher temperature on regenerate to widen the sampling space and make the
+        // new result noticeably different; keep it low (0.3) for the first pass.
+        let temperature = if is_refresh { 0.8 } else { 0.3 };
+
         info!(
             "Processing text ({} chars) with action {:?}, model: {}, creative_mode: {}, context: {}",
             text.len(),
@@ -657,7 +678,7 @@ impl CopilotClient {
                 action, creative_mode, app_context, native_language, target_language);
         }
 
-        self.call_chat_completion(github_token, model, system_prompt, text, on_chunk, cancel_token)
+        self.call_chat_completion(github_token, model, system_prompt, text, temperature, on_chunk, cancel_token)
             .await
     }
 
@@ -690,7 +711,7 @@ impl CopilotClient {
             info!("[DEBUG] Read Mode — native={}, target={}, text_len={}", native_language, target_language, text.len());
         }
 
-        self.call_chat_completion(github_token, model, system_prompt, text, on_chunk, cancel_token)
+        self.call_chat_completion(github_token, model, system_prompt, text, 0.3, on_chunk, cancel_token)
             .await
     }
 }

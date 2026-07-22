@@ -1,7 +1,7 @@
 {
   "name": "copilot-rewrite",
   "private": true,
-  "version": "0.16.5",
+  "version": "0.16.6",
   "type": "module",
   "scripts": {
     "dev": "vite",

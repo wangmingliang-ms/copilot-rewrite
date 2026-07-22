@@ -328,6 +328,10 @@ pub struct ProcessRequest {
     pub action: RewriteAction,
     #[serde(default)]
     pub is_refresh: bool,
+    /// On regenerate: the previous (rejected) result, fed back so the model produces
+    /// a different output. Empty for the first generation. Write Mode only.
+    #[serde(default)]
+    pub previous_result: String,
     /// For ReadModeTranslate: the target language to translate into
     #[serde(default)]
     pub read_target_language: String,
@@ -396,6 +400,8 @@ async fn process_text(
                     &settings.model,
                     settings.creative_mode,
                     "",
+                    request.is_refresh,
+                    &request.previous_result,
                     None,
                     None,
                 )
@@ -507,6 +513,8 @@ async fn process_and_show_preview(
                 &settings.model,
                 creative_mode,
                 &app_context,
+                request.is_refresh,
+                &request.previous_result,
                 Some(&chunk_callback),
                 Some(&cancel_token),
             ).await
