@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.18.0] - 2026-07-24
+
+### ✨ Improvements
+
+- **Toolbar mode toggles** — The Write/Read Mode action dropdowns are replaced with inline checkbox pills. Write Mode shows a connected "Translate | More Creative" segmented group (Translate adds a translation on top of polishing; the dedicated translate-icon marks it), and Read Mode shows a "Summarize" toggle. Each toggle persists to settings and immediately regenerates. The "Translate-only" write action was removed — polishing is always applied, translation is additive.
+
 ## [0.17.0] - 2026-07-24
 
 ### ✨ Features

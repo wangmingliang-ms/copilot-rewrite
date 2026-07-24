@@ -8,7 +8,7 @@ import { SelectionInfo, ProcessResponse } from "../hooks/useSelection";
 import { extractJsonStringValue, stripCodeFences, extractVocabulary, parseReadModeSeparator } from "../utils/jsonParser";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import * as Select from "@radix-ui/react-select";
-import { Square, RefreshCw, ChevronDown, ChevronLeft, ChevronRight, Check, Sparkles, X, Settings, Copy, FileText, AlertCircle, Code, Type } from "lucide-react";
+import { Square, RefreshCw, ChevronDown, ChevronLeft, ChevronRight, Check, Sparkles, X, Settings, Copy, FileText, AlertCircle, Code, Type, Languages } from "lucide-react";
 
 // ── State machine ──
 // icon (48×48) → loading (expanded, spinner) → streaming (expanded, text flowing) → expanded (final) | error
@@ -792,27 +792,29 @@ const Popup: FC<PopupProps> = ({ selection }) => {
               Summarize
             </button>
           ) : (
-            <>
+            /* Segmented group: Translate + More Creative share one bordered container */
+            <div className="flex items-center rounded-md border border-gray-200 dark:border-gray-600 shadow-sm overflow-hidden divide-x divide-gray-200 dark:divide-gray-600">
               <button
                 onClick={handleWriteTranslateToggle}
                 disabled={isGenerating}
-                className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${toolbarBtnClass} ${writeTranslate ? "text-copilot-blue bg-blue-50 dark:bg-blue-900/30" : "text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/60"}`}
+                className={`flex items-center gap-1 px-2.5 py-1 text-xs font-medium transition-colors ${writeTranslate ? "text-copilot-blue bg-blue-50 dark:bg-blue-900/30" : "text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/60"}`}
                 title="Translate in addition to polishing"
               >
                 {writeTranslate && <Check size={11} className="flex-shrink-0" />}
                 Translate
+                <Languages size={11} className="flex-shrink-0" />
               </button>
               <button
                 onClick={handleCreativeToggle}
                 disabled={isGenerating}
-                className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${toolbarBtnClass} ${creativeMode ? "text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30" : "text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/60"}`}
+                className={`flex items-center gap-1 px-2.5 py-1 text-xs font-medium transition-colors ${creativeMode ? "text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30" : "text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/60"}`}
                 title="More Creative — full creative rewrite freedom"
               >
                 {creativeMode && <Check size={11} className="flex-shrink-0" />}
                 More Creative
                 <Sparkles size={11} className="flex-shrink-0" />
               </button>
-            </>
+            </div>
           )}
         </div>
 
