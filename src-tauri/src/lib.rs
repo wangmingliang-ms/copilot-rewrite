@@ -195,6 +195,12 @@ pub struct Settings {
     /// Write Mode action: "TranslateAndPolish", "Translate", or "Polish"
     #[serde(default = "default_write_action")]
     pub write_action: String,
+    /// Remembered expanded popup content width (logical px)
+    #[serde(default = "default_popup_width")]
+    pub popup_width: f64,
+    /// Remembered expanded popup content height (logical px)
+    #[serde(default = "default_popup_height")]
+    pub popup_height: f64,
     /// Debug mode — logs detailed information (LLM prompts, responses) to the log file
     #[serde(default)]
     pub debug_mode: bool,
@@ -245,6 +251,14 @@ fn default_popup_icon_position() -> String {
 
 fn default_write_action() -> String {
     "TranslateAndPolish".to_string()
+}
+
+fn default_popup_width() -> f64 {
+    400.0
+}
+
+fn default_popup_height() -> f64 {
+    300.0
 }
 
 impl Settings {
@@ -306,6 +320,8 @@ impl Default for Settings {
             read_mode_sub: "translate_summarize".to_string(),
             popup_icon_position: "top-left".to_string(),
             write_action: "TranslateAndPolish".to_string(),
+            popup_width: 400.0,
+            popup_height: 300.0,
             debug_mode: false,
         }
     }
@@ -1126,11 +1142,29 @@ async fn dismiss_popup(
     Ok(())
 }
 
-/// Resize popup to fit actual rendered content height (called from frontend after render)
+/// Get the current popup content rect (logical x, y, w, h) — baseline for a drag-resize.
 #[tauri::command]
-async fn resize_popup_content(app: tauri::AppHandle, height: f64) -> Result<(), String> {
-    overlay::resize_popup_to_content(&app, height);
-    Ok(())
+fn get_popup_rect(app: tauri::AppHandle) -> Option<(f64, f64, f64, f64)> {
+    overlay::get_popup_rect(&app)
+}
+
+/// Apply a drag-resize (logical content rect). Clamps to min size + monitor work area,
+/// persists the resulting size to settings, and returns the clamped rect.
+#[tauri::command]
+fn set_popup_rect(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Arc<AppState>>,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+) -> Result<(f64, f64, f64, f64), String> {
+    let rect = overlay::set_popup_rect(&app, x, y, width, height);
+    let mut settings = state.settings.lock();
+    settings.popup_width = rect.2;
+    settings.popup_height = rect.3;
+    let _ = settings.save();
+    Ok(rect)
 }
 
 /// Right-click pass-through: dismiss popup and re-send right-click to the window under the cursor.
@@ -1242,7 +1276,8 @@ pub fn run() {
             is_enabled,
             dismiss_popup,
             forward_right_click_to_source,
-            resize_popup_content,
+            get_popup_rect,
+            set_popup_rect,
             start_github_login,
             poll_github_login,
             get_auth_status,
@@ -1263,6 +1298,12 @@ pub fn run() {
 
             // Apply window styles to popup (WS_EX_NOACTIVATE, strip frame)
             overlay::setup_popup_window(&app_handle);
+
+            // Restore remembered expanded popup size
+            {
+                let s = state.settings.lock();
+                overlay::set_expanded_size(s.popup_width, s.popup_height);
+            }
 
             // Settings window: hide on close instead of destroy, so it can be re-shown
             if let Some(settings_win) = app_handle.get_webview_window("settings") {

@@ -33,22 +33,14 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 /// Icon/spinner size (physical pixels)
 const ICON_SIZE: f64 = 48.0;
 
-/// Expanded preview width
-const EXPANDED_WIDTH: f64 = 400.0;
-const EXPANDED_MIN_HEIGHT: f64 = 200.0;
-const EXPANDED_MAX_HEIGHT: f64 = 400.0;
-/// Default height for initial streaming expand (before content is measured)
-const EXPANDED_STREAMING_HEIGHT: f64 = 250.0;
+/// Default expanded content size (logical px) — used when no remembered size exists
+const DEFAULT_EXPANDED_W: f64 = 400.0;
+const DEFAULT_EXPANDED_H: f64 = 300.0;
+/// Minimum expanded content size (logical px) — resize cannot go below this
+const MIN_EXPANDED_W: f64 = 300.0;
+const MIN_EXPANDED_H: f64 = 200.0;
 /// Shadow margin (logical px) — extra space around content for CSS box-shadow
 const SHADOW_MARGIN: f64 = 20.0;
-/// Button bar height
-const BUTTONS_HEIGHT: f64 = 34.0;
-/// Text area padding (top 20 + bottom 12 + labels ~16)
-const TEXT_PADDING: f64 = 48.0;
-/// Approximate line height
-const LINE_HEIGHT_PX: f64 = 18.0;
-/// Approximate characters per line
-const CHARS_PER_LINE: f64 = 50.0;
 
 /// Offset from cursor position
 const POPUP_OFFSET_X: f64 = 8.0;
@@ -56,12 +48,19 @@ const POPUP_OFFSET_Y: f64 = 16.0;
 
 /// Stored popup position (logical coordinates) and DPI scale — set once, reused across state transitions
 static POPUP_POS: Mutex<(f64, f64, f64)> = Mutex::new((0.0, 0.0, 1.0));
-/// Stored input element rect (physical pixels) — for expand_popup sizing/positioning
+/// Stored input element rect (physical pixels) — for expand_popup positioning
 static INPUT_RECT: Mutex<Option<(i32, i32, i32, i32)>> = Mutex::new(None);
-/// Stored popup bottom edge (logical Y) — anchored during content resizing
-static POPUP_BOTTOM: Mutex<f64> = Mutex::new(0.0);
+/// Remembered expanded content size (logical px) — persisted to settings, reused across popups
+static EXPANDED_SIZE: Mutex<(f64, f64)> = Mutex::new((DEFAULT_EXPANDED_W, DEFAULT_EXPANDED_H));
 /// Cached popup WebviewWindow — set once in setup_popup_window, avoids HashMap lookup per call
 static POPUP_WINDOW: Mutex<Option<WebviewWindow>> = Mutex::new(None);
+
+/// Set the remembered expanded content size (logical px). Called at startup from settings.
+pub fn set_expanded_size(w: f64, h: f64) {
+    let w = w.max(MIN_EXPANDED_W);
+    let h = h.max(MIN_EXPANDED_H);
+    *EXPANDED_SIZE.lock() = (w, h);
+}
 
 /// Get the cached popup window (set during setup_popup_window).
 /// Falls back to app_handle lookup if cache is empty (shouldn't happen after setup).
@@ -229,10 +228,10 @@ pub fn show_popup_icon(
     }
 }
 
-/// Compute expanded popup position and width given a target height.
-/// Returns (x, y, w_logical) in logical coordinates, clamped to screen bounds.
-/// Uses input element rect when available, otherwise falls back to stored popup position.
-fn compute_expanded_position(_app_handle: &AppHandle, height: f64) -> (f64, f64, f64) {
+/// Compute expanded popup position given target width and height.
+/// Returns (x, y) in logical coordinates, clamped to screen bounds.
+/// Uses input element rect for positioning when available, otherwise stored popup position.
+fn compute_expanded_position(_app_handle: &AppHandle, w: f64, height: f64) -> (f64, f64) {
     let stored_input = *INPUT_RECT.lock();
 
     // Determine which monitor the popup should appear on
@@ -245,18 +244,9 @@ fn compute_expanded_position(_app_handle: &AppHandle, height: f64) -> (f64, f64,
     let screen_right = mon_x + mon_w;
     let screen_bottom = mon_y + mon_h;
 
-    // Determine width and scale from selection rect (one get_scale_at call)
-    let (w, scale_opt) = if let Some((_rx, ry, rw, _rh)) = stored_input {
-        let scale = get_scale_at(0, ry);
-        let elem_w = rw as f64 / scale;
-        (elem_w.max(EXPANDED_WIDTH).min(mon_w - 16.0), Some(scale))
-    } else {
-        (EXPANDED_WIDTH, None)
-    };
-
     // Position relative to selection rect, or fallback to stored popup pos
     if let Some((sx, sy, _sw, sh)) = stored_input {
-        let scale = scale_opt.unwrap_or_else(|| get_scale_at(sx, sy));
+        let scale = get_scale_at(sx, sy);
         let sel_x = sx as f64 / scale;
         let sel_y = sy as f64 / scale;
         let sel_h = sh as f64 / scale;
@@ -278,7 +268,7 @@ fn compute_expanded_position(_app_handle: &AppHandle, height: f64) -> (f64, f64,
         if px < mon_x { px = mon_x + 8.0; }
         if py < mon_y { py = mon_y + 8.0; }
 
-        (px, py, w)
+        (px, py)
     } else {
         let (stored_x, stored_y, _) = *POPUP_POS.lock();
         let mut x = stored_x;
@@ -287,12 +277,12 @@ fn compute_expanded_position(_app_handle: &AppHandle, height: f64) -> (f64, f64,
         if y + height > screen_bottom { y = screen_bottom - height - 8.0; }
         if x < mon_x { x = mon_x + 8.0; }
         if y < mon_y { y = mon_y + 8.0; }
-        (x, y, w)
+        (x, y)
     }
 }
 
 /// Apply expanded size and position to the popup window.
-/// Removes WS_EX_NOACTIVATE, sets size/position, stores bottom anchor.
+/// Removes WS_EX_NOACTIVATE, sets size/position atomically.
 fn apply_expanded_layout(app_handle: &AppHandle, x: f64, y: f64, w_logical: f64, height: f64, label: &str) {
     if let Some(window) = get_popup(app_handle) {
         // Remove WS_EX_NOACTIVATE so buttons are clickable
@@ -303,10 +293,6 @@ fn apply_expanded_layout(app_handle: &AppHandle, x: f64, y: f64, w_logical: f64,
         let win_h = height + SHADOW_MARGIN * 2.0;
         let win_x = x - SHADOW_MARGIN;
         let win_y = y - SHADOW_MARGIN;
-
-        // Store the bottom edge position (content bottom Y) for anchor-bottom resizing
-        let content_bottom = y + height;
-        *POPUP_BOTTOM.lock() = content_bottom;
 
         // Use a single SetWindowPos call to set position + size atomically,
         // avoiding the visible intermediate state between separate set_size/set_position.
@@ -326,26 +312,24 @@ fn apply_expanded_layout(app_handle: &AppHandle, x: f64, y: f64, w_logical: f64,
         }
 
         info!(
-            "Popup {} to {:.0}x{:.0} (content {:.0}x{:.0}) at ({:.0}, {:.0}), bottom={:.0}",
-            label, win_w, win_h, w_logical, height, win_x, win_y, content_bottom
+            "Popup {} to {:.0}x{:.0} (content {:.0}x{:.0}) at ({:.0}, {:.0})",
+            label, win_w, win_h, w_logical, height, win_x, win_y
         );
     }
 }
 
-/// Expand popup to show result text — removes WS_EX_NOACTIVATE for interactivity.
-/// Uses input element rect for width and vertical positioning when available.
-pub fn expand_popup(app_handle: &AppHandle, text: &str) {
-    let height = estimate_height(text);
-    let (x, y, w_logical) = compute_expanded_position(app_handle, height);
-    apply_expanded_layout(app_handle, x, y, w_logical, height, "expanded");
+/// Expand popup to show result — uses remembered content size.
+pub fn expand_popup(app_handle: &AppHandle, _text: &str) {
+    let (w, h) = *EXPANDED_SIZE.lock();
+    let (x, y) = compute_expanded_position(app_handle, w, h);
+    apply_expanded_layout(app_handle, x, y, w, h, "expanded");
 }
 
-/// Expand popup for streaming — uses a fixed default height instead of estimating from text.
-/// The frontend resize effect will adjust the height as content grows.
+/// Expand popup for streaming — uses remembered content size (same as expand_popup).
 pub fn expand_popup_streaming(app_handle: &AppHandle) {
-    let height = EXPANDED_STREAMING_HEIGHT;
-    let (x, y, w_logical) = compute_expanded_position(app_handle, height);
-    apply_expanded_layout(app_handle, x, y, w_logical, height, "streaming expand");
+    let (w, h) = *EXPANDED_SIZE.lock();
+    let (x, y) = compute_expanded_position(app_handle, w, h);
+    apply_expanded_layout(app_handle, x, y, w, h, "streaming expand");
 }
 
 /// Shrink popup back to icon size and re-apply WS_EX_NOACTIVATE
@@ -534,115 +518,80 @@ fn resize_popup_physical(app_handle: &AppHandle, w: f64, h: f64) {
     }
 }
 
-/// Estimate expanded height based on text content.
-/// For tabbed content (read mode with separators, write mode with separator),
-/// only estimates based on the largest single section since tabs show one at a time.
-fn estimate_height(text: &str) -> f64 {
-    if text.is_empty() {
-        return EXPANDED_MIN_HEIGHT;
-    }
-
-    // If the text contains section separators (tabs), only measure the largest section
-    let measure_text = if text.contains("---VOCABULARY---") || text.contains("---SUMMARY---") {
-        // Read mode: split by separators, find the largest section
-        text.split("---VOCABULARY---")
-            .flat_map(|part| part.split("---SUMMARY---"))
-            .max_by_key(|s| s.len())
-            .unwrap_or(text)
-    } else if text.contains("---TRANSLATED---") {
-        // Write mode: split by separator, find the largest section
-        text.split("---TRANSLATED---")
-            .max_by_key(|s| s.len())
-            .unwrap_or(text)
-    } else {
-        text
-    };
-
-    let mut newline_count = 0usize;
-    let mut char_count = 0usize;
-    for c in measure_text.chars() {
-        char_count += 1;
-        if c == '\n' {
-            newline_count += 1;
-        }
-    }
-    let wrapped_lines = (char_count as f64 / CHARS_PER_LINE).ceil();
-    let total_lines = wrapped_lines.max(newline_count as f64 + 1.0);
-    let text_height = total_lines * LINE_HEIGHT_PX;
-    let height = text_height + TEXT_PADDING + BUTTONS_HEIGHT;
-    height.clamp(EXPANDED_MIN_HEIGHT, EXPANDED_MAX_HEIGHT)
+/// Get the current popup CONTENT rect in logical coordinates (x, y, w, h).
+/// Content rect excludes the SHADOW_MARGIN border. Returned to the frontend as
+/// the baseline for a drag-resize gesture.
+pub fn get_popup_rect(app_handle: &AppHandle) -> Option<(f64, f64, f64, f64)> {
+    let window = get_popup(app_handle)?;
+    let scale = window.scale_factor().unwrap_or(1.0);
+    let pos = window.outer_position().ok()?;
+    let size = window.outer_size().ok()?;
+    let win_x = pos.x as f64 / scale;
+    let win_y = pos.y as f64 / scale;
+    let win_w = size.width as f64 / scale;
+    let win_h = size.height as f64 / scale;
+    // Convert window rect back to content rect (strip shadow margin)
+    Some((
+        win_x + SHADOW_MARGIN,
+        win_y + SHADOW_MARGIN,
+        win_w - SHADOW_MARGIN * 2.0,
+        win_h - SHADOW_MARGIN * 2.0,
+    ))
 }
 
-/// Resize expanded popup to fit actual rendered content height (called from frontend)
-/// Anchors the bottom edge — grows/shrinks upward
-pub fn resize_popup_to_content(app_handle: &AppHandle, content_height: f64) {
-    let bottom = *POPUP_BOTTOM.lock();
-    if bottom == 0.0 {
-        debug!("resize_popup_to_content: POPUP_BOTTOM not set yet, skipping");
-        return;
-    }
+/// Apply a drag-resize: set the popup CONTENT rect (logical x, y, w, h).
+/// Clamps width/height to minimums and the whole rect into the monitor work area.
+/// Stores the resulting size in EXPANDED_SIZE and returns the clamped content rect.
+pub fn set_popup_rect(app_handle: &AppHandle, x: f64, y: f64, w: f64, h: f64) -> (f64, f64, f64, f64) {
+    // Clamp size to minimums first
+    let mut w = w.max(MIN_EXPANDED_W);
+    let mut h = h.max(MIN_EXPANDED_H);
+    let mut x = x;
+    let mut y = y;
+
+    // Determine monitor work area at the target position.
+    // Use the popup's current scale to convert logical → physical for the monitor query.
+    let win_scale = get_popup(app_handle)
+        .and_then(|w| w.scale_factor().ok())
+        .unwrap_or(1.0);
+    let (mon_x, mon_y, mon_w, mon_h, _) = get_monitor_info_at((x * win_scale) as i32, (y * win_scale) as i32);
+    let screen_right = mon_x + mon_w;
+    let screen_bottom = mon_y + mon_h;
+
+    // Clamp size so the rect fits within the work area from its current top-left
+    if w > mon_w { w = mon_w; }
+    if h > mon_h { h = mon_h; }
+    // Shift left/up if the rect overflows the right/bottom edges
+    if x + w > screen_right { x = screen_right - w; }
+    if y + h > screen_bottom { y = screen_bottom - h; }
+    // Keep top-left inside the work area
+    if x < mon_x { x = mon_x; }
+    if y < mon_y { y = mon_y; }
+
+    *EXPANDED_SIZE.lock() = (w, h);
 
     if let Some(window) = get_popup(app_handle) {
-        // Add 20px buffer to avoid sub-pixel scrollbar
-        let height = (content_height + 20.0).clamp(EXPANDED_MIN_HEIGHT, EXPANDED_MAX_HEIGHT);
-        let stored_input = *INPUT_RECT.lock();
-
-        // Determine width: use element width if available (clamped), otherwise default
-        let w_logical = if let Some((_rx, ry, rw, _)) = stored_input {
-            let scale = get_scale_at(0, ry);
-            let elem_w = rw as f64 / scale;
-            let (_, _, mon_w, _, _) = get_monitor_info_at(_rx, ry);
-            elem_w.max(EXPANDED_WIDTH).min(mon_w - 16.0)
-        } else {
-            EXPANDED_WIDTH
-        };
-
-        // Anchor bottom edge: content top = bottom - height
-        let mut content_y = bottom - height;
-        // Get the monitor that contains the popup (use stored input_rect or current position)
-        let (_mon_x, mon_y, _, _, _) = if let Some((sx, sy, _, _)) = stored_input {
-            get_monitor_info_at(sx, sy)
-        } else if let Ok(pos) = window.outer_position() {
-            get_monitor_info_at(pos.x, pos.y)
-        } else {
-            (0.0, 0.0, 1920.0, 1080.0, 1.0)
-        };
-        if content_y < mon_y {
-            content_y = mon_y;
-        }
-
-        // Get current X position (keep it stable)
-        let content_x = if let Ok(pos) = window.outer_position() {
-            let scale = window.scale_factor().unwrap_or(1.0);
-            pos.x as f64 / scale + SHADOW_MARGIN
-        } else {
-            0.0
-        };
-
-        let win_w = w_logical + SHADOW_MARGIN * 2.0;
-        let win_h = height + SHADOW_MARGIN * 2.0;
-        let win_x = content_x - SHADOW_MARGIN;
-        let win_y = content_y - SHADOW_MARGIN;
-
-        // Use a single SetWindowPos call to set position + size atomically,
-        // avoiding the visible intermediate state between separate set_size/set_position.
         if let Ok(hwnd) = window.hwnd() {
-            let scale = window.scale_factor().unwrap_or(1.0);
+            let s = window.scale_factor().unwrap_or(1.0);
+            let win_x = x - SHADOW_MARGIN;
+            let win_y = y - SHADOW_MARGIN;
+            let win_w = w + SHADOW_MARGIN * 2.0;
+            let win_h = h + SHADOW_MARGIN * 2.0;
             unsafe {
                 let _ = SetWindowPos(
                     HWND(hwnd.0 as *mut _),
                     HWND_TOP,
-                    (win_x * scale) as i32,
-                    (win_y * scale) as i32,
-                    (win_w * scale) as i32,
-                    (win_h * scale) as i32,
+                    (win_x * s) as i32,
+                    (win_y * s) as i32,
+                    (win_w * s) as i32,
+                    (win_h * s) as i32,
                     SWP_NOZORDER | SWP_FRAMECHANGED,
                 );
             }
         }
-
-        debug!("Popup resized to content: {:.0}x{:.0} (content height {:.0}), bottom anchored at {:.0}", win_w, win_h, height, bottom);
     }
+
+    (x, y, w, h)
 }
 
 /// Get scale factor at given physical coordinates

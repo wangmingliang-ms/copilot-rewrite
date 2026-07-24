@@ -403,43 +403,6 @@ const Popup: FC<PopupProps> = ({ selection }) => {
     return () => window.removeEventListener("blur", handleBlur);
   }, [state, showActionMenu, showReplaceMenu]);
 
-  // Resize popup to fit content
-  const contentRef = useRef<HTMLDivElement>(null);
-  const hasResized = useRef(false);
-  const sizeLockedForRegenerate = useRef(false);
-  useEffect(() => {
-    if ((state !== "expanded" && state !== "streaming" && state !== "loading") || !contentRef.current) return;
-    if (sizeLockedForRegenerate.current) return;
-    if (state === "expanded" && hasResized.current) return;
-    const delay = state === "streaming" ? 200 : state === "loading" ? 150 : 50;
-    const timer = setTimeout(() => {
-      if (contentRef.current) {
-        const card = contentRef.current;
-        const oldMaxH = card.style.maxHeight;
-        card.style.maxHeight = "none";
-        const totalHeight = card.scrollHeight;
-        card.style.maxHeight = oldMaxH;
-        invoke("resize_popup_content", { height: Math.min(Math.max(totalHeight, 80), 400) }).catch(() => {});
-        // For expanded state, do a second resize after 300ms to catch async markdown rendering
-        if (state === "expanded") {
-          setTimeout(() => {
-            if (contentRef.current) {
-              const c = contentRef.current;
-              const old = c.style.maxHeight;
-              c.style.maxHeight = "none";
-              const h = c.scrollHeight;
-              c.style.maxHeight = old;
-              invoke("resize_popup_content", { height: Math.min(Math.max(h, 80), 400) }).catch(() => {});
-            }
-            hasResized.current = true;
-            sizeLockedForRegenerate.current = true;
-          }, 300);
-        }
-      }
-    }, delay);
-    return () => clearTimeout(timer);
-  }, [state, streamingText, translatedHtml, reorganizedHtml, readSummaryHtml, readTranslationHtml, readLayout]);
-
   // ── Process invocation helper ──
   // Accept explicit readMode override to avoid stale closure issues
   // (setIsReadMode is async, so the closure may not reflect the latest value)
@@ -706,6 +669,85 @@ const Popup: FC<PopupProps> = ({ selection }) => {
     }
   }, [outputText, outputHtml, replaceMode]);
 
+  // ── 8-direction drag-resize ──
+  // Each handle drags one edge/corner; the opposite edge/corner stays fixed.
+  // The window rect (logical, content coords) is fetched once at pointerdown as the
+  // baseline, then each move computes a new target rect and asks the backend to apply it.
+  type ResizeDir = "n" | "s" | "e" | "w" | "ne" | "nw" | "se" | "sw";
+  const resizeBase = useRef<{ x: number; y: number; w: number; h: number; px: number; py: number; dir: ResizeDir } | null>(null);
+  const resizeRaf = useRef<number | null>(null);
+
+  const handleResizeStart = useCallback((dir: ResizeDir) => (e: React.PointerEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    invoke<[number, number, number, number] | null>("get_popup_rect").then((rect) => {
+      if (!rect) return;
+      resizeBase.current = { x: rect[0], y: rect[1], w: rect[2], h: rect[3], px: e.screenX, py: e.screenY, dir };
+    }).catch(() => {});
+  }, []);
+
+  const handleResizeMove = useCallback((e: React.PointerEvent) => {
+    const base = resizeBase.current;
+    if (!base) return;
+    e.preventDefault();
+    if (resizeRaf.current !== null) return;
+    const screenX = e.screenX;
+    const screenY = e.screenY;
+    resizeRaf.current = requestAnimationFrame(() => {
+      resizeRaf.current = null;
+      const b = resizeBase.current;
+      if (!b) return;
+      // screenX/Y are physical; convert delta to logical via devicePixelRatio
+      const dpr = window.devicePixelRatio || 1;
+      const dx = (screenX - b.px) / dpr;
+      const dy = (screenY - b.py) / dpr;
+      let { x, y, w, h } = b;
+      if (b.dir.includes("e")) w = b.w + dx;
+      if (b.dir.includes("s")) h = b.h + dy;
+      if (b.dir.includes("w")) { x = b.x + dx; w = b.w - dx; }
+      if (b.dir.includes("n")) { y = b.y + dy; h = b.h - dy; }
+      invoke("set_popup_rect", { x, y, width: w, height: h }).catch(() => {});
+    });
+  }, []);
+
+  const handleResizeEnd = useCallback((e: React.PointerEvent) => {
+    if ((e.target as HTMLElement).hasPointerCapture?.(e.pointerId)) {
+      (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+    }
+    resizeBase.current = null;
+    if (resizeRaf.current !== null) { cancelAnimationFrame(resizeRaf.current); resizeRaf.current = null; }
+  }, []);
+
+  // Renders the 8 resize handles (4 edges + 4 corners) as an overlay inside the card.
+  const renderResizeHandles = () => {
+    const dirs: { dir: ResizeDir; cls: string; cursor: string }[] = [
+      { dir: "n", cls: "top-0 left-2 right-2 h-1.5", cursor: "ns-resize" },
+      { dir: "s", cls: "bottom-0 left-2 right-2 h-1.5", cursor: "ns-resize" },
+      { dir: "e", cls: "right-0 top-2 bottom-2 w-1.5", cursor: "ew-resize" },
+      { dir: "w", cls: "left-0 top-2 bottom-2 w-1.5", cursor: "ew-resize" },
+      { dir: "nw", cls: "top-0 left-0 w-3 h-3", cursor: "nwse-resize" },
+      { dir: "ne", cls: "top-0 right-0 w-3 h-3", cursor: "nesw-resize" },
+      { dir: "sw", cls: "bottom-0 left-0 w-3 h-3", cursor: "nesw-resize" },
+      { dir: "se", cls: "bottom-0 right-0 w-3 h-3", cursor: "nwse-resize" },
+    ];
+    return (
+      <>
+        {dirs.map(({ dir, cls, cursor }) => (
+          <div
+            key={dir}
+            className={`absolute ${cls} z-50`}
+            style={{ cursor }}
+            onPointerDown={handleResizeStart(dir)}
+            onPointerMove={handleResizeMove}
+            onPointerUp={handleResizeEnd}
+            onPointerCancel={handleResizeEnd}
+          />
+        ))}
+      </>
+    );
+  };
+
   // Right-click pass-through: dismiss popup, suppress WebView2 menu, and
   // re-send the right-click to the window now under the cursor (source app).
   const handleRightClickPassthrough = useCallback((e: React.MouseEvent) => {
@@ -730,8 +772,6 @@ const Popup: FC<PopupProps> = ({ selection }) => {
     setShowRaw(false);
     setRefreshing(false);
     refreshingRef.current = false;
-    hasResized.current = false;
-    sizeLockedForRegenerate.current = false;
     setIsReadMode(false);
     setReadTab("summary");
     setWriteTab("translated");
@@ -1108,7 +1148,8 @@ const Popup: FC<PopupProps> = ({ selection }) => {
   if (state === "loading") {
     return (
       <div className="w-screen h-screen" onContextMenu={handleRightClickPassthrough} style={{ padding: "20px", background: "transparent" }}>
-        <div ref={contentRef} className="flex flex-col rounded-lg overflow-hidden h-full" style={cardStyle}>
+        <div className="relative flex flex-col rounded-lg overflow-hidden h-full" style={cardStyle}>
+          {renderResizeHandles()}
           {renderTopToolbar()}
           <div className={`flex-1 flex items-center justify-center mx-4 my-2 ${contentCardClass}`}>
             <div className="flex flex-col items-center gap-3">
@@ -1126,7 +1167,8 @@ const Popup: FC<PopupProps> = ({ selection }) => {
   if (state === "streaming") {
     return (
       <div className="w-screen h-screen" onContextMenu={handleRightClickPassthrough} style={{ padding: "20px", background: "transparent" }}>
-        <div ref={contentRef} className="flex flex-col rounded-lg overflow-hidden h-full" style={cardStyle}>
+        <div className="relative flex flex-col rounded-lg overflow-hidden h-full" style={cardStyle}>
+          {renderResizeHandles()}
           {renderTopToolbar()}
           <div className={`flex-1 min-h-0 overflow-auto px-5 pt-4 pb-3 mx-4 my-2 ${contentCardClass}`} style={{ userSelect: "text", WebkitUserSelect: "text" }}>
             {/* Phase indicator for "thinking" (reorganized section before separator) */}
@@ -1166,7 +1208,8 @@ const Popup: FC<PopupProps> = ({ selection }) => {
   if (state === "error") {
     return (
       <div className="w-screen h-screen" onContextMenu={handleRightClickPassthrough} style={{ padding: "20px", background: "transparent" }}>
-        <div className="flex flex-col rounded-lg h-full overflow-hidden" style={cardStyle}>
+        <div className="relative flex flex-col rounded-lg h-full overflow-hidden" style={cardStyle}>
+          {renderResizeHandles()}
           {renderTopToolbar()}
           <div className={`flex-1 px-5 py-4 flex items-start gap-2.5 mx-4 my-2 ${contentCardClass}`}>
             <div className="flex-shrink-0 w-5 h-5 rounded-full bg-red-50 dark:bg-red-900/30 flex items-center justify-center mt-0.5">
@@ -1183,7 +1226,8 @@ const Popup: FC<PopupProps> = ({ selection }) => {
   // ── Expanded state (final result) ──
   return (
     <div className="w-screen h-screen" onContextMenu={handleRightClickPassthrough} style={{ padding: "20px", background: "transparent" }}>
-      <div ref={contentRef} className="flex flex-col rounded-lg overflow-hidden h-full" style={cardStyle}>
+      <div className="relative flex flex-col rounded-lg overflow-hidden h-full" style={cardStyle}>
+        {renderResizeHandles()}
         {renderTopToolbar()}
 
         {!result ? (

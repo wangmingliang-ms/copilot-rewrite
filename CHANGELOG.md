@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.17.0] - 2026-07-24
+
+### ✨ Features
+
+- **Resizable popup** — The result popup can now be resized like a normal window by dragging any of its 8 edges/corners (4 sides + 4 corners). The chosen size is remembered across popups and app restarts, and is always clamped to the screen work area. Content that exceeds the window scrolls internally. This replaces the previous automatic content-fit sizing; the default size is 400×300 (logical px) with a 300×200 minimum.
+
 ## [0.16.6] - 2026-07-22
 
 ### 🐛 Bug Fixes
