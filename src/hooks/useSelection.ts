@@ -20,7 +20,7 @@ export interface SelectionInfo {
 }
 
 /** Matches the Rust RewriteAction enum */
-export type RewriteAction = "Translate" | "Polish" | "TranslateAndPolish" | "ReadModeTranslate";
+export type RewriteAction = "Polish" | "TranslateAndPolish" | "ReadModeTranslate";
 
 /** Matches the Rust ProcessResponse struct */
 export interface ProcessResponse {

@@ -14,21 +14,6 @@ import { Square, RefreshCw, ChevronDown, ChevronLeft, ChevronRight, Check, Spark
 // icon (48×48) → loading (expanded, spinner) → streaming (expanded, text flowing) → expanded (final) | error
 type PopupState = "icon" | "loading" | "streaming" | "expanded" | "error";
 
-// Write Mode actions
-type WriteAction = "TranslateAndPolish" | "Translate" | "Polish";
-const WRITE_ACTIONS: { value: WriteAction; label: string }[] = [
-  { value: "TranslateAndPolish", label: "Translate + Polish" },
-  { value: "Translate", label: "Only Translate" },
-  { value: "Polish", label: "Only Polish" },
-];
-
-// Read Mode actions
-type ReadAction = "translate_summarize" | "simple_translate";
-const READ_ACTIONS: { value: ReadAction; label: string }[] = [
-  { value: "translate_summarize", label: "Summarize + Translate" },
-  { value: "simple_translate", label: "Only Translate" },
-];
-
 interface CopilotModel {
   id: string;
   name: string;
@@ -67,10 +52,10 @@ const Popup: FC<PopupProps> = ({ selection }) => {
   const [readTab, setReadTab] = useState<"summary" | "translation" | "vocabulary">("summary");
   const [writeTab, setWriteTab] = useState<"translated" | "polished">("translated");
 
-  // Top toolbar state — action selection
-  const [currentWriteAction, setCurrentWriteAction] = useState<WriteAction>("TranslateAndPolish");
-  const [currentReadAction, setCurrentReadAction] = useState<ReadAction>("translate_summarize");
-  const [showActionMenu, setShowActionMenu] = useState(false);
+  // Top toolbar state — Write Mode: Translate checkbox; Read Mode: Summarize checkbox.
+  // Write action is derived: writeTranslate ? "TranslateAndPolish" : "Polish".
+  const [writeTranslate, setWriteTranslate] = useState<boolean>(true);
+  const [readSummarize, setReadSummarize] = useState<boolean>(true);
 
   // Derived: is generating
   const isGenerating = state === "loading" || state === "streaming";
@@ -83,8 +68,7 @@ const Popup: FC<PopupProps> = ({ selection }) => {
   const [readModeSettings, setReadModeSettings] = useState<{
     native_language: string;
     target_language: string;
-    read_mode_sub: string;
-  }>({ native_language: "Chinese (Simplified)", target_language: "English", read_mode_sub: "translate_summarize" });
+  }>({ native_language: "Chinese (Simplified)", target_language: "English" });
 
   // Apply theme to this window's <html> based on settings
   const applyTheme = useCallback(async (themeValue?: string) => {
@@ -119,28 +103,22 @@ const Popup: FC<PopupProps> = ({ selection }) => {
     return () => observer.disconnect();
   }, []);
 
-  // Refresh settings (model name + creative mode + theme + read mode + write action) from backend
+  // Refresh settings (model name + creative mode + theme + read/write toggles) from backend
   const refreshSettings = useCallback(async () => {
     try {
       const s = await invoke<{
         model: string; creative_mode: boolean; theme?: string;
-        native_language?: string; target_language?: string; read_mode_enabled?: boolean; read_mode_sub?: string;
-        write_action?: string;
+        native_language?: string; target_language?: string; read_mode_enabled?: boolean; read_summarize?: boolean;
+        write_translate?: boolean;
       }>("get_settings");
       setCreativeMode(s.creative_mode || false);
       applyTheme(s.theme);
-      // Restore write action
-      const wa = s.write_action || "TranslateAndPolish";
-      if (wa === "TranslateAndPolish" || wa === "Translate" || wa === "Polish") {
-        setCurrentWriteAction(wa as WriteAction);
-      }
-      const rms = {
+      setWriteTranslate(s.write_translate ?? true);
+      setReadSummarize(s.read_summarize ?? true);
+      setReadModeSettings({
         native_language: s.native_language || "Chinese (Simplified)",
         target_language: s.target_language || "English",
-        read_mode_sub: s.read_mode_sub || "translate_summarize",
-      };
-      setReadModeSettings(rms);
-      setCurrentReadAction(rms.read_mode_sub === "simple_translate" ? "simple_translate" : "translate_summarize");
+      });
       if (!s.model) { setCurrentModel(""); setCurrentModelId(""); return; }
       setCurrentModelId(s.model);
       try {
@@ -382,41 +360,40 @@ const Popup: FC<PopupProps> = ({ selection }) => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         if (showReplaceMenu) { setShowReplaceMenu(false); return; }
-        if (showActionMenu) { setShowActionMenu(false); return; }
         handleDismiss();
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => { window.removeEventListener("keydown", handleKeyDown); };
-  }, [showReplaceMenu, showActionMenu]);
+  }, [showReplaceMenu]);
 
   // Auto-dismiss on blur (skip when Radix menus are open — their Portal causes transient blur)
   useEffect(() => {
     if (state !== "expanded" && state !== "streaming" && state !== "loading" && state !== "error") return;
     const handleBlur = () => {
       setTimeout(async () => {
-        if (showActionMenu || showReplaceMenu) return;
+        if (showReplaceMenu) return;
         if (!document.hasFocus()) handleDismiss();
       }, 100);
     };
     window.addEventListener("blur", handleBlur);
     return () => window.removeEventListener("blur", handleBlur);
-  }, [state, showActionMenu, showReplaceMenu]);
+  }, [state, showReplaceMenu]);
 
   // ── Process invocation helper ──
   // Accept explicit readMode override to avoid stale closure issues
   // (setIsReadMode is async, so the closure may not reflect the latest value)
   const invokeProcess = useCallback(async (opts: {
-    action?: WriteAction;
-    readAction?: ReadAction;
+    translate?: boolean;
+    summarize?: boolean;
     creative?: boolean;
     isRefresh?: boolean;
     readMode?: boolean;
     previousResult?: string;
   } = {}) => {
     if (!selection) return;
-    const writeAction = opts.action ?? currentWriteAction;
-    const readAction = opts.readAction ?? currentReadAction;
+    const translate = opts.translate ?? writeTranslate;
+    const summarize = opts.summarize ?? readSummarize;
     const creative = opts.creative ?? creativeMode;
     const isRefresh = opts.isRefresh ?? false;
     const effectiveReadMode = opts.readMode ?? isReadMode;
@@ -424,7 +401,6 @@ const Popup: FC<PopupProps> = ({ selection }) => {
 
     try {
       if (effectiveReadMode) {
-        const summarize = readAction === "translate_summarize";
         await invoke("process_and_show_preview", {
           request: {
             text: selection.text,
@@ -439,7 +415,7 @@ const Popup: FC<PopupProps> = ({ selection }) => {
         await invoke("process_and_show_preview", {
           request: {
             text: selection.text,
-            action: writeAction,
+            action: translate ? "TranslateAndPolish" : "Polish",
             creative_mode: creative,
             is_refresh: isRefresh,
             previous_result: previousResult,
@@ -454,7 +430,7 @@ const Popup: FC<PopupProps> = ({ selection }) => {
       setRefreshing(false);
       refreshingRef.current = false;
     }
-  }, [selection, currentWriteAction, currentReadAction, creativeMode, isReadMode, readModeSettings]);
+  }, [selection, writeTranslate, readSummarize, creativeMode, isReadMode, readModeSettings]);
 
   // ── Icon click handler ──
   const handleIconClick = useCallback(async () => {
@@ -559,39 +535,15 @@ const Popup: FC<PopupProps> = ({ selection }) => {
     }
   }, [currentModelId, models, state, invokeProcess]);
 
-  // ── Action dropdown change → persist + auto-regenerate ──
-  const handleWriteActionChange = useCallback(async (action: WriteAction) => {
-    if (action === currentWriteAction) return;
-    setCurrentWriteAction(action);
-    setShowActionMenu(false);
-    invoke("log_action", { action: `Write action changed to: ${action}` }).catch(() => {});
+  // ── Write "Translate" checkbox → persist + auto-regenerate ──
+  const handleWriteTranslateToggle = useCallback(async () => {
+    const next = !writeTranslate;
+    setWriteTranslate(next);
+    invoke("log_action", { action: `Write translate toggled: ${next}` }).catch(() => {});
 
-    // Persist to settings
     try {
       const s = await invoke<Record<string, unknown>>("get_settings");
-      await invoke("update_settings", { settings: { ...s, write_action: action } });
-    } catch { /* non-critical */ }
-
-    // Auto-regenerate
-    await invoke("cancel_request").catch(() => {});
-    setPopupState("loading");
-    setStreamingText(null);
-    setResult(null);
-    setRefreshing(true);
-    refreshingRef.current = true;
-    await invokeProcess({ action, isRefresh: true });
-  }, [currentWriteAction, invokeProcess]);
-
-  const handleReadActionChange = useCallback(async (action: ReadAction) => {
-    if (action === currentReadAction) return;
-    setCurrentReadAction(action);
-    setShowActionMenu(false);
-    invoke("log_action", { action: `Read action changed to: ${action}` }).catch(() => {});
-
-    // Persist to settings
-    try {
-      const s = await invoke<Record<string, unknown>>("get_settings");
-      await invoke("update_settings", { settings: { ...s, read_mode_sub: action } });
+      await invoke("update_settings", { settings: { ...s, write_translate: next } });
     } catch { /* non-critical */ }
 
     await invoke("cancel_request").catch(() => {});
@@ -600,8 +552,28 @@ const Popup: FC<PopupProps> = ({ selection }) => {
     setResult(null);
     setRefreshing(true);
     refreshingRef.current = true;
-    await invokeProcess({ readAction: action, isRefresh: true });
-  }, [currentReadAction, invokeProcess]);
+    await invokeProcess({ translate: next, isRefresh: true });
+  }, [writeTranslate, invokeProcess]);
+
+  // ── Read "Summarize" checkbox → persist + auto-regenerate ──
+  const handleReadSummarizeToggle = useCallback(async () => {
+    const next = !readSummarize;
+    setReadSummarize(next);
+    invoke("log_action", { action: `Read summarize toggled: ${next}` }).catch(() => {});
+
+    try {
+      const s = await invoke<Record<string, unknown>>("get_settings");
+      await invoke("update_settings", { settings: { ...s, read_summarize: next } });
+    } catch { /* non-critical */ }
+
+    await invoke("cancel_request").catch(() => {});
+    setPopupState("loading");
+    setStreamingText(null);
+    setResult(null);
+    setRefreshing(true);
+    refreshingRef.current = true;
+    await invokeProcess({ summarize: next, isRefresh: true });
+  }, [readSummarize, invokeProcess]);
 
   // ── Creative mode toggle → persist + auto-regenerate ──
   const handleCreativeToggle = useCallback(async () => {
@@ -777,7 +749,6 @@ const Popup: FC<PopupProps> = ({ selection }) => {
     setWriteTab("translated");
     setHistory([]);
     setHistoryIndex(-1);
-    setShowActionMenu(false);
     setShowReplaceMenu(false);
   };
 
@@ -808,74 +779,41 @@ const Popup: FC<PopupProps> = ({ selection }) => {
         className="flex-shrink-0 flex items-center gap-1.5 px-4 py-2.5 border-b border-gray-200 dark:border-gray-600"
         style={{ background: isDark ? "rgba(15,23,42,0.6)" : "rgba(249,250,251,0.8)" }}
       >
-        {/* Action dropdown (includes creative mode toggle for Write Mode) */}
-        <div className={`${disabledClass}`}>
-          <DropdownMenu.Root open={showActionMenu} onOpenChange={setShowActionMenu}>
-            <DropdownMenu.Trigger asChild>
+        {/* Mode toggles — checkbox pills */}
+        <div className={`flex items-center gap-1.5 ${disabledClass}`}>
+          {isReadMode ? (
+            <button
+              onClick={handleReadSummarizeToggle}
+              disabled={isGenerating}
+              className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${toolbarBtnClass} ${readSummarize ? "text-copilot-blue bg-blue-50 dark:bg-blue-900/30" : "text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/60"}`}
+              title="Include a summary alongside the translation"
+            >
+              {readSummarize && <Check size={11} className="flex-shrink-0" />}
+              Summarize
+            </button>
+          ) : (
+            <>
               <button
-                className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors ${toolbarBtnClass}`}
+                onClick={handleWriteTranslateToggle}
                 disabled={isGenerating}
+                className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${toolbarBtnClass} ${writeTranslate ? "text-copilot-blue bg-blue-50 dark:bg-blue-900/30" : "text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/60"}`}
+                title="Translate in addition to polishing"
               >
-                {!isReadMode && creativeMode && <Sparkles size={10} className="text-blue-500 flex-shrink-0" />}
-                {isReadMode
-                  ? READ_ACTIONS.find((a) => a.value === currentReadAction)?.label
-                  : WRITE_ACTIONS.find((a) => a.value === currentWriteAction)?.label}
-                <ChevronDown size={10} className="ml-0.5" />
+                {writeTranslate && <Check size={11} className="flex-shrink-0" />}
+                Translate
               </button>
-            </DropdownMenu.Trigger>
-            <DropdownMenu.Portal>
-              <DropdownMenu.Content
-                className="bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 py-1 min-w-[180px] z-50"
-                sideOffset={4}
-                align="start"
+              <button
+                onClick={handleCreativeToggle}
+                disabled={isGenerating}
+                className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${toolbarBtnClass} ${creativeMode ? "text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30" : "text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/60"}`}
+                title="More Creative — full creative rewrite freedom"
               >
-                {isReadMode
-                  ? READ_ACTIONS.map((a) => (
-                      <DropdownMenu.CheckboxItem
-                        key={a.value}
-                        checked={currentReadAction === a.value}
-                        onCheckedChange={() => handleReadActionChange(a.value)}
-                        className={`w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 outline-none cursor-pointer ${currentReadAction === a.value ? "text-copilot-blue font-medium" : "text-gray-700 dark:text-gray-300"}`}
-                      >
-                        <DropdownMenu.ItemIndicator className="w-3 inline-flex justify-center flex-shrink-0">
-                          <Check size={10} />
-                        </DropdownMenu.ItemIndicator>
-                        <span className={currentReadAction !== a.value ? "ml-5" : ""}>{a.label}</span>
-                      </DropdownMenu.CheckboxItem>
-                    ))
-                  : <>
-                      {WRITE_ACTIONS.map((a) => (
-                        <DropdownMenu.CheckboxItem
-                          key={a.value}
-                          checked={currentWriteAction === a.value}
-                          onCheckedChange={() => handleWriteActionChange(a.value)}
-                          className={`w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 outline-none cursor-pointer ${currentWriteAction === a.value ? "text-copilot-blue font-medium" : "text-gray-700 dark:text-gray-300"}`}
-                        >
-                          <DropdownMenu.ItemIndicator className="w-3 inline-flex justify-center flex-shrink-0">
-                            <Check size={10} />
-                          </DropdownMenu.ItemIndicator>
-                          <span className={currentWriteAction !== a.value ? "ml-5" : ""}>{a.label}</span>
-                        </DropdownMenu.CheckboxItem>
-                      ))}
-                      <DropdownMenu.Separator className="h-px bg-gray-200 dark:bg-gray-700 my-1" />
-                      <DropdownMenu.CheckboxItem
-                        checked={creativeMode}
-                        onCheckedChange={() => handleCreativeToggle()}
-                        className={`w-full text-left px-3 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 outline-none cursor-pointer ${creativeMode ? "text-blue-600 dark:text-blue-400 font-medium" : "text-gray-700 dark:text-gray-300"}`}
-                      >
-                        <DropdownMenu.ItemIndicator className="w-3 inline-flex justify-center flex-shrink-0">
-                          <Check size={10} />
-                        </DropdownMenu.ItemIndicator>
-                        <span className={`flex items-center gap-1.5 ${!creativeMode ? "ml-5" : ""}`}>
-                          More Creative
-                          <Sparkles size={12} className="flex-shrink-0" />
-                        </span>
-                      </DropdownMenu.CheckboxItem>
-                    </>
-                }
-              </DropdownMenu.Content>
-            </DropdownMenu.Portal>
-          </DropdownMenu.Root>
+                {creativeMode && <Check size={11} className="flex-shrink-0" />}
+                More Creative
+                <Sparkles size={11} className="flex-shrink-0" />
+              </button>
+            </>
+          )}
         </div>
 
         {/* Model dropdown */}

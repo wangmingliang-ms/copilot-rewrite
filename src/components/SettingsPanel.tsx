@@ -52,7 +52,7 @@ interface Settings {
   theme: string;
   native_language: string;
   read_mode_enabled: boolean;
-  read_mode_sub: string;
+  read_summarize: boolean;
   popup_icon_position: string;
   debug_mode: boolean;
 }
@@ -96,7 +96,7 @@ const SettingsPanel: FC<{ themeCtx: ThemeCtx }> = ({ themeCtx }) => {
     theme: "system",
     native_language: "Chinese (Simplified)",
     read_mode_enabled: true,
-    read_mode_sub: "translate_summarize",
+    read_summarize: true,
     popup_icon_position: "top-left",
     debug_mode: false,
   });

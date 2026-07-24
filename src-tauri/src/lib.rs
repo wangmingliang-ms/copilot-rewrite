@@ -185,16 +185,16 @@ pub struct Settings {
     /// Whether Read Mode is enabled (triggers on non-input element selections)
     #[serde(default = "default_true")]
     pub read_mode_enabled: bool,
-    /// Read Mode sub-mode: "translate_summarize" or "simple_translate"
-    #[serde(default = "default_read_mode_sub")]
-    pub read_mode_sub: String,
+    /// Read Mode: whether to include a summary alongside the translation
+    #[serde(default = "default_true")]
+    pub read_summarize: bool,
     /// Popup icon position relative to selected text bounding rect
     /// Values: "top-center", "top-left", "top-right", "bottom-center", "bottom-left", "bottom-right"
     #[serde(default = "default_popup_icon_position")]
     pub popup_icon_position: String,
-    /// Write Mode action: "TranslateAndPolish", "Translate", or "Polish"
-    #[serde(default = "default_write_action")]
-    pub write_action: String,
+    /// Write Mode: whether to translate in addition to polishing (true = TranslateAndPolish, false = Polish)
+    #[serde(default = "default_true")]
+    pub write_translate: bool,
     /// Remembered expanded popup content width (logical px)
     #[serde(default = "default_popup_width")]
     pub popup_width: f64,
@@ -241,16 +241,8 @@ fn default_native_language() -> String {
     "Chinese (Simplified)".to_string()
 }
 
-fn default_read_mode_sub() -> String {
-    "translate_summarize".to_string()
-}
-
 fn default_popup_icon_position() -> String {
     "top-left".to_string()
-}
-
-fn default_write_action() -> String {
-    "TranslateAndPolish".to_string()
 }
 
 fn default_popup_width() -> f64 {
@@ -317,9 +309,9 @@ impl Default for Settings {
             theme: "system".to_string(),
             native_language: "Chinese (Simplified)".to_string(),
             read_mode_enabled: true,
-            read_mode_sub: "translate_summarize".to_string(),
+            read_summarize: true,
             popup_icon_position: "top-left".to_string(),
-            write_action: "TranslateAndPolish".to_string(),
+            write_translate: true,
             popup_width: 400.0,
             popup_height: 300.0,
             debug_mode: false,
@@ -330,7 +322,6 @@ impl Default for Settings {
 /// The action the user wants to perform on selected text
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum RewriteAction {
-    Translate,
     Polish,
     TranslateAndPolish,
     /// Read Mode: translate (and optionally summarize) non-input text
