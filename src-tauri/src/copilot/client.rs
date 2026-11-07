@@ -1,7 +1,7 @@
 // Copilot API client implementation
 // Uses GitHub Copilot token exchange flow:
 // 1. Use GitHub token to get Copilot session token from api.github.com
-// 2. Use session token to call chat completions API
+// 2. Use session token to call the model's supported completion API
 
 use crate::RewriteAction;
 use anyhow::{Context, Result};
@@ -14,6 +14,7 @@ use std::time::{Duration, Instant};
 
 const COPILOT_TOKEN_URL: &str = "https://api.github.com/copilot_internal/v2/token";
 const COPILOT_CHAT_URL: &str = "https://api.githubcopilot.com/chat/completions";
+const COPILOT_RESPONSES_URL: &str = "https://api.githubcopilot.com/responses";
 const COPILOT_MODELS_URL: &str = "https://api.githubcopilot.com/models";
 
 /// Cached Copilot session token
@@ -161,18 +162,95 @@ Output ONLY the sections above — no preamble, no code fences, no JSON."#,
     )
 }
 
-#[derive(Debug, Serialize)]
-struct ChatCompletionRequest {
-    model: String,
-    messages: Vec<ChatMessage>,
-    temperature: f32,
-    stream: bool,
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+enum CompletionApi {
+    #[default]
+    ChatCompletions,
+    Responses,
 }
 
-#[derive(Debug, Serialize)]
-struct ChatMessage {
-    role: String,
-    content: String,
+#[derive(Default)]
+struct StreamEvent {
+    text: Option<String>,
+    model: Option<String>,
+    done: bool,
+}
+
+impl CompletionApi {
+    fn url(self) -> &'static str {
+        match self {
+            Self::ChatCompletions => COPILOT_CHAT_URL,
+            Self::Responses => COPILOT_RESPONSES_URL,
+        }
+    }
+
+    fn request(self, model: &str, system_prompt: &str, user_text: &str, temperature: f32) -> serde_json::Value {
+        let messages = serde_json::json!([
+            { "role": "system", "content": system_prompt },
+            { "role": "user", "content": user_text }
+        ]);
+        match self {
+            Self::ChatCompletions => serde_json::json!({
+                "model": model, "messages": messages, "temperature": temperature, "stream": true
+            }),
+            // Reasoning models do not accept temperature on Responses requests.
+            Self::Responses => serde_json::json!({
+                "model": model, "input": messages, "stream": true, "store": false
+            }),
+        }
+    }
+
+    fn parse_event(self, data: &str) -> Result<StreamEvent> {
+        if self == Self::ChatCompletions {
+            if data == "[DONE]" {
+                return Ok(StreamEvent { done: true, ..Default::default() });
+            }
+            let chunk: ChatCompletionResponse = serde_json::from_str(data)
+                .context("Invalid Chat Completions stream event")?;
+            let mut text = String::new();
+            if let Some(choice) = chunk.choices.first() {
+                if let Some(content) = choice.delta.as_ref().and_then(|delta| delta.content.as_ref()) {
+                    text.push_str(content);
+                }
+                if let Some(message) = &choice.message {
+                    text.push_str(&message.content);
+                }
+            }
+            return Ok(StreamEvent {
+                text: if text.is_empty() { None } else { Some(text) },
+                model: chunk.model,
+                done: false,
+            });
+        }
+
+        let event: serde_json::Value = serde_json::from_str(data)
+            .context("Invalid Responses stream event")?;
+        let response = &event["response"];
+        let mut parsed = StreamEvent {
+            model: response["model"].as_str().map(str::to_owned),
+            ..Default::default()
+        };
+        match event["type"].as_str() {
+            Some("response.output_text.delta") => {
+                parsed.text = Some(event["delta"].as_str()
+                    .context("Responses text delta is missing")?.to_owned());
+            }
+            Some("response.completed") => {
+                anyhow::ensure!(response["status"].as_str() == Some("completed"),
+                    "Responses request did not complete: {}", response);
+                parsed.done = true;
+            }
+            Some("response.failed" | "response.incomplete") => {
+                anyhow::bail!("Responses request failed: {}", response);
+            }
+            Some("error") => anyhow::bail!("Responses API error: {}", event),
+            Some("response.refusal.delta" | "response.refusal.done") => {
+                anyhow::bail!("Responses model refused the request: {}", event);
+            }
+            _ => {} // Lifecycle, reasoning and text-done events contain no new output text.
+        }
+        Ok(parsed)
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -221,6 +299,9 @@ pub struct CopilotModel {
     pub preview: bool,
     #[serde(default)]
     pub category: String,
+    // Transport metadata stays inside the client; the frontend only needs picker fields.
+    #[serde(skip)]
+    api: CompletionApi,
 }
 
 /// Response from /models endpoint
@@ -254,6 +335,39 @@ struct ModelEntry {
 struct ModelCapabilities {
     #[serde(default, rename = "type")]
     model_type: Option<String>,
+}
+
+impl ModelEntry {
+    fn into_picker_model(self) -> Option<CopilotModel> {
+        if self.model_picker_enabled != Some(true) {
+            return None;
+        }
+        if self.capabilities.as_ref().and_then(|caps| caps.model_type.as_deref())
+            .is_some_and(|model_type| model_type != "chat") {
+            return None;
+        }
+        if self.name.as_deref().unwrap_or("").to_lowercase().contains("internal") {
+            return None;
+        }
+        let api = match self.supported_endpoints.as_ref() {
+            Some(endpoints) if endpoints.iter().any(|e| e == "/responses") => CompletionApi::Responses,
+            Some(endpoints) if endpoints.iter().any(|e| e == "/chat/completions") => CompletionApi::ChatCompletions,
+            None => CompletionApi::ChatCompletions,
+            Some(_) => {
+                debug!("Skipping model {} — unsupported endpoints: {:?}", self.id, self.supported_endpoints);
+                return None;
+            }
+        };
+        Some(CopilotModel {
+            name: self.name.unwrap_or_else(|| self.id.clone()),
+            id: self.id,
+            version: self.version.unwrap_or_default(),
+            vendor: self.vendor.unwrap_or_default(),
+            preview: self.preview.unwrap_or(false),
+            category: self.model_picker_category.unwrap_or_default(),
+            api,
+        })
+    }
 }
 
 /// Client for the GitHub Copilot API
@@ -340,7 +454,7 @@ impl CopilotClient {
         Ok(token_response.token)
     }
 
-    /// Shared helper: send a chat completion request to Copilot API with 401 retry.
+    /// Shared helper: send a request through the model's supported API with 401 retry.
     ///
     /// Handles token exchange, HTTP request, 401 token-expired retry (once),
     /// and SSE stream parsing. Both `process()` and `process_read_mode()` delegate here.
@@ -348,7 +462,7 @@ impl CopilotClient {
     /// When `on_chunk` is provided, it is called with the accumulated result text
     /// after each SSE delta is appended, enabling incremental streaming to the frontend.
     /// When `cancel_token` is provided, cancellation is checked between SSE chunks.
-    async fn call_chat_completion(
+    async fn call_completion(
         &self,
         github_token: &str,
         model: &str,
@@ -360,31 +474,23 @@ impl CopilotClient {
     ) -> Result<String> {
         let t0 = Instant::now();
 
+        // Resolve against the current account's catalog, including when settings retain an old model.
+        let selected = self.list_models(github_token).await?.into_iter()
+            .find(|entry| entry.id == model)
+            .with_context(|| format!("Model {} is not available in the model picker. Please select another model in Settings.", model))?;
+        let api = selected.api;
+
         // Get Copilot session token
         let copilot_token = self.get_copilot_token(github_token).await?;
         info!("[PERF-LLM] +{}ms — got copilot token", t0.elapsed().as_millis());
 
-        let request = ChatCompletionRequest {
-            model: model.to_string(),
-            messages: vec![
-                ChatMessage {
-                    role: "system".to_string(),
-                    content: system_prompt,
-                },
-                ChatMessage {
-                    role: "user".to_string(),
-                    content: user_text.to_string(),
-                },
-            ],
-            temperature,
-            stream: true,
-        };
+        let request = api.request(model, &system_prompt, user_text, temperature);
 
         // Debug mode: log full request details
         if crate::DEBUG_MODE.load(std::sync::atomic::Ordering::Relaxed) {
-            info!("[DEBUG] System prompt:\n{}", request.messages[0].content);
-            info!("[DEBUG] User text ({} chars):\n{}", request.messages[1].content.len(), request.messages[1].content);
-            info!("[DEBUG] Request: model={}, temperature={}, stream={}", request.model, request.temperature, request.stream);
+            info!("[DEBUG] System prompt:\n{}", system_prompt);
+            info!("[DEBUG] User text ({} chars):\n{}", user_text.len(), user_text);
+            info!("[DEBUG] Request: model={}, api={:?}, stream=true", model, api);
         }
 
         // Try up to 2 times (initial + one retry on 401)
@@ -405,7 +511,7 @@ impl CopilotClient {
 
             let response = self
                 .http
-                .post(COPILOT_CHAT_URL)
+                .post(api.url())
                 .header("Authorization", format!("Bearer {}", token))
                 .header("Content-Type", "application/json")
                 .header("Editor-Version", "vscode/1.96.0")
@@ -510,42 +616,30 @@ impl CopilotClient {
                     }
 
                     if let Some(data) = line.strip_prefix("data: ") {
-                        if data == "[DONE]" {
-                            done = true;
-                            break;
-                        }
-                        if let Ok(chunk) = serde_json::from_str::<ChatCompletionResponse>(data) {
-                            if !actual_model_logged {
-                                info!(
-                                    "API responding with model: {} (requested: {})",
-                                    chunk.model.as_deref().unwrap_or("unknown"),
-                                    model
-                                );
+                        let event = api.parse_event(data)?;
+                        if !actual_model_logged {
+                            if let Some(actual_model) = event.model {
+                                info!("API responding with model: {} (requested: {})", actual_model, model);
                                 actual_model_logged = true;
                             }
-                            if let Some(choice) = chunk.choices.first() {
-                                let mut appended = false;
-                                if let Some(ref delta) = choice.delta {
-                                    if let Some(ref content) = delta.content {
-                                        result.push_str(content);
-                                        appended = true;
-                                    }
-                                }
-                                if let Some(ref message) = choice.message {
-                                    result.push_str(&message.content);
-                                    appended = true;
-                                }
-                                // Notify callback with accumulated result after each append
-                                if appended {
-                                    if let Some(cb) = on_chunk {
-                                        cb(&result);
-                                    }
-                                }
+                        }
+                        if let Some(text) = event.text {
+                            result.push_str(&text);
+                            if let Some(cb) = on_chunk {
+                                cb(&result);
                             }
+                        }
+                        if event.done {
+                            done = true;
+                            break;
                         }
                     }
                 }
             }
+
+            anyhow::ensure!(api != CompletionApi::Responses || done,
+                "Responses stream ended before response.completed");
+            anyhow::ensure!(!result.trim().is_empty(), "Copilot API returned no output text");
 
             info!(
                 "[PERF-LLM] +{}ms — parsed {} chars, DONE",
@@ -647,7 +741,7 @@ impl CopilotClient {
                 action, creative_mode, app_context, native_language, target_language);
         }
 
-        self.call_chat_completion(github_token, model, system_prompt, text, temperature, on_chunk, cancel_token)
+        self.call_completion(github_token, model, system_prompt, text, temperature, on_chunk, cancel_token)
             .await
     }
 
@@ -680,7 +774,7 @@ impl CopilotClient {
             info!("[DEBUG] Read Mode — native={}, target={}, text_len={}", native_language, target_language, text.len());
         }
 
-        self.call_chat_completion(github_token, model, system_prompt, text, 0.3, on_chunk, cancel_token)
+        self.call_completion(github_token, model, system_prompt, text, 0.3, on_chunk, cancel_token)
             .await
     }
 }
@@ -698,145 +792,181 @@ impl CopilotClient {
             anyhow::bail!("Not logged in");
         }
 
-        let copilot_token = self.get_copilot_token(github_token).await?;
-
-        let response = self
-            .http
-            .get(COPILOT_MODELS_URL)
-            .header("Authorization", format!("Bearer {}", copilot_token))
-            .header("User-Agent", "CopilotRewrite/0.9.0")
-            .header("Accept", "application/json")
-            .header("Editor-Version", "vscode/1.96.0")
-            .header("Editor-Plugin-Version", "copilot-chat/0.24")
-            .header("Copilot-Integration-Id", "vscode-chat")
-            .header("Openai-Intent", "model-access")
-            .send()
-            .await
-            .context("Failed to fetch models")?;
+        // Catalog lookup now precedes generation, so it must also refresh a rejected session token.
+        let mut retried = false;
+        let response = loop {
+            let copilot_token = self.get_copilot_token(github_token).await?;
+            let response = self
+                .http
+                .get(COPILOT_MODELS_URL)
+                .header("Authorization", format!("Bearer {}", copilot_token))
+                .header("User-Agent", "CopilotRewrite/0.9.0")
+                .header("Accept", "application/json")
+                .header("Editor-Version", "vscode/1.96.0")
+                .header("Editor-Plugin-Version", "copilot-chat/0.24")
+                .header("Copilot-Integration-Id", "vscode-chat")
+                .header("Openai-Intent", "model-access")
+                .send()
+                .await
+                .context("Failed to fetch models")?;
+            if response.status().as_u16() == 401 && !retried {
+                *self.cached_token.lock() = None;
+                retried = true;
+                continue;
+            }
+            break response;
+        };
 
         let status = response.status();
         if !status.is_success() {
             let body = response.text().await.unwrap_or_default();
-            warn!("Models endpoint returned {}: {}", status, body);
-            // Return default models as fallback
-            return Ok(Self::default_models());
+            anyhow::bail!("Models endpoint returned {}: {}", status, body);
         }
 
         let body_text = response
             .text()
             .await
             .context("Failed to read models body")?;
-        let models_resp: ModelsResponse = match serde_json::from_str(&body_text) {
-            Ok(m) => m,
-            Err(e) => {
-                warn!("Failed to parse models response: {}", e);
-                return Ok(Self::default_models());
-            }
-        };
+        let models_resp: ModelsResponse = serde_json::from_str(&body_text)
+            .context("Failed to parse models response")?;
 
         let models: Vec<CopilotModel> = models_resp
             .data
             .into_iter()
-            // Filter: only model_picker_enabled=true and chat-capable models
-            .filter(|m| {
-                // Use official model_picker_enabled flag — false means deprecated/hidden
-                if !m.model_picker_enabled.unwrap_or(false) {
-                    return false;
-                }
-                // Skip non-chat models (e.g. embeddings)
-                if let Some(ref caps) = m.capabilities {
-                    if let Some(ref t) = caps.model_type {
-                        if t != "chat" {
-                            return false;
-                        }
-                    }
-                }
-                // Skip models that don't support /chat/completions endpoint
-                if let Some(ref endpoints) = m.supported_endpoints {
-                    if !endpoints.iter().any(|e| e == "/chat/completions") {
-                        debug!(
-                            "Skipping model {} — no /chat/completions support (endpoints: {:?})",
-                            m.id, endpoints
-                        );
-                        return false;
-                    }
-                }
-                // Skip internal-only models
-                let name = m.name.as_deref().unwrap_or("");
-                if name.to_lowercase().contains("internal") {
-                    return false;
-                }
-                true
-            })
-            .map(|m| CopilotModel {
-                id: m.id.clone(),
-                name: m.name.unwrap_or_else(|| m.id.clone()),
-                version: m.version.unwrap_or_default(),
-                vendor: m.vendor.unwrap_or_default(),
-                preview: m.preview.unwrap_or(false),
-                category: m.model_picker_category.unwrap_or_default(),
-            })
+            .filter_map(ModelEntry::into_picker_model)
             .collect();
 
-        if models.is_empty() {
-            Ok(Self::default_models())
-        } else {
-            info!("Fetched {} models from Copilot API", models.len());
-            Ok(models)
+        info!("Fetched {} models from Copilot API", models.len());
+        Ok(models)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn picker_only_offers_enabled_models_with_a_supported_transport() {
+        let cases = [
+            (serde_json::json!({"model_picker_enabled": true, "supported_endpoints": ["/responses"]}), Some(CompletionApi::Responses)),
+            (serde_json::json!({"model_picker_enabled": true, "supported_endpoints": ["/chat/completions"]}), Some(CompletionApi::ChatCompletions)),
+            (serde_json::json!({"model_picker_enabled": true, "supported_endpoints": ["/chat/completions", "/responses"]}), Some(CompletionApi::Responses)),
+            (serde_json::json!({"model_picker_enabled": true}), Some(CompletionApi::ChatCompletions)),
+            (serde_json::json!({"model_picker_enabled": false, "supported_endpoints": ["/responses"]}), None),
+            (serde_json::json!({"supported_endpoints": ["/responses"]}), None),
+            (serde_json::json!({"model_picker_enabled": true, "supported_endpoints": ["ws:/responses"]}), None),
+            (serde_json::json!({"model_picker_enabled": true, "supported_endpoints": []}), None),
+            (serde_json::json!({"model_picker_enabled": true, "capabilities": {"type": "embeddings"}}), None),
+            (serde_json::json!({"model_picker_enabled": true, "name": "Model (Internal only)"}), None),
+        ];
+        for (mut entry, expected) in cases {
+            entry["id"] = serde_json::json!("test-model");
+            let model: ModelEntry = serde_json::from_value(entry.clone()).unwrap();
+            let model = model.into_picker_model();
+            assert_eq!(model.as_ref().map(|model| model.api), expected, "{entry}");
+            if let Some(model) = model {
+                // The UI receives picker fields, not transport decisions.
+                assert!(serde_json::to_value(model).unwrap().get("api").is_none());
+            }
         }
     }
 
-    /// Fallback model list when API is unavailable
-    fn default_models() -> Vec<CopilotModel> {
-        vec![
-            CopilotModel {
-                id: "claude-sonnet-4".into(),
-                name: "Claude Sonnet 4".into(),
-                version: String::new(),
-                vendor: "Anthropic".into(),
-                preview: false,
-                category: "versatile".into(),
-            },
-            CopilotModel {
-                id: "gpt-4o".into(),
-                name: "GPT-4o".into(),
-                version: String::new(),
-                vendor: "OpenAI".into(),
-                preview: false,
-                category: "versatile".into(),
-            },
-            CopilotModel {
-                id: "gpt-5-mini".into(),
-                name: "GPT-5 Mini".into(),
-                version: String::new(),
-                vendor: "OpenAI".into(),
-                preview: false,
-                category: "versatile".into(),
-            },
-            CopilotModel {
-                id: "claude-sonnet-4.5".into(),
-                name: "Claude Sonnet 4.5".into(),
-                version: String::new(),
-                vendor: "Anthropic".into(),
-                preview: false,
-                category: "versatile".into(),
-            },
-            CopilotModel {
-                id: "claude-haiku-4.5".into(),
-                name: "Claude Haiku 4.5".into(),
-                version: String::new(),
-                vendor: "Anthropic".into(),
-                preview: false,
-                category: "versatile".into(),
-            },
-            CopilotModel {
-                id: "gemini-2.5-pro".into(),
-                name: "Gemini 2.5 Pro".into(),
-                version: String::new(),
-                vendor: "Google".into(),
-                preview: false,
-                category: "versatile".into(),
-            },
-        ]
+    #[test]
+    fn requests_keep_user_text_separate_from_instructions_for_both_apis() {
+        for api in [CompletionApi::Responses, CompletionApi::ChatCompletions] {
+            let request = api.request("test-model", "Translate, do not answer.", "How do I reset my password?", 0.8);
+            let key = if api == CompletionApi::Responses { "input" } else { "messages" };
+            assert_eq!(request[key][0]["role"], "system");
+            assert_eq!(request[key][0]["content"], "Translate, do not answer.");
+            assert_eq!(request[key][1]["role"], "user");
+            assert_eq!(request[key][1]["content"], "How do I reset my password?");
+            assert_eq!(request["stream"], true);
+            if api == CompletionApi::Responses {
+                assert_eq!(request["store"], false);
+                assert!(request.get("temperature").is_none());
+                assert!(request.get("messages").is_none());
+            } else {
+                assert!((request["temperature"].as_f64().unwrap() - 0.8).abs() < 0.00001);
+                assert!(request.get("input").is_none());
+            }
+        }
+    }
+
+    #[test]
+    fn responses_streams_only_new_output_text_and_finishes_on_completed() {
+        let api = CompletionApi::Responses;
+        let events = [
+            r#"{"type":"response.created","response":{"model":"test-model","status":"in_progress"}}"#,
+            r#"{"type":"response.reasoning_text.delta","delta":"Do not display reasoning"}"#,
+            r#"{"type":"response.output_text.delta","delta":"你好"}"#,
+            r#"{"type":"response.output_text.delta","delta":"，世界"}"#,
+            r#"{"type":"response.output_text.done","text":"你好，世界"}"#,
+            r#"{"type":"response.completed","response":{"model":"test-model","status":"completed"}}"#,
+        ];
+        let mut text = String::new();
+        for (index, event) in events.iter().enumerate() {
+            let parsed = api.parse_event(event).unwrap();
+            if let Some(delta) = parsed.text { text.push_str(&delta); }
+            assert_eq!(parsed.done, index == events.len() - 1);
+        }
+        assert_eq!(text, "你好，世界", "Text-done must not duplicate the accumulated translation");
+    }
+
+    #[test]
+    fn responses_failures_cannot_be_reported_as_a_successful_translation() {
+        for event in [
+            r#"{"type":"response.failed","response":{"error":{"message":"Unavailable"}}}"#,
+            r#"{"type":"response.incomplete","response":{"incomplete_details":{"reason":"max_output_tokens"}}}"#,
+            r#"{"type":"error","message":"Rate limited"}"#,
+            r#"{"type":"response.completed","response":{"status":"incomplete"}}"#,
+            r#"{"type":"response.refusal.delta","delta":"Cannot comply"}"#,
+            r#"{"type":"response.output_text.delta"}"#,
+            "invalid JSON",
+            "[DONE]",
+        ] {
+            assert!(CompletionApi::Responses.parse_event(event).is_err(), "{event}");
+        }
+    }
+
+    #[test]
+    fn chat_completions_keeps_delta_and_message_compatibility() {
+        let api = CompletionApi::ChatCompletions;
+        let delta = api.parse_event(r#"{"model":"gemini-test","choices":[{"delta":{"content":"Hello"}}]}"#).unwrap();
+        assert_eq!(delta.text.as_deref(), Some("Hello"));
+        assert_eq!(delta.model.as_deref(), Some("gemini-test"));
+        assert!(!delta.done);
+        let message = api.parse_event(r#"{"choices":[{"message":{"content":" world"}}]}"#).unwrap();
+        assert_eq!(message.text.as_deref(), Some(" world"));
+        assert!(api.parse_event("[DONE]").unwrap().done);
+    }
+
+    #[tokio::test]
+    #[ignore = "Calls the live Copilot API using this machine's saved login"]
+    async fn live_picker_and_translation_use_the_application_client() {
+        let auth = crate::copilot::oauth::load_saved_auth().expect("A saved Copilot Rewrite login is required");
+        let client = CopilotClient::new();
+        let models = client.list_models(&auth.github_token).await.unwrap();
+        for (id, api) in [("gpt-6.1-sol", CompletionApi::Responses), ("gemini-4-argon", CompletionApi::ChatCompletions)] {
+            assert_eq!(models.iter().find(|model| model.id == id).expect("Expected live model").api, api);
+            let chunks = Mutex::new(Vec::new());
+            let on_chunk = |text: &str| chunks.lock().push(text.to_owned());
+            let result = client.process(
+                "明天上午十点开会。", &RewriteAction::TranslateAndPolish,
+                "Chinese (Simplified)", "English", &auth.github_token, id,
+                false, "", false, "", Some(&on_chunk), None,
+            ).await.unwrap();
+            let (original, translation) = result.split_once("---TRANSLATED---").expect("Write Mode sections");
+            assert!(original.contains("明天"));
+            assert!(translation.to_lowercase().contains("tomorrow"));
+            assert_eq!(chunks.lock().last().unwrap().trim(), result);
+            println!("{id}: Write Mode OK, {} streamed updates", chunks.lock().len());
+        }
+        assert!(!models.iter().any(|model| model.id == "gpt-4o" || model.id == "gpt-4.1"));
+        let result = client.process_read_mode(
+            "The meeting is at 10 a.m. tomorrow.", "Chinese (Simplified)", "English",
+            &auth.github_token, "gpt-6.1-sol", None, None,
+        ).await.unwrap();
+        assert!(result.contains("明天"), "Read Mode must return the translated text");
+        println!("gpt-6.1-sol: Read Mode OK; {} picker models", models.len());
     }
 }

@@ -150,7 +150,7 @@ const SettingsPanel: FC<{ themeCtx: ThemeCtx }> = ({ themeCtx }) => {
       const result = await invoke<CopilotModel[]>("list_models");
       setModels(result);
     } catch {
-      // Backend list_models has its own fallback; if it fails too, show empty
+      // Do not show unverified models when the catalog cannot be loaded.
       setModels([]);
     } finally {
       setModelsLoading(false);
