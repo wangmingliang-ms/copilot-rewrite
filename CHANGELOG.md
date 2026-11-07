@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.19.1] - 2026-11-07
+
+### Improvements
+
+- **Less emoji in generated text** — Normal, Creative, and Read Mode prompts no longer add emoji by default. Emoji remain available for sparse use when they clearly improve meaning or tone.
+
 ## [0.19.0] - 2026-11-07
 
 ### ✨ Improvements
