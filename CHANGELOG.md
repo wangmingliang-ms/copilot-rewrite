@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.19.0] - 2026-11-07
+
+### ✨ Improvements
+
+- **Responses API support** — Models that require the Responses API are now available for translation and polishing. Requests use each model's supported endpoint, with streaming output in Write Mode and Read Mode.
+- **Current model picker** — Only models with `model_picker_enabled=true` are shown. Removed the hardcoded fallback list so hidden or unavailable models do not reappear when the model catalog fails to load.
+
+### 🐛 Bug Fixes
+
+- **Incomplete responses** — Failed, incomplete, or interrupted Responses requests now report an error instead of returning a partial translation as a successful result.
+
 ## [0.18.0] - 2026-07-24
 
 ### ✨ Improvements
